@@ -10,6 +10,8 @@ glib = "0.22"
 gtk = { package = "gtk4", version = "0.11.4", features = ["v4_22"] }
 libc = "0.2"
 nix = { version = "0.31.3", features = ["fs", "poll", "process", "signal", "socket", "term", "uio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 vte = { package = "vte4", version = "0.10.0", features = ["gtk_v4_18", "v0_84"] }
 
 [dependencies.adw]
