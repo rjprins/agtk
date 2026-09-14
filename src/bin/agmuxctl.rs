@@ -61,6 +61,7 @@ fn run() -> Result<(), Failure> {
     let command = match arguments.as_slice() {
         [command] if command == "state" => ControlCommand::AppGetState,
         [group, command] if group == "ui" && command == "inspect" => ControlCommand::UiInspect,
+        [group, command] if group == "ui" && command == "capture" => ControlCommand::UiCapture,
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
             return Err(Failure::Usage(usage().to_owned()));
@@ -410,7 +411,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

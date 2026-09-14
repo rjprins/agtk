@@ -25,6 +25,8 @@ use crate::instance::InstancePaths;
 use crate::session::{SessionLaunchPlan, receive_attachment};
 use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
 
+mod capture;
+
 const EMPTY_PAGE: &str = "empty";
 const MAX_INSPECTED_SESSIONS: usize = 500;
 const PCRE2_LITERAL: u32 = 0x0200_0000;
@@ -472,6 +474,17 @@ impl Workspace {
                     id,
                     ErrorCode::InternalError,
                     "Could not serialize UI inspection",
+                    Some(serde_json::json!({ "reason": error.to_string() })),
+                ),
+            },
+            ControlCommand::UiCapture => match capture::capture_workspace(self)
+                .and_then(|capture| serde_json::to_value(capture).map_err(Into::into))
+            {
+                Ok(capture) => ControlResponse::success(id, capture),
+                Err(error) => ControlResponse::failure(
+                    id,
+                    ErrorCode::InternalError,
+                    "Could not capture application content",
                     Some(serde_json::json!({ "reason": error.to_string() })),
                 ),
             },
