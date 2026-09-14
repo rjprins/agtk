@@ -4,6 +4,7 @@ pub mod capture;
 pub mod control;
 pub mod history;
 pub mod instance;
+pub mod persist;
 pub mod session;
 pub mod terminal_text;
 pub mod ui;
