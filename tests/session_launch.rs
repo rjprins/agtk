@@ -62,3 +62,40 @@ fn session_plan_rejects_a_missing_executable() {
 
     assert!(error.to_string().contains("executable"));
 }
+
+#[test]
+fn session_plan_rejects_missing_project_and_nul_arguments() {
+    let missing_project = CreateSessionParams {
+        kind: SessionKind::Shell,
+        command: Some("/bin/sh".to_owned()),
+        args: Vec::new(),
+        cwd: None,
+        name: None,
+        project_root: Some(PathBuf::from("/definitely/missing/agmux-project")),
+        worktree_path: None,
+        initial_input: None,
+    };
+    assert!(
+        SessionLaunchPlan::new(missing_project)
+            .unwrap_err()
+            .to_string()
+            .contains("project root")
+    );
+
+    let nul_argument = CreateSessionParams {
+        kind: SessionKind::Shell,
+        command: Some("/bin/sh".to_owned()),
+        args: vec!["bad\0argument".to_owned()],
+        cwd: None,
+        name: None,
+        project_root: None,
+        worktree_path: None,
+        initial_input: None,
+    };
+    assert!(
+        SessionLaunchPlan::new(nul_argument)
+            .unwrap_err()
+            .to_string()
+            .contains("NUL")
+    );
+}

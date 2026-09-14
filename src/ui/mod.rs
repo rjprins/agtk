@@ -22,6 +22,8 @@ use crate::control::{
 };
 use crate::history::{InputTracker, history_needle};
 use crate::instance::InstancePaths;
+use crate::io_worker::IoWorker;
+use crate::persist::{PersistResult, SessionRecord, Store};
 use crate::session::{SessionLaunchPlan, receive_attachment};
 use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
 
@@ -51,24 +53,19 @@ struct Workspace {
     sessions: Rc<RefCell<HashMap<String, SessionView>>>,
     sequence: Rc<Cell<u64>>,
     control_server: Rc<RefCell<Option<ControlServer>>>,
+    io: IoWorker,
+    store: Rc<RefCell<Option<Store>>>,
 }
 
 struct SessionView {
-    name: String,
-    kind: SessionKind,
+    record: SessionRecord,
     terminal: vte::Terminal,
     page: gtk::ScrolledWindow,
     row: gtk::ListBoxRow,
     label: gtk::Label,
     history: Vec<String>,
-    _pty: vte::Pty,
-    control: UnixStream,
-}
-
-#[derive(Clone)]
-struct SessionMetadata {
-    kind: SessionKind,
-    name: Option<String>,
+    _pty: Option<vte::Pty>,
+    control: Option<UnixStream>,
 }
 
 pub fn build(app: &adw::Application, paths: InstancePaths) {
@@ -158,6 +155,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         sessions: Rc::new(RefCell::new(HashMap::new())),
         sequence: Rc::new(Cell::new(0)),
         control_server: Rc::new(RefCell::new(None)),
+        io: IoWorker::default(),
+        store: Rc::new(RefCell::new(None)),
     };
 
     let selected_workspace = workspace.clone();
@@ -169,36 +168,77 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             session.terminal.grab_focus();
         }
         selected_workspace.render_history(Some(id.as_str()));
+        selected_workspace.save_preference("selectedSessionId", serde_json::json!(id.as_str()));
     });
 
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
 
     workspace.discover_sessions();
-    workspace.start_control_server();
-    if workspace.sessions.borrow().is_empty() && workspace.paths.name().as_str() == "default" {
-        workspace.launch_shell();
-    }
 
     window.present();
 }
 
 impl Workspace {
-    fn stop_session(&self, id: &str) -> io::Result<()> {
-        let Some(mut session) = self.sessions.borrow_mut().remove(id) else {
-            return Ok(());
+    fn remove_session_view(&self, id: &str) {
+        let was_selected = self.selected_session_id().as_deref() == Some(id);
+        let Some(session) = self.sessions.borrow_mut().remove(id) else {
+            return;
         };
-        let shutdown = session.control.write_all(b"K");
         self.stack.remove(&session.page);
         self.list.remove(&session.row);
-
-        if let Some(row) = self.list.row_at_index(0) {
-            self.list.select_row(Some(&row));
-        } else {
-            self.stack.set_visible_child_name(EMPTY_PAGE);
-            self.render_history(None);
+        if was_selected {
+            if let Some(row) = self.list.row_at_index(0) {
+                self.list.select_row(Some(&row));
+            } else {
+                self.stack.set_visible_child_name(EMPTY_PAGE);
+                self.render_history(None);
+                self.save_preference("selectedSessionId", serde_json::Value::Null);
+            }
         }
-        shutdown
+    }
+
+    fn run_io<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> PersistResult<T> + Send + 'static,
+        done: impl FnOnce(&Self, PersistResult<T>) + 'static,
+    ) {
+        let result = self.io.submit(work);
+        let workspace = self.clone();
+        glib::spawn_future_local(async move {
+            let result = result
+                .await
+                .unwrap_or_else(|_| Err("I/O worker stopped".into()));
+            done(&workspace, result);
+        });
+    }
+
+    fn save_preference(&self, key: &'static str, value: serde_json::Value) {
+        let Some(store) = self.store.borrow().clone() else {
+            return;
+        };
+        self.run_io(
+            move || store.set_preference(key, &value),
+            |workspace, result| {
+                if let Err(error) = result {
+                    workspace.show_error(&format!("Could not save preference: {error}"));
+                }
+            },
+        );
+    }
+
+    fn persist_record(&self, record: SessionRecord) {
+        let Some(store) = self.store.borrow().clone() else {
+            return;
+        };
+        self.run_io(
+            move || store.save_session(&record),
+            |workspace, result| {
+                if let Err(error) = result {
+                    workspace.show_error(&format!("Could not save session: {error}"));
+                }
+            },
+        );
     }
 
     fn selected_session_id(&self) -> Option<String> {
@@ -217,22 +257,32 @@ impl Workspace {
         format!("{}-{millis}-{sequence}", session_kind_name(kind))
     }
 
-    fn report_launch_failure(
+    fn report_failure(
         &self,
         pending: Option<PendingRequest>,
+        code: ErrorCode,
         message: &'static str,
         reason: String,
     ) {
         if let Some(pending) = pending {
             respond_failure(
                 pending,
-                ErrorCode::InternalError,
+                code,
                 message,
                 Some(serde_json::json!({ "reason": reason })),
             );
         } else {
             self.show_error(&format!("{message}: {reason}"));
         }
+    }
+
+    fn report_launch_failure(
+        &self,
+        pending: Option<PendingRequest>,
+        message: &'static str,
+        reason: String,
+    ) {
+        self.report_failure(pending, ErrorCode::InternalError, message, reason);
     }
 
     fn show_error(&self, message: &str) {

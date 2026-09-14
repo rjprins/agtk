@@ -1,34 +1,97 @@
 use super::*;
+use crate::session::Attachment;
+use std::time::Instant;
 
 impl Workspace {
     pub(super) fn discover_sessions(&self) {
-        let mut sockets = socket_files(&self.paths.sessions_dir());
-        if self.paths.name().as_str() == "default"
-            && let Some(legacy_dir) = self.paths.runtime_dir().parent()
-        {
-            sockets.extend(socket_files(legacy_dir));
-        }
-        sockets.sort();
-        for socket in sockets {
-            let _ = self.attach(&socket);
-        }
+        self.new_shell_button.set_sensitive(false);
+        let paths = self.paths.clone();
+        self.run_io(
+            move || {
+                let store = Store::open(&paths.database())?;
+                let selected = store
+                    .preference("selectedSessionId")?
+                    .and_then(|v| v.as_str().map(str::to_owned));
+                let mut records = store.sessions()?;
+                let mut sockets = socket_files(&paths.sessions_dir());
+                if paths.name().as_str() == "default"
+                    && let Some(legacy) = paths.runtime_dir().parent()
+                {
+                    sockets.extend(socket_files(legacy));
+                }
+                sockets.sort();
+                for socket in sockets {
+                    let Some(id) = socket.file_stem().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    if id == "control" || records.iter().any(|r| r.id == id) {
+                        continue;
+                    }
+                    let mut record = SessionRecord::discovered(id, socket.clone());
+                    record.name = display_name(id);
+                    record.position = records.len() as i64;
+                    records.push(record);
+                }
+                let mut recovered = Vec::new();
+                for mut record in records {
+                    let connected = connect_session(&record.socket_path).ok();
+                    record.state = if connected.is_some() {
+                        SessionState::Running
+                    } else {
+                        SessionState::Exited
+                    };
+                    store.save_session(&record)?;
+                    recovered.push((record, connected));
+                }
+                Ok((store, selected, recovered))
+            },
+            |workspace, result| match result {
+                Ok((store, selected, recovered)) => {
+                    *workspace.store.borrow_mut() = Some(store);
+                    for (record, connected) in recovered {
+                        let (control, attachment) =
+                            connected.map_or((None, None), |(c, a)| (Some(c), Some(a)));
+                        if let Err(error) = workspace.attach(record, control, attachment) {
+                            workspace.show_error(&format!("Could not restore terminal: {error}"));
+                        }
+                    }
+                    if let Some(selected) = selected {
+                        let row = workspace
+                            .sessions
+                            .borrow()
+                            .get(&selected)
+                            .map(|s| s.row.clone());
+                        if let Some(row) = row {
+                            workspace.list.select_row(Some(&row));
+                        }
+                    }
+                    workspace.new_shell_button.set_sensitive(true);
+                    workspace.start_control_server();
+                    if workspace.sessions.borrow().is_empty()
+                        && workspace.paths.name().as_str() == "default"
+                    {
+                        workspace.launch_shell();
+                    }
+                }
+                Err(error) => workspace.show_error(&format!("Could not load workspace: {error}")),
+            },
+        );
     }
 
     pub(super) fn launch_shell(&self) {
-        let params = CreateSessionParams {
-            kind: SessionKind::Shell,
-            command: None,
-            args: Vec::new(),
-            cwd: None,
-            name: None,
-            project_root: None,
-            worktree_path: None,
-            initial_input: None,
-        };
-        match SessionLaunchPlan::new(params) {
-            Ok(plan) => self.launch_session(plan, None),
-            Err(error) => self.show_error(&format!("Could not prepare shell: {error}")),
-        }
+        self.launch_controlled(
+            CreateSessionParams {
+                kind: SessionKind::Shell,
+                command: None,
+                args: Vec::new(),
+                cwd: None,
+                name: None,
+                project_root: None,
+                worktree_path: None,
+                initial_input: None,
+            },
+            None,
+        );
     }
 
     pub(super) fn launch_controlled_session(
@@ -36,150 +99,258 @@ impl Workspace {
         params: CreateSessionParams,
         pending: PendingRequest,
     ) {
-        match SessionLaunchPlan::new(params) {
-            Ok(plan) => self.launch_session(plan, Some(pending)),
-            Err(error) => respond_failure(
-                pending,
-                ErrorCode::InvalidParams,
-                "Session launch parameters are invalid",
-                Some(serde_json::json!({ "reason": error.to_string() })),
-            ),
-        }
+        self.launch_controlled(params, Some(pending));
     }
 
-    pub(super) fn launch_session(&self, plan: SessionLaunchPlan, pending: Option<PendingRequest>) {
-        let sessions_dir = self.paths.sessions_dir();
-        if let Err(error) = fs::create_dir_all(&sessions_dir) {
+    pub(super) fn launch_controlled(
+        &self,
+        params: CreateSessionParams,
+        pending: Option<PendingRequest>,
+    ) {
+        let Some(store) = self.store.borrow().clone() else {
             self.report_launch_failure(
                 pending,
-                "Could not create runtime directory",
-                error.to_string(),
+                "Workspace is loading",
+                "Try again once recovery finishes".into(),
             );
             return;
-        }
-
-        let id = self.next_session_id(plan.kind);
-        let socket_path = sessions_dir.join(format!("{id}.sock"));
-        let mut host = Command::new(&self.host_binary);
-        host.arg("--socket")
-            .arg(&socket_path)
-            .arg("--")
-            .arg(&plan.program)
-            .args(&plan.args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Some(cwd) = &plan.cwd {
-            host.current_dir(cwd);
-        }
-        match host.spawn() {
-            Ok(mut child) => {
+        };
+        let id = self.next_session_id(params.kind);
+        let position = self
+            .sessions
+            .borrow()
+            .values()
+            .map(|s| s.record.position)
+            .max()
+            .unwrap_or(-1)
+            + 1;
+        let socket = self.paths.sessions_dir().join(format!("{id}.sock"));
+        let host_binary = self.host_binary.clone();
+        self.run_io(
+            move || {
+                let plan = SessionLaunchPlan::new(params)?;
+                fs::create_dir_all(socket.parent().ok_or("invalid socket path")?)?;
+                let mut record = SessionRecord::discovered(&id, socket.clone());
+                record.name = plan.name.unwrap_or_else(|| display_name(&id));
+                record.kind = plan.kind;
+                record.program = plan.program;
+                record.args = plan.args;
+                record.cwd = plan.cwd;
+                record.project_root = plan.project_root;
+                record.worktree_path = plan.worktree_path;
+                record.position = position;
+                record.state = SessionState::Reconnecting;
+                store.save_session(&record)?;
+                let mut command = Command::new(host_binary);
+                command
+                    .arg("--socket")
+                    .arg(&socket)
+                    .arg("--")
+                    .arg(&record.program)
+                    .args(&record.args)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                if let Some(cwd) = &record.cwd {
+                    command.current_dir(cwd);
+                }
+                let mut child = match command.spawn() {
+                    Ok(child) => child,
+                    Err(error) => {
+                        store.remove_session(&id)?;
+                        return Err(error.into());
+                    }
+                };
+                let deadline = Instant::now() + Duration::from_secs(2);
+                let connected = loop {
+                    match connect_session(&socket) {
+                        Ok(connected) => break Ok(connected),
+                        Err(error) if Instant::now() >= deadline => break Err(error),
+                        Err(_) => {
+                            if child.try_wait()?.is_some() {
+                                break Err(io::Error::other("session host exited during launch"));
+                            }
+                            thread::sleep(Duration::from_millis(20));
+                        }
+                    }
+                };
+                // On UI loss the host must remain independent. Reap only, never tie its lifetime to GTK.
                 thread::spawn(move || {
                     let _ = child.wait();
                 });
-            }
-            Err(error) => {
-                self.report_launch_failure(
-                    pending,
-                    "Could not start session host",
-                    error.to_string(),
-                );
-                return;
-            }
-        }
-
-        let workspace = self.clone();
-        let attempts = Rc::new(Cell::new(0_u8));
-        let pending = Rc::new(RefCell::new(pending));
-        let metadata = SessionMetadata {
-            kind: plan.kind,
-            name: plan.name,
-        };
-        let initial_input = plan.initial_input;
-        glib::timeout_add_local(Duration::from_millis(20), move || {
-            match workspace.attach_with_metadata(&socket_path, Some(metadata.clone())) {
-                Ok(()) => {
-                    if let Some(input) = &initial_input {
-                        let terminal = workspace
-                            .sessions
-                            .borrow()
-                            .get(&id)
-                            .map(|session| session.terminal.clone());
-                        if let Some(terminal) = terminal {
-                            terminal.feed_child(input.as_bytes());
-                            terminal.feed_child(b"\n");
-                        }
-                    }
-                    if let Some(pending) = pending.borrow_mut().take() {
-                        match workspace.session_summary(&id).and_then(|summary| {
-                            serde_json::to_value(summary).map_err(|error| error.to_string())
-                        }) {
-                            Ok(summary) => {
-                                let request_id = pending.request.id.clone();
-                                let _ =
-                                    pending.respond(ControlResponse::success(request_id, summary));
+                let (control, attachment) = connected?;
+                record.state = SessionState::Running;
+                store.save_session(&record)?;
+                Ok((record, control, attachment, plan.initial_input))
+            },
+            move |workspace, result| match result {
+                Ok((record, control, attachment, initial_input)) => {
+                    let id = record.id.clone();
+                    match workspace.attach(record, Some(control), Some(attachment)) {
+                        Ok(()) => {
+                            let terminal = workspace
+                                .sessions
+                                .borrow()
+                                .get(&id)
+                                .map(|s| s.terminal.clone());
+                            if let (Some(input), Some(terminal)) = (initial_input, terminal) {
+                                terminal.feed_child(input.as_bytes());
+                                terminal.feed_child(b"\n");
                             }
-                            Err(error) => respond_failure(
-                                pending,
-                                ErrorCode::InternalError,
-                                "Could not describe created session",
-                                Some(serde_json::json!({ "reason": error })),
-                            ),
+                            // Queue behind selection persistence before acknowledging durable creation.
+                            let summary = workspace
+                                .session_summary(&id)
+                                .and_then(|s| serde_json::to_value(s).map_err(|e| e.to_string()));
+                            workspace.run_io(
+                                || Ok(()),
+                                move |_, _| {
+                                    if let Some(pending) = pending {
+                                        match summary {
+                                            Ok(summary) => {
+                                                let request_id = pending.request.id.clone();
+                                                let _ = pending.respond(ControlResponse::success(
+                                                    request_id, summary,
+                                                ));
+                                            }
+                                            Err(error) => respond_failure(
+                                                pending,
+                                                ErrorCode::InternalError,
+                                                "Could not describe session",
+                                                Some(serde_json::json!({"reason":error})),
+                                            ),
+                                        }
+                                    }
+                                },
+                            );
                         }
+                        Err(error) => workspace.report_launch_failure(
+                            pending,
+                            "Could not attach session",
+                            error.to_string(),
+                        ),
                     }
-                    glib::ControlFlow::Break
-                }
-                Err(_) if attempts.get() < 50 => {
-                    attempts.set(attempts.get() + 1);
-                    glib::ControlFlow::Continue
                 }
                 Err(error) => {
-                    if let Some(pending) = pending.borrow_mut().take() {
-                        respond_failure(
-                            pending,
-                            ErrorCode::InternalError,
-                            "Could not attach session",
-                            Some(serde_json::json!({ "reason": error.to_string() })),
-                        );
+                    let code = if error
+                        .downcast_ref::<crate::session::LaunchPlanError>()
+                        .is_some()
+                    {
+                        ErrorCode::InvalidParams
                     } else {
-                        workspace.show_error(&format!("Could not attach session: {error}"));
-                    }
-                    glib::ControlFlow::Break
+                        ErrorCode::InternalError
+                    };
+                    workspace.report_failure(
+                        pending,
+                        code,
+                        "Could not launch session",
+                        error.to_string(),
+                    );
                 }
-            }
+            },
+        );
+    }
+
+    pub(super) fn stop_session(&self, id: &str, pending: Option<PendingRequest>) {
+        let record_and_control = self.sessions.borrow().get(id).map(|s| {
+            (
+                s.record.clone(),
+                s.control.as_ref().map(UnixStream::try_clone).transpose(),
+            )
         });
+        let Some((record, control)) = record_and_control else {
+            return;
+        };
+        let Some(store) = self.store.borrow().clone() else {
+            return;
+        };
+        let id = id.to_owned();
+        self.run_io(
+            move || {
+                if let Some(mut control) = control? {
+                    control.set_write_timeout(Some(Duration::from_secs(1)))?;
+                    match control.write_all(b"K") {
+                        Ok(()) => {}
+                        Err(error)
+                            if record.state == SessionState::Exited
+                                || !record.socket_path.exists() =>
+                        {
+                            let _ = error;
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                    let deadline = Instant::now() + Duration::from_secs(2);
+                    while record.socket_path.exists() {
+                        if Instant::now() >= deadline {
+                            return Err("session host did not stop, row retained".into());
+                        }
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                }
+                store.remove_session(&record.id)
+            },
+            move |workspace, result| match result {
+                Ok(()) => {
+                    workspace.remove_session_view(&id);
+                    if let Some(pending) = pending {
+                        let request_id = pending.request.id.clone();
+                        let _ = pending.respond(ControlResponse::success(
+                            request_id,
+                            serde_json::json!({"closedSessionId":id}),
+                        ));
+                    }
+                }
+                Err(error) => workspace.report_launch_failure(
+                    pending,
+                    "Could not stop session",
+                    error.to_string(),
+                ),
+            },
+        );
     }
 
-    pub(super) fn attach(&self, socket_path: &Path) -> Result<(), Box<dyn Error>> {
-        self.attach_with_metadata(socket_path, None)
-    }
-
-    pub(super) fn attach_with_metadata(
+    pub(super) fn attach(
         &self,
-        socket_path: &Path,
-        metadata: Option<SessionMetadata>,
+        record: SessionRecord,
+        control: Option<UnixStream>,
+        attachment: Option<Attachment>,
     ) -> Result<(), Box<dyn Error>> {
-        let id = socket_path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .ok_or("invalid session socket name")?
-            .to_owned();
+        let id = record.id.clone();
         if self.sessions.borrow().contains_key(&id) {
             return Ok(());
         }
-
-        let control = UnixStream::connect(socket_path)?;
-        let attachment = receive_attachment(&control)?;
         let terminal = vte::Terminal::new();
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
         terminal.set_scrollback_lines(50_000);
         terminal.set_scroll_on_keystroke(true);
         terminal.set_font(Some(&FontDescription::from_string("Monospace 11")));
-        terminal.feed(&attachment.replay);
-
-        let pty = vte::Pty::foreign_sync(attachment.pty, None::<&gio::Cancellable>)?;
-        terminal.set_pty(Some(&pty));
+        let pty = if let Some(attachment) = attachment {
+            terminal.feed(&attachment.replay);
+            let pty = vte::Pty::foreign_sync(attachment.pty, None::<&gio::Cancellable>)?;
+            terminal.set_pty(Some(&pty));
+            Some(pty)
+        } else {
+            terminal.feed(b"This session has exited. Close its row to dismiss it.\r\n");
+            None
+        };
+        let eof_workspace = self.clone();
+        let eof_id = id.clone();
+        terminal.connect_eof(move |_| {
+            let record = {
+                let mut sessions = eof_workspace.sessions.borrow_mut();
+                sessions.get_mut(&eof_id).map(|session| {
+                    session.record.state = SessionState::Exited;
+                    session
+                        .label
+                        .set_text(&format!("{} (exited)", session.record.name));
+                    session.control.take();
+                    session.record.clone()
+                })
+            };
+            if let Some(record) = record {
+                eof_workspace.persist_record(record);
+            }
+        });
         terminal.connect_selection_changed(|terminal| {
             let Some(selection) = terminal.text_selected(vte::Format::Text) else {
                 return;
@@ -203,12 +374,11 @@ impl Workspace {
         let scroll = gtk::ScrolledWindow::builder().child(&terminal).build();
         self.stack.add_named(&scroll, Some(&id));
 
-        let kind = metadata
-            .as_ref()
-            .map_or(SessionKind::Shell, |metadata| metadata.kind);
-        let name = metadata
-            .and_then(|metadata| metadata.name)
-            .unwrap_or_else(|| display_name(&id));
+        let name = if record.state == SessionState::Exited {
+            format!("{} (exited)", record.name)
+        } else {
+            record.name.clone()
+        };
         let row = gtk::ListBoxRow::new();
         row.set_widget_name(&id);
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
@@ -231,16 +401,13 @@ impl Workspace {
         let close_workspace = self.clone();
         let close_id = id.clone();
         close.connect_clicked(move |_| {
-            if let Err(error) = close_workspace.stop_session(&close_id) {
-                close_workspace.show_error(&format!("Could not stop session: {error}"));
-            }
+            close_workspace.stop_session(&close_id, None);
         });
 
         self.sessions.borrow_mut().insert(
             id.clone(),
             SessionView {
-                name,
-                kind,
+                record,
                 terminal,
                 page: scroll,
                 row: row.clone(),
@@ -253,4 +420,12 @@ impl Workspace {
         self.list.select_row(Some(&row));
         Ok(())
     }
+}
+
+fn connect_session(socket: &Path) -> io::Result<(UnixStream, Attachment)> {
+    let control = UnixStream::connect(socket)?;
+    control.set_read_timeout(Some(Duration::from_millis(300)))?;
+    control.set_write_timeout(Some(Duration::from_millis(300)))?;
+    let attachment = receive_attachment(&control)?;
+    Ok((control, attachment))
 }

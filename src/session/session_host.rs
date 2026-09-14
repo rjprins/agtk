@@ -2,10 +2,11 @@ use std::ffi::CString;
 use std::io::{self, Read};
 use std::os::fd::AsFd;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nix::errno::Errno;
 use nix::fcntl::{FcntlArg, OFlag, fcntl};
@@ -21,6 +22,10 @@ const REPLAY_CAPACITY: usize = 1024 * 1024;
 pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()> {
     let command = prepare_command(command)?;
     let environment = prepare_environment()?;
+    let listener = UnixListener::bind(socket_path)?;
+    std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
+    listener.set_nonblocking(true)?;
+    let _socket_guard = SocketGuard(socket_path.to_path_buf());
     let winsize = Winsize {
         ws_row: 30,
         ws_col: 120,
@@ -35,17 +40,16 @@ pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()
         // SAFETY: exec failed and _exit is async-signal-safe.
         unsafe { libc::_exit(127) }
     };
+    let mut child_guard = ChildGuard::new(child);
 
     let flags = OFlag::from_bits_truncate(fcntl(&master, FcntlArg::F_GETFL)?);
     fcntl(&master, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
 
-    let listener = UnixListener::bind(socket_path)?;
-    listener.set_nonblocking(true)?;
-    let _socket_guard = SocketGuard(socket_path.to_path_buf());
     let mut replay = ReplayBuffer::new(REPLAY_CAPACITY);
 
     loop {
         if child_has_exited(child)? {
+            child_guard.disarm();
             return Ok(());
         }
 
@@ -56,8 +60,8 @@ pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()
                 let detached_output = replay.take();
                 match send_attachment(&client, &detached_output, client_pty.as_fd()) {
                     Ok(()) if monitor_client(&client, child)? => {
-                        let _ = killpg(child, Signal::SIGHUP);
-                        let _ = waitpid(child, None);
+                        terminate_child(child)?;
+                        child_guard.disarm();
                         return Ok(());
                     }
                     Ok(()) => {}
@@ -78,7 +82,13 @@ fn prepare_environment() -> io::Result<Vec<CString>> {
         .filter(|(key, _)| {
             !matches!(
                 key.as_bytes(),
-                b"TERM" | b"COLORTERM" | b"NO_COLOR" | b"TERM_PROGRAM" | b"TERM_PROGRAM_VERSION"
+                b"TERM"
+                    | b"COLORTERM"
+                    | b"NO_COLOR"
+                    | b"TERM_PROGRAM"
+                    | b"TERM_PROGRAM_VERSION"
+                    | b"TMUX"
+                    | b"TMUX_PANE"
             )
         })
         .map(|(key, value)| {
@@ -165,6 +175,52 @@ fn child_has_exited(child: Pid) -> io::Result<bool> {
         Ok(WaitStatus::StillAlive) => Ok(false),
         Ok(_) | Err(Errno::ECHILD) => Ok(true),
         Err(error) => Err(io::Error::from(error)),
+    }
+}
+
+fn terminate_child(child: Pid) -> io::Result<()> {
+    for signal in [Signal::SIGHUP, Signal::SIGTERM] {
+        let _ = killpg(child, signal);
+        if wait_for_child(child, Duration::from_millis(300))? {
+            return Ok(());
+        }
+    }
+    let _ = killpg(child, Signal::SIGKILL);
+    match waitpid(child, None) {
+        Ok(_) | Err(Errno::ECHILD) => Ok(()),
+        Err(error) => Err(io::Error::from(error)),
+    }
+}
+
+fn wait_for_child(child: Pid, timeout: Duration) -> io::Result<bool> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if child_has_exited(child)? {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+struct ChildGuard(Option<Pid>);
+
+impl ChildGuard {
+    fn new(child: Pid) -> Self {
+        Self(Some(child))
+    }
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(child) = self.0 {
+            let _ = terminate_child(child);
+        }
     }
 }
 

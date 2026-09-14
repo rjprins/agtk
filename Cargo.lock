@@ -6,6 +6,7 @@ version = 4
 name = "agmux-native"
 version = "0.1.0"
 dependencies = [
+ "futures-channel",
  "gio",
  "glib",
  "gtk4",

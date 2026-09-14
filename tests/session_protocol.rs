@@ -19,6 +19,9 @@ fn attachment_transfers_replay_bytes_and_the_pty_descriptor() {
     });
 
     let attachment = receive_attachment(&client).expect("receive attachment");
+    let descriptor_flags = nix::fcntl::fcntl(&attachment.pty, nix::fcntl::FcntlArg::F_GETFD)
+        .expect("read descriptor flags");
+    assert_ne!(descriptor_flags & libc::FD_CLOEXEC, 0);
     sender.join().expect("sender completes");
 
     assert_eq!(attachment.replay, b"detached output");

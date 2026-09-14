@@ -59,6 +59,11 @@ pub struct SessionSummary {
     pub state: SessionState,
     pub is_selected: bool,
     pub history_count: usize,
+    pub cwd: Option<PathBuf>,
+    pub project_root: Option<PathBuf>,
+    pub worktree_path: Option<PathBuf>,
+    pub created_at: u64,
+    pub position: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

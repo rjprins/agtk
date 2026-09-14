@@ -28,6 +28,57 @@ impl Workspace {
             self.launch_controlled_session(params.clone(), pending);
             return;
         }
+        if let ControlCommand::SessionClose(params) = &pending.request.command
+            && self.sessions.borrow().contains_key(&params.session_id)
+        {
+            self.stop_session(&params.session_id.clone(), Some(pending));
+            return;
+        }
+        if let ControlCommand::SessionRename(params) = &pending.request.command {
+            let record = self
+                .sessions
+                .borrow()
+                .get(&params.session_id)
+                .map(|s| s.record.clone());
+            if let Some(mut record) = record {
+                record.name.clone_from(&params.name);
+                let updated = record.clone();
+                let store = self.store.borrow().clone().expect("workspace loaded");
+                self.run_io(
+                    move || store.save_session(&record),
+                    move |workspace, result| match result {
+                        Ok(()) => {
+                            if let Some(session) =
+                                workspace.sessions.borrow_mut().get_mut(&updated.id)
+                            {
+                                session.record.name = updated.name.clone();
+                                session.label.set_text(&updated.name);
+                            }
+                            let summary = workspace
+                                .session_summary(&updated.id)
+                                .and_then(|s| serde_json::to_value(s).map_err(|e| e.to_string()));
+                            match summary {
+                                Ok(summary) => {
+                                    let id = pending.request.id.clone();
+                                    let _ = pending.respond(ControlResponse::success(id, summary));
+                                }
+                                Err(error) => workspace.report_launch_failure(
+                                    Some(pending),
+                                    "Could not describe session",
+                                    error,
+                                ),
+                            }
+                        }
+                        Err(error) => workspace.report_launch_failure(
+                            Some(pending),
+                            "Could not rename session",
+                            error.to_string(),
+                        ),
+                    },
+                );
+                return;
+            }
+        }
 
         let id = pending.request.id.clone();
         let response = match &pending.request.command {
@@ -116,6 +167,7 @@ impl Workspace {
                     .sessions
                     .borrow()
                     .get(&params.session_id)
+                    .filter(|session| session.record.state != SessionState::Exited)
                     .map(|session| session.terminal.clone());
                 if let Some(terminal) = terminal {
                     // VTE sends these bytes directly to the attached child PTY.
@@ -134,64 +186,27 @@ impl Workspace {
                     session_not_found(id, &params.session_id)
                 }
             }
-            ControlCommand::SessionRename(params) => {
-                let renamed = {
-                    let mut sessions = self.sessions.borrow_mut();
-                    sessions.get_mut(&params.session_id).map(|session| {
-                        session.name.clone_from(&params.name);
-                        session.label.set_text(&params.name);
-                    })
-                };
-                if renamed.is_some() {
-                    match self
-                        .session_summary(&params.session_id)
-                        .and_then(|summary| {
-                            serde_json::to_value(summary).map_err(|error| error.to_string())
-                        }) {
-                        Ok(summary) => ControlResponse::success(id, summary),
-                        Err(error) => ControlResponse::failure(
-                            id,
-                            ErrorCode::InternalError,
-                            "Could not describe renamed session",
-                            Some(serde_json::json!({ "reason": error })),
-                        ),
-                    }
+            ControlCommand::SessionRename(params) => session_not_found(id, &params.session_id),
+            ControlCommand::SessionClose(params) => {
+                if params.allow_missing {
+                    ControlResponse::success(
+                        id,
+                        serde_json::json!({"closedSessionId":params.session_id}),
+                    )
                 } else {
                     session_not_found(id, &params.session_id)
                 }
             }
-            ControlCommand::SessionClose(params) => {
-                if !self.sessions.borrow().contains_key(&params.session_id) {
-                    if params.allow_missing {
-                        ControlResponse::success(
-                            id,
-                            serde_json::json!({ "closedSessionId": params.session_id }),
-                        )
-                    } else {
-                        session_not_found(id, &params.session_id)
-                    }
-                } else {
-                    match self.stop_session(&params.session_id) {
-                        Ok(()) => ControlResponse::success(
-                            id,
-                            serde_json::json!({ "closedSessionId": params.session_id }),
-                        ),
-                        Err(error) => ControlResponse::failure(
-                            id,
-                            ErrorCode::InternalError,
-                            "Could not stop session",
-                            Some(serde_json::json!({ "reason": error.to_string() })),
-                        ),
-                    }
+            ControlCommand::HistoryList(params) => {
+                match self.sessions.borrow().get(&params.session_id) {
+                    Some(session) => ControlResponse::success(
+                        id,
+                        serde_json::json!({"sessionId":params.session_id,"entries":session.history,"isTruncated":false}),
+                    ),
+                    None => session_not_found(id, &params.session_id),
                 }
             }
             ControlCommand::SessionCreate(_) => unreachable!("session creation handled above"),
-            command => ControlResponse::failure(
-                id,
-                ErrorCode::NotImplemented,
-                "Control method is not implemented yet",
-                Some(serde_json::json!({ "method": command.method() })),
-            ),
         };
         let _ = pending.respond(response);
     }

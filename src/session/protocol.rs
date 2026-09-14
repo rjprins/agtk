@@ -54,7 +54,7 @@ pub fn receive_attachment(mut socket: &UnixStream) -> io::Result<Attachment> {
             socket.as_raw_fd(),
             &mut iov,
             Some(&mut control_space),
-            MsgFlags::empty(),
+            MsgFlags::MSG_CMSG_CLOEXEC,
         )
         .map_err(io::Error::from)?;
 

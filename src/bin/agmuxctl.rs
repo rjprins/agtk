@@ -180,12 +180,21 @@ fn run_wait(client: &ControlClient, options: WaitOptions) -> Result<(), Failure>
     let deadline = Instant::now() + options.timeout;
     let mut sequence = 0_u64;
     loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Err(Failure::Timeout(format!(
+                "wait timed out after {} ms",
+                options.timeout.as_millis()
+            )));
+        };
         let response = client
-            .send(&ControlRequest {
-                version: PROTOCOL_VERSION,
-                id: format!("ctl-{}-wait-{sequence}", std::process::id()),
-                command: options.condition.observation(),
-            })
+            .send_with_timeout(
+                &ControlRequest {
+                    version: PROTOCOL_VERSION,
+                    id: format!("ctl-{}-wait-{sequence}", std::process::id()),
+                    command: options.condition.observation(),
+                },
+                remaining,
+            )
             .map_err(Failure::Client)?;
         match response.body {
             ResponseBody::Success(result) => {
@@ -425,9 +434,10 @@ fn client_exit_code(error: &ClientError) -> u8 {
             EXIT_TIMEOUT
         }
         ClientError::Connection(_) => EXIT_CONNECTION,
-        ClientError::Encoding(_) | ClientError::Protocol(_) | ClientError::ResponseTooLarge => {
-            EXIT_USAGE_OR_PROTOCOL
-        }
+        ClientError::Encoding(_)
+        | ClientError::Protocol(_)
+        | ClientError::ResponseTooLarge
+        | ClientError::UnexpectedResponseId { .. } => EXIT_USAGE_OR_PROTOCOL,
     }
 }
 

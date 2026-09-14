@@ -9,14 +9,19 @@ impl Workspace {
             .iter()
             .map(|(id, session)| SessionSummary {
                 id: id.clone(),
-                name: session.name.clone(),
-                kind: session.kind,
-                state: SessionState::Running,
+                name: session.record.name.clone(),
+                kind: session.record.kind,
+                state: session.record.state,
                 is_selected: selected_session_id.as_deref() == Some(id.as_str()),
                 history_count: session.history.len(),
+                cwd: session.record.cwd.clone(),
+                project_root: session.record.project_root.clone(),
+                worktree_path: session.record.worktree_path.clone(),
+                created_at: session.record.created_at,
+                position: session.record.position,
             })
             .collect::<Vec<_>>();
-        sessions.sort_by(|left, right| left.id.cmp(&right.id));
+        sessions.sort_by(|left, right| (left.position, &left.id).cmp(&(right.position, &right.id)));
 
         AppState {
             instance: self.paths.name().as_str().to_owned(),
@@ -41,11 +46,16 @@ impl Workspace {
             .ok_or_else(|| format!("session disappeared before it could be described: {id}"))?;
         Ok(SessionSummary {
             id: id.to_owned(),
-            name: session.name.clone(),
-            kind: session.kind,
-            state: SessionState::Running,
+            name: session.record.name.clone(),
+            kind: session.record.kind,
+            state: session.record.state,
             is_selected: selected_session_id.as_deref() == Some(id),
             history_count: session.history.len(),
+            cwd: session.record.cwd.clone(),
+            project_root: session.record.project_root.clone(),
+            worktree_path: session.record.worktree_path.clone(),
+            created_at: session.record.created_at,
+            position: session.record.position,
         })
     }
 
@@ -64,7 +74,7 @@ impl Workspace {
                 Some(UiNode {
                     id: format!("session-{id}"),
                     role: "terminal-session".to_owned(),
-                    label: Some(session.name.clone()),
+                    label: Some(session.record.name.clone()),
                     is_visible: session.row.is_visible(),
                     is_enabled: session.row.is_sensitive(),
                     is_selected: selected_session_id.as_deref() == Some(id.as_str()),

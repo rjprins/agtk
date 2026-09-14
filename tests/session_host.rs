@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsFd;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -9,6 +10,8 @@ use std::time::{Duration, Instant};
 
 use agmux_native::session::receive_attachment;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+use nix::sys::signal::{Signal, killpg};
+use nix::unistd::Pid;
 
 #[test]
 fn session_host_survives_disconnect_and_accepts_reattachment() {
@@ -16,7 +19,7 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
     let socket_path = directory.path().join("session.sock");
     let script = concat!(
         "printf 'env:%s:%s\\n' \"$TERM\" \"$COLORTERM\"; ",
-        "printf 'color-vars:%s:%s\\n' \"${NO_COLOR-unset}\" \"$TERM_PROGRAM\"; ",
+        "printf 'color-vars:%s:%s:%s\\n' \"${NO_COLOR-unset}\" \"$TERM_PROGRAM\" \"${TMUX-unset}\"; ",
         "printf 'ready\\n'; ",
         "IFS= read -r first; printf 'got:%s\\n' \"$first\"; ",
         "sleep 0.2; printf 'detached\\n'; ",
@@ -31,10 +34,19 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
         .stderr(Stdio::piped())
         .env("NO_COLOR", "1")
         .env("TERM_PROGRAM", "tmux")
+        .env("TMUX", "/tmp/user-tmux,1,0")
         .spawn()
         .expect("start session host");
 
     wait_for_socket(&socket_path, &mut host);
+    assert_eq!(
+        std::fs::metadata(&socket_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
 
     let first_control = UnixStream::connect(&socket_path).expect("connect first client");
     let first_attachment = receive_attachment(&first_control).expect("attach first client");
@@ -44,7 +56,7 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
         initial_output.push_str(&read_until(&mut first_pty, "ready", Duration::from_secs(2)));
     }
     assert!(initial_output.contains("env:xterm-256color:truecolor"));
-    assert!(initial_output.contains("color-vars:unset:agmux-native"));
+    assert!(initial_output.contains("color-vars:unset:agmux-native:unset"));
     first_pty.write_all(b"one\n").expect("write first input");
     assert!(read_until(&mut first_pty, "got:one", Duration::from_secs(2)).contains("got:one"));
 
@@ -62,6 +74,52 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
 
     second_control.write_all(b"K").expect("request shutdown");
     wait_for_exit(&mut host, Duration::from_secs(2));
+}
+
+#[test]
+fn session_host_escalates_shutdown_for_a_signal_resistant_child() {
+    let directory = tempfile::tempdir().expect("create runtime directory");
+    let socket_path = directory.path().join("stubborn.sock");
+    let script = "trap '' HUP TERM; printf 'child:%s\\n' \"$$\"; while :; do sleep 10; done";
+    let mut host = Command::new(env!("CARGO_BIN_EXE_agmux-session"))
+        .args([
+            "--socket",
+            socket_path.to_str().unwrap(),
+            "--",
+            "/bin/sh",
+            "-c",
+            script,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    wait_for_socket(&socket_path, &mut host);
+    let mut control = UnixStream::connect(&socket_path).unwrap();
+    let attachment = receive_attachment(&control).unwrap();
+    let mut pty = File::from(attachment.pty);
+    let mut output = String::from_utf8_lossy(&attachment.replay).into_owned();
+    if !output.contains("child:") {
+        output.push_str(&read_until(&mut pty, "child:", Duration::from_secs(2)));
+    }
+    let child = output
+        .lines()
+        .find_map(|line| line.strip_prefix("child:"))
+        .and_then(|pid| pid.trim().parse::<i32>().ok())
+        .expect("child PID");
+    control.write_all(b"K").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if host.try_wait().unwrap().is_some() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let _ = host.kill();
+    let _ = killpg(Pid::from_raw(child), Signal::SIGKILL);
+    let _ = host.wait();
+    panic!("session host did not escalate shutdown");
 }
 
 fn wait_for_socket(path: &Path, host: &mut Child) {

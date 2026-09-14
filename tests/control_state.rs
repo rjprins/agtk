@@ -16,6 +16,11 @@ fn application_state_has_a_stable_machine_readable_shape() {
         projects: Vec::new(),
         worktree_groups: Vec::new(),
         sessions: vec![SessionSummary {
+            cwd: None,
+            project_root: None,
+            worktree_path: None,
+            created_at: 0,
+            position: 0,
             id: "shell-1".to_owned(),
             name: "Shell 1".to_owned(),
             kind: SessionKind::Shell,
@@ -41,7 +46,12 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 "kind": "shell",
                 "state": "running",
                 "isSelected": true,
-                "historyCount": 2
+                "historyCount": 2,
+                "cwd": null,
+                "projectRoot": null,
+                "worktreePath": null,
+                "createdAt": 0,
+                "position": 0
             }],
             "attention": { "count": 0 }
         })
