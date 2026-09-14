@@ -16,6 +16,7 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
     let socket_path = directory.path().join("session.sock");
     let script = concat!(
         "printf 'env:%s:%s\\n' \"$TERM\" \"$COLORTERM\"; ",
+        "printf 'color-vars:%s:%s\\n' \"${NO_COLOR-unset}\" \"$TERM_PROGRAM\"; ",
         "printf 'ready\\n'; ",
         "IFS= read -r first; printf 'got:%s\\n' \"$first\"; ",
         "sleep 0.2; printf 'detached\\n'; ",
@@ -28,6 +29,8 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
+        .env("NO_COLOR", "1")
+        .env("TERM_PROGRAM", "tmux")
         .spawn()
         .expect("start session host");
 
@@ -41,6 +44,7 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
         initial_output.push_str(&read_until(&mut first_pty, "ready", Duration::from_secs(2)));
     }
     assert!(initial_output.contains("env:xterm-256color:truecolor"));
+    assert!(initial_output.contains("color-vars:unset:agmux-native"));
     first_pty.write_all(b"one\n").expect("write first input");
     assert!(read_until(&mut first_pty, "got:one", Duration::from_secs(2)).contains("got:one"));
 

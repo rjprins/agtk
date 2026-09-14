@@ -75,7 +75,12 @@ pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()
 
 fn prepare_environment() -> io::Result<Vec<CString>> {
     let mut environment = std::env::vars_os()
-        .filter(|(key, _)| !matches!(key.as_bytes(), b"TERM" | b"COLORTERM"))
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_bytes(),
+                b"TERM" | b"COLORTERM" | b"NO_COLOR" | b"TERM_PROGRAM" | b"TERM_PROGRAM_VERSION"
+            )
+        })
         .map(|(key, value)| {
             let mut entry = key.as_bytes().to_vec();
             entry.push(b'=');
@@ -90,6 +95,15 @@ fn prepare_environment() -> io::Result<Vec<CString>> {
         .collect::<io::Result<Vec<_>>>()?;
     environment.push(CString::new("TERM=xterm-256color").expect("static environment variable"));
     environment.push(CString::new("COLORTERM=truecolor").expect("static environment variable"));
+    environment
+        .push(CString::new("TERM_PROGRAM=agmux-native").expect("static environment variable"));
+    environment.push(
+        CString::new(format!(
+            "TERM_PROGRAM_VERSION={}",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .expect("package version cannot contain a NUL byte"),
+    );
     Ok(environment)
 }
 
