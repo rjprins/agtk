@@ -157,6 +157,22 @@ struct EncodedFailureResponse<'a> {
     error: &'a ControlError,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DecodedSuccessResponse {
+    version: u16,
+    id: String,
+    result: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DecodedFailureResponse {
+    version: u16,
+    id: String,
+    error: ControlError,
+}
+
 pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
     if bytes.len() > MAX_REQUEST_BYTES {
         return Err(ControlError::new(
@@ -270,6 +286,46 @@ pub fn encode_response(response: &ControlResponse) -> serde_json::Result<String>
     };
     encoded.push('\n');
     Ok(encoded)
+}
+
+pub fn decode_response(bytes: &[u8]) -> Result<ControlResponse, ControlError> {
+    let value: Value = serde_json::from_slice(bytes).map_err(invalid_response)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid_response("response is not an object"))?;
+    let has_result = object.contains_key("result");
+    let has_error = object.contains_key("error");
+    if has_result == has_error {
+        return Err(invalid_response(
+            "response must contain exactly one of result or error",
+        ));
+    }
+
+    let response = if has_result {
+        let decoded: DecodedSuccessResponse =
+            serde_json::from_value(value).map_err(invalid_response)?;
+        ControlResponse {
+            version: decoded.version,
+            id: decoded.id,
+            body: ResponseBody::Success(decoded.result),
+        }
+    } else {
+        let decoded: DecodedFailureResponse =
+            serde_json::from_value(value).map_err(invalid_response)?;
+        ControlResponse {
+            version: decoded.version,
+            id: decoded.id,
+            body: ResponseBody::Failure(decoded.error),
+        }
+    };
+    if response.version != PROTOCOL_VERSION {
+        return Err(ControlError::new(
+            ErrorCode::UnsupportedVersion,
+            "Response protocol version is not supported",
+        ));
+    }
+    validate_id("responseId", &response.id, MAX_REQUEST_ID_CHARS)?;
+    Ok(response)
 }
 
 impl ControlCommand {
@@ -444,6 +500,14 @@ fn validate_id(field: &str, value: &str, max_chars: usize) -> Result<(), Control
 
 fn invalid_params(message: &str) -> ControlError {
     ControlError::new(ErrorCode::InvalidParams, message)
+}
+
+fn invalid_response(reason: impl ToString) -> ControlError {
+    ControlError::with_details(
+        ErrorCode::InvalidRequest,
+        "Response is not a valid protocol envelope",
+        json!({ "reason": reason.to_string() }),
+    )
 }
 
 fn empty_params() -> Value {

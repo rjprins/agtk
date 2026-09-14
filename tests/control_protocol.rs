@@ -1,6 +1,6 @@
 use agmux_native::control::{
-    ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, SessionIdParams, SessionKind,
-    decode_request, encode_request, encode_response,
+    ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, ResponseBody, SessionIdParams,
+    SessionKind, decode_request, decode_response, encode_request, encode_response,
 };
 use serde_json::json;
 
@@ -177,4 +177,30 @@ fn response_envelopes_are_stable_and_exclusive() {
         r#"{"version":1,"id":"req-2","error":{"code":"SESSION_NOT_FOUND","message":"No session exists with that ID","details":{"sessionId":"missing"}}}
 "#
     );
+
+    assert_eq!(
+        decode_response(
+            br#"{"version":1,"id":"req-2","error":{"code":"SESSION_NOT_FOUND","message":"No session exists with that ID","details":{"sessionId":"missing"}}}"#
+        )
+        .expect("decode failure response"),
+        failure
+    );
+}
+
+#[test]
+fn response_rejects_result_and_error_in_the_same_envelope() {
+    let error = decode_response(
+        br#"{"version":1,"id":"req","result":{},"error":{"code":"INTERNAL_ERROR","message":"broken"}}"#,
+    )
+    .expect_err("reject ambiguous response");
+
+    assert_eq!(error.code, ErrorCode::InvalidRequest);
+}
+
+#[test]
+fn response_body_is_available_without_reparsing_json() {
+    let response = decode_response(br#"{"version":1,"id":"req","result":{"ok":true}}"#)
+        .expect("decode success response");
+
+    assert_eq!(response.body, ResponseBody::Success(json!({ "ok": true })));
 }
