@@ -1,0 +1,21 @@
+[package]
+name = "agmux-native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+
+[dependencies]
+glib = "0.22"
+gtk = { package = "gtk4", version = "0.11.4", features = ["v4_22"] }
+libc = "0.2"
+nix = { version = "0.31.3", features = ["fs", "poll", "process", "signal", "socket", "term"] }
+vte = { package = "vte4", version = "0.10.0", features = ["gtk_v4_18", "v0_84"] }
+
+[dependencies.adw]
+package = "libadwaita"
+version = "0.9.2"
+features = ["gtk_v4_22", "v1_9"]
+
+[dev-dependencies]
+tempfile = "3.23"
+
