@@ -2,12 +2,13 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use adw::prelude::*;
@@ -15,13 +16,13 @@ use gtk::pango::FontDescription;
 use vte::prelude::*;
 
 use crate::control::{
-    AppState, AttentionSummary, Bounds, ControlCommand, ControlResponse, ControlServer, ErrorCode,
-    PROTOCOL_VERSION, PendingRequest, SessionKind, SessionState, SessionSummary, TextSnapshot,
-    UiInspection, UiNode, WindowState,
+    AppState, AttentionSummary, Bounds, ControlCommand, ControlResponse, ControlServer,
+    CreateSessionParams, ErrorCode, PROTOCOL_VERSION, PendingRequest, SessionKind, SessionState,
+    SessionSummary, TextSnapshot, UiInspection, UiNode, WindowState,
 };
 use crate::history::{InputTracker, history_needle};
 use crate::instance::InstancePaths;
-use crate::session::receive_attachment;
+use crate::session::{SessionLaunchPlan, receive_attachment};
 use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
 
 const EMPTY_PAGE: &str = "empty";
@@ -48,12 +49,20 @@ struct Workspace {
 
 struct SessionView {
     name: String,
+    kind: SessionKind,
     terminal: vte::Terminal,
     page: gtk::ScrolledWindow,
     row: gtk::ListBoxRow,
+    label: gtk::Label,
     history: Vec<String>,
     _pty: vte::Pty,
     control: UnixStream,
+}
+
+#[derive(Clone)]
+struct SessionMetadata {
+    kind: SessionKind,
+    name: Option<String>,
 }
 
 pub fn build(app: &adw::Application, paths: InstancePaths) {
@@ -183,38 +192,131 @@ impl Workspace {
     }
 
     fn launch_shell(&self) {
+        let params = CreateSessionParams {
+            kind: SessionKind::Shell,
+            command: None,
+            args: Vec::new(),
+            cwd: None,
+            name: None,
+            project_root: None,
+            worktree_path: None,
+            initial_input: None,
+        };
+        match SessionLaunchPlan::new(params) {
+            Ok(plan) => self.launch_session(plan, None),
+            Err(error) => self.show_error(&format!("Could not prepare shell: {error}")),
+        }
+    }
+
+    fn launch_controlled_session(&self, params: CreateSessionParams, pending: PendingRequest) {
+        match SessionLaunchPlan::new(params) {
+            Ok(plan) => self.launch_session(plan, Some(pending)),
+            Err(error) => respond_failure(
+                pending,
+                ErrorCode::InvalidParams,
+                "Session launch parameters are invalid",
+                Some(serde_json::json!({ "reason": error.to_string() })),
+            ),
+        }
+    }
+
+    fn launch_session(&self, plan: SessionLaunchPlan, pending: Option<PendingRequest>) {
         let sessions_dir = self.paths.sessions_dir();
         if let Err(error) = fs::create_dir_all(&sessions_dir) {
-            self.show_error(&format!("Could not create runtime directory: {error}"));
+            self.report_launch_failure(
+                pending,
+                "Could not create runtime directory",
+                error.to_string(),
+            );
             return;
         }
 
-        let id = self.next_session_id();
+        let id = self.next_session_id(plan.kind);
         let socket_path = sessions_dir.join(format!("{id}.sock"));
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_owned());
-        let spawn = Command::new(&self.host_binary)
-            .args(["--socket", socket_path.to_string_lossy().as_ref()])
-            .args(["--", shell.as_str()])
+        let mut host = Command::new(&self.host_binary);
+        host.arg("--socket")
+            .arg(&socket_path)
+            .arg("--")
+            .arg(&plan.program)
+            .args(&plan.args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        if let Err(error) = spawn {
-            self.show_error(&format!("Could not start session host: {error}"));
-            return;
+            .stderr(Stdio::null());
+        if let Some(cwd) = &plan.cwd {
+            host.current_dir(cwd);
+        }
+        match host.spawn() {
+            Ok(mut child) => {
+                thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            Err(error) => {
+                self.report_launch_failure(
+                    pending,
+                    "Could not start session host",
+                    error.to_string(),
+                );
+                return;
+            }
         }
 
         let workspace = self.clone();
         let attempts = Rc::new(Cell::new(0_u8));
+        let pending = Rc::new(RefCell::new(pending));
+        let metadata = SessionMetadata {
+            kind: plan.kind,
+            name: plan.name,
+        };
+        let initial_input = plan.initial_input;
         glib::timeout_add_local(Duration::from_millis(20), move || {
-            match workspace.attach(&socket_path) {
-                Ok(()) => glib::ControlFlow::Break,
+            match workspace.attach_with_metadata(&socket_path, Some(metadata.clone())) {
+                Ok(()) => {
+                    if let Some(input) = &initial_input {
+                        let terminal = workspace
+                            .sessions
+                            .borrow()
+                            .get(&id)
+                            .map(|session| session.terminal.clone());
+                        if let Some(terminal) = terminal {
+                            terminal.feed_child(input.as_bytes());
+                            terminal.feed_child(b"\n");
+                        }
+                    }
+                    if let Some(pending) = pending.borrow_mut().take() {
+                        match workspace.session_summary(&id).and_then(|summary| {
+                            serde_json::to_value(summary).map_err(|error| error.to_string())
+                        }) {
+                            Ok(summary) => {
+                                let request_id = pending.request.id.clone();
+                                let _ =
+                                    pending.respond(ControlResponse::success(request_id, summary));
+                            }
+                            Err(error) => respond_failure(
+                                pending,
+                                ErrorCode::InternalError,
+                                "Could not describe created session",
+                                Some(serde_json::json!({ "reason": error })),
+                            ),
+                        }
+                    }
+                    glib::ControlFlow::Break
+                }
                 Err(_) if attempts.get() < 50 => {
                     attempts.set(attempts.get() + 1);
                     glib::ControlFlow::Continue
                 }
                 Err(error) => {
-                    workspace.show_error(&format!("Could not attach session: {error}"));
+                    if let Some(pending) = pending.borrow_mut().take() {
+                        respond_failure(
+                            pending,
+                            ErrorCode::InternalError,
+                            "Could not attach session",
+                            Some(serde_json::json!({ "reason": error.to_string() })),
+                        );
+                    } else {
+                        workspace.show_error(&format!("Could not attach session: {error}"));
+                    }
                     glib::ControlFlow::Break
                 }
             }
@@ -222,6 +324,14 @@ impl Workspace {
     }
 
     fn attach(&self, socket_path: &Path) -> Result<(), Box<dyn Error>> {
+        self.attach_with_metadata(socket_path, None)
+    }
+
+    fn attach_with_metadata(
+        &self,
+        socket_path: &Path,
+        metadata: Option<SessionMetadata>,
+    ) -> Result<(), Box<dyn Error>> {
         let id = socket_path
             .file_stem()
             .and_then(|name| name.to_str())
@@ -266,7 +376,12 @@ impl Workspace {
         let scroll = gtk::ScrolledWindow::builder().child(&terminal).build();
         self.stack.add_named(&scroll, Some(&id));
 
-        let name = display_name(&id);
+        let kind = metadata
+            .as_ref()
+            .map_or(SessionKind::Shell, |metadata| metadata.kind);
+        let name = metadata
+            .and_then(|metadata| metadata.name)
+            .unwrap_or_else(|| display_name(&id));
         let row = gtk::ListBoxRow::new();
         row.set_widget_name(&id);
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
@@ -288,15 +403,21 @@ impl Workspace {
 
         let close_workspace = self.clone();
         let close_id = id.clone();
-        close.connect_clicked(move |_| close_workspace.stop_session(&close_id));
+        close.connect_clicked(move |_| {
+            if let Err(error) = close_workspace.stop_session(&close_id) {
+                close_workspace.show_error(&format!("Could not stop session: {error}"));
+            }
+        });
 
         self.sessions.borrow_mut().insert(
             id.clone(),
             SessionView {
                 name,
+                kind,
                 terminal,
                 page: scroll,
                 row: row.clone(),
+                label,
                 history: Vec::new(),
                 _pty: pty,
                 control,
@@ -329,6 +450,11 @@ impl Workspace {
     }
 
     fn handle_control_request(&self, pending: PendingRequest) {
+        if let ControlCommand::SessionCreate(params) = &pending.request.command {
+            self.launch_controlled_session(params.clone(), pending);
+            return;
+        }
+
         let id = pending.request.id.clone();
         let response = match &pending.request.command {
             ControlCommand::AppGetState => match serde_json::to_value(self.app_state()) {
@@ -384,6 +510,97 @@ impl Workspace {
                     ),
                 }
             }
+            ControlCommand::SessionSelect(params) => {
+                let row = self
+                    .sessions
+                    .borrow()
+                    .get(&params.session_id)
+                    .map(|session| session.row.clone());
+                if let Some(row) = row {
+                    self.list.select_row(Some(&row));
+                    ControlResponse::success(
+                        id,
+                        serde_json::json!({ "selectedSessionId": params.session_id }),
+                    )
+                } else {
+                    session_not_found(id, &params.session_id)
+                }
+            }
+            ControlCommand::SessionSendInput(params) => {
+                let terminal = self
+                    .sessions
+                    .borrow()
+                    .get(&params.session_id)
+                    .map(|session| session.terminal.clone());
+                if let Some(terminal) = terminal {
+                    // VTE sends these bytes directly to the attached child PTY.
+                    // Source: https://gnome.pages.gitlab.gnome.org/vte/gtk4/method.Terminal.feed_child.html
+                    terminal.feed_child(params.text.as_bytes());
+                    let mut bytes_written = params.text.len();
+                    if params.append_enter {
+                        terminal.feed_child(b"\n");
+                        bytes_written += 1;
+                    }
+                    ControlResponse::success(
+                        id,
+                        serde_json::json!({ "bytesWritten": bytes_written }),
+                    )
+                } else {
+                    session_not_found(id, &params.session_id)
+                }
+            }
+            ControlCommand::SessionRename(params) => {
+                let renamed = {
+                    let mut sessions = self.sessions.borrow_mut();
+                    sessions.get_mut(&params.session_id).map(|session| {
+                        session.name.clone_from(&params.name);
+                        session.label.set_text(&params.name);
+                    })
+                };
+                if renamed.is_some() {
+                    match self
+                        .session_summary(&params.session_id)
+                        .and_then(|summary| {
+                            serde_json::to_value(summary).map_err(|error| error.to_string())
+                        }) {
+                        Ok(summary) => ControlResponse::success(id, summary),
+                        Err(error) => ControlResponse::failure(
+                            id,
+                            ErrorCode::InternalError,
+                            "Could not describe renamed session",
+                            Some(serde_json::json!({ "reason": error })),
+                        ),
+                    }
+                } else {
+                    session_not_found(id, &params.session_id)
+                }
+            }
+            ControlCommand::SessionClose(params) => {
+                if !self.sessions.borrow().contains_key(&params.session_id) {
+                    if params.allow_missing {
+                        ControlResponse::success(
+                            id,
+                            serde_json::json!({ "closedSessionId": params.session_id }),
+                        )
+                    } else {
+                        session_not_found(id, &params.session_id)
+                    }
+                } else {
+                    match self.stop_session(&params.session_id) {
+                        Ok(()) => ControlResponse::success(
+                            id,
+                            serde_json::json!({ "closedSessionId": params.session_id }),
+                        ),
+                        Err(error) => ControlResponse::failure(
+                            id,
+                            ErrorCode::InternalError,
+                            "Could not stop session",
+                            Some(serde_json::json!({ "reason": error.to_string() })),
+                        ),
+                    }
+                }
+            }
+            ControlCommand::SessionCreate(_) => unreachable!("session creation handled above"),
             command => ControlResponse::failure(
                 id,
                 ErrorCode::NotImplemented,
@@ -403,7 +620,7 @@ impl Workspace {
             .map(|(id, session)| SessionSummary {
                 id: id.clone(),
                 name: session.name.clone(),
-                kind: SessionKind::Shell,
+                kind: session.kind,
                 state: SessionState::Running,
                 is_selected: selected_session_id.as_deref() == Some(id.as_str()),
                 history_count: session.history.len(),
@@ -424,6 +641,22 @@ impl Workspace {
             sessions,
             attention: AttentionSummary { count: 0 },
         }
+    }
+
+    fn session_summary(&self, id: &str) -> Result<SessionSummary, String> {
+        let selected_session_id = self.selected_session_id();
+        let sessions = self.sessions.borrow();
+        let session = sessions
+            .get(id)
+            .ok_or_else(|| format!("session disappeared before it could be described: {id}"))?;
+        Ok(SessionSummary {
+            id: id.to_owned(),
+            name: session.name.clone(),
+            kind: session.kind,
+            state: SessionState::Running,
+            is_selected: selected_session_id.as_deref() == Some(id),
+            history_count: session.history.len(),
+        })
     }
 
     fn ui_inspection(&self) -> UiInspection {
@@ -564,13 +797,11 @@ impl Workspace {
         }
     }
 
-    fn stop_session(&self, id: &str) {
+    fn stop_session(&self, id: &str) -> io::Result<()> {
         let Some(mut session) = self.sessions.borrow_mut().remove(id) else {
-            return;
+            return Ok(());
         };
-        if let Err(error) = session.control.write_all(b"K") {
-            self.show_error(&format!("Could not stop session: {error}"));
-        }
+        let shutdown = session.control.write_all(b"K");
         self.stack.remove(&session.page);
         self.list.remove(&session.row);
 
@@ -580,6 +811,7 @@ impl Workspace {
             self.stack.set_visible_child_name(EMPTY_PAGE);
             self.render_history(None);
         }
+        shutdown
     }
 
     fn selected_session_id(&self) -> Option<String> {
@@ -588,14 +820,32 @@ impl Workspace {
             .map(|row| row.widget_name().to_string())
     }
 
-    fn next_session_id(&self) -> String {
+    fn next_session_id(&self, kind: SessionKind) -> String {
         let sequence = self.sequence.get();
         self.sequence.set(sequence + 1);
         let millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        format!("shell-{millis}-{sequence}")
+        format!("{}-{millis}-{sequence}", session_kind_name(kind))
+    }
+
+    fn report_launch_failure(
+        &self,
+        pending: Option<PendingRequest>,
+        message: &'static str,
+        reason: String,
+    ) {
+        if let Some(pending) = pending {
+            respond_failure(
+                pending,
+                ErrorCode::InternalError,
+                message,
+                Some(serde_json::json!({ "reason": reason })),
+            );
+        } else {
+            self.show_error(&format!("{message}: {reason}"));
+        }
     }
 
     fn show_error(&self, message: &str) {
@@ -613,6 +863,34 @@ fn widget_bounds(widget: &impl IsA<gtk::Widget>, window: &impl IsA<gtk::Widget>)
         width: bounds.width(),
         height: bounds.height(),
     }
+}
+
+const fn session_kind_name(kind: SessionKind) -> &'static str {
+    match kind {
+        SessionKind::Shell => "shell",
+        SessionKind::Codex => "codex",
+        SessionKind::Claude => "claude",
+        SessionKind::Custom => "custom",
+    }
+}
+
+fn respond_failure(
+    pending: PendingRequest,
+    code: ErrorCode,
+    message: &'static str,
+    details: Option<serde_json::Value>,
+) {
+    let request_id = pending.request.id.clone();
+    let _ = pending.respond(ControlResponse::failure(request_id, code, message, details));
+}
+
+fn session_not_found(request_id: String, session_id: &str) -> ControlResponse {
+    ControlResponse::failure(
+        request_id,
+        ErrorCode::SessionNotFound,
+        "No session exists with that ID",
+        Some(serde_json::json!({ "sessionId": session_id })),
+    )
 }
 
 fn socket_files(directory: &Path) -> Vec<PathBuf> {
