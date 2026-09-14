@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.92"
 
 [dependencies]
+gio = "0.22"
 glib = "0.22"
 gtk = { package = "gtk4", version = "0.11.4", features = ["v4_22"] }
 libc = "0.2"
