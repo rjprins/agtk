@@ -1,5 +1,9 @@
 use std::collections::VecDeque;
 
+mod protocol;
+
+pub use protocol::{Attachment, receive_attachment, send_attachment};
+
 #[derive(Debug)]
 pub struct ReplayBuffer {
     bytes: VecDeque<u8>,

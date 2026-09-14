@@ -8,7 +8,7 @@ rust-version = "1.92"
 glib = "0.22"
 gtk = { package = "gtk4", version = "0.11.4", features = ["v4_22"] }
 libc = "0.2"
-nix = { version = "0.31.3", features = ["fs", "poll", "process", "signal", "socket", "term"] }
+nix = { version = "0.31.3", features = ["fs", "poll", "process", "signal", "socket", "term", "uio"] }
 vte = { package = "vte4", version = "0.10.0", features = ["gtk_v4_18", "v0_84"] }
 
 [dependencies.adw]
@@ -18,4 +18,3 @@ features = ["gtk_v4_22", "v1_9"]
 
 [dev-dependencies]
 tempfile = "3.23"
-
