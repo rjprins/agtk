@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,6 +42,7 @@ impl ControlServer {
         })?;
         fs::create_dir_all(parent)?;
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        prepare_socket_path(socket_path)?;
 
         let listener = UnixListener::bind(socket_path)?;
         fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))?;
@@ -60,6 +61,28 @@ impl ControlServer {
             },
             receiver,
         ))
+    }
+}
+
+fn prepare_socket_path(socket_path: &Path) -> io::Result<()> {
+    match UnixStream::connect(socket_path) {
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
+            "another control server is already listening",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+            match fs::symlink_metadata(socket_path) {
+                Ok(metadata) if metadata.file_type().is_socket() => fs::remove_file(socket_path),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Ok(_) => Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    "control socket path exists and is not a Unix socket",
+                )),
+                Err(error) => Err(error),
+            }
+        }
+        Err(error) => Err(error),
     }
 }
 

@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
 
 use agmux_native::control::{ControlCommand, ControlResponse, ControlServer};
@@ -100,6 +100,31 @@ fn server_socket_is_private_to_the_current_user() {
 
     assert_eq!(socket_mode, 0o600);
     assert_eq!(directory_mode, 0o700);
+}
+
+#[test]
+fn server_replaces_a_stale_socket_left_by_an_interrupted_process() {
+    let directory = tempfile::tempdir().expect("create temporary directory");
+    let socket = directory.path().join("control.sock");
+    let stale = UnixListener::bind(&socket).expect("create stale socket");
+    drop(stale);
+
+    let (_server, _requests) = ControlServer::bind(&socket).expect("replace stale socket");
+
+    UnixStream::connect(&socket).expect("connect to replacement server");
+}
+
+#[test]
+fn server_does_not_replace_a_socket_that_is_still_live() {
+    let directory = tempfile::tempdir().expect("create temporary directory");
+    let socket = directory.path().join("control.sock");
+    let (_server, _requests) = ControlServer::bind(&socket).expect("bind first server");
+
+    let error = ControlServer::bind(&socket)
+        .err()
+        .expect("second server must not replace a live socket");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
 }
 
 fn exchange(socket: &std::path::Path, request: &str) -> String {
