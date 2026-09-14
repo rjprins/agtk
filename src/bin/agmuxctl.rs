@@ -2,7 +2,8 @@ use std::env;
 use std::process::ExitCode;
 
 use agmux_native::control::{
-    ClientError, ControlClient, ControlCommand, ControlRequest, PROTOCOL_VERSION, ResponseBody,
+    ClientError, ControlClient, ControlCommand, ControlRequest, GetTextParams, PROTOCOL_VERSION,
+    ResponseBody,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
 
@@ -47,9 +48,27 @@ fn run() -> Result<(), Failure> {
     let command = match arguments.as_slice() {
         [command] if command == "state" => ControlCommand::AppGetState,
         [group, command] if group == "ui" && command == "inspect" => ControlCommand::UiInspect,
+        [group, command, session_id] if group == "session" && command == "text" => {
+            ControlCommand::SessionGetText(GetTextParams {
+                session_id: session_id.clone(),
+                lines: 200,
+            })
+        }
+        [group, command, session_id, flag, lines]
+            if group == "session" && command == "text" && flag == "--lines" =>
+        {
+            let lines = lines
+                .parse::<u32>()
+                .map_err(|_| Failure::Usage("--lines requires an integer".to_owned()))?;
+            ControlCommand::SessionGetText(GetTextParams {
+                session_id: session_id.clone(),
+                lines,
+            })
+        }
         _ => {
             return Err(Failure::Usage(
-                "usage: agmuxctl [--instance NAME] <state|ui inspect>".to_owned(),
+                "usage: agmuxctl [--instance NAME] <state|ui inspect|session text ID [--lines N]>"
+                    .to_owned(),
             ));
         }
     };

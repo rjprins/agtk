@@ -1,6 +1,6 @@
 use agmux_native::control::{
-    AppState, AttentionSummary, Bounds, SessionKind, SessionState, SessionSummary, UiInspection,
-    UiNode, WindowState,
+    AppState, AttentionSummary, Bounds, SessionKind, SessionState, SessionSummary, TextSnapshot,
+    UiInspection, UiNode, WindowState,
 };
 
 #[test]
@@ -44,6 +44,26 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 "historyCount": 2
             }],
             "attention": { "count": 0 }
+        })
+    );
+}
+
+#[test]
+fn terminal_text_snapshot_has_truncation_metadata() {
+    let snapshot = TextSnapshot {
+        session_id: "shell-1".to_owned(),
+        text: "prompt output".to_owned(),
+        lines: 1,
+        is_truncated: true,
+    };
+
+    assert_eq!(
+        serde_json::to_value(snapshot).expect("serialize terminal text snapshot"),
+        serde_json::json!({
+            "sessionId": "shell-1",
+            "text": "prompt output",
+            "lines": 1,
+            "isTruncated": true
         })
     );
 }

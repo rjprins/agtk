@@ -16,13 +16,13 @@ use vte::prelude::*;
 
 use crate::control::{
     AppState, AttentionSummary, Bounds, ControlCommand, ControlResponse, ControlServer, ErrorCode,
-    PROTOCOL_VERSION, PendingRequest, SessionKind, SessionState, SessionSummary, UiInspection,
-    UiNode, WindowState,
+    PROTOCOL_VERSION, PendingRequest, SessionKind, SessionState, SessionSummary, TextSnapshot,
+    UiInspection, UiNode, WindowState,
 };
 use crate::history::{InputTracker, history_needle};
 use crate::instance::InstancePaths;
 use crate::session::receive_attachment;
-use crate::terminal_text::cleanup_copied_text;
+use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
 
 const EMPTY_PAGE: &str = "empty";
 const MAX_INSPECTED_SESSIONS: usize = 500;
@@ -349,6 +349,41 @@ impl Workspace {
                     Some(serde_json::json!({ "reason": error.to_string() })),
                 ),
             },
+            ControlCommand::SessionGetText(params) => {
+                let sessions = self.sessions.borrow();
+                match sessions.get(&params.session_id) {
+                    Some(session) => {
+                        // VTE exposes the visible screen and in-memory scrollback as plain text.
+                        // Source: https://gnome.pages.gitlab.gnome.org/vte/gtk4/method.Terminal.get_text_format.html
+                        let text = session
+                            .terminal
+                            .text_format(vte::Format::Text)
+                            .unwrap_or_default();
+                        let bounded = bounded_terminal_text(text.as_str(), params.lines as usize);
+                        let snapshot = TextSnapshot {
+                            session_id: params.session_id.clone(),
+                            text: bounded.text,
+                            lines: bounded.lines,
+                            is_truncated: bounded.is_truncated,
+                        };
+                        match serde_json::to_value(snapshot) {
+                            Ok(snapshot) => ControlResponse::success(id, snapshot),
+                            Err(error) => ControlResponse::failure(
+                                id,
+                                ErrorCode::InternalError,
+                                "Could not serialize terminal text",
+                                Some(serde_json::json!({ "reason": error.to_string() })),
+                            ),
+                        }
+                    }
+                    None => ControlResponse::failure(
+                        id,
+                        ErrorCode::SessionNotFound,
+                        "No session exists with that ID",
+                        Some(serde_json::json!({ "sessionId": params.session_id })),
+                    ),
+                }
+            }
             command => ControlResponse::failure(
                 id,
                 ErrorCode::NotImplemented,

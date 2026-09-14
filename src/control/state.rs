@@ -94,3 +94,12 @@ pub struct Bounds {
     pub width: f32,
     pub height: f32,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextSnapshot {
+    pub session_id: String,
+    pub text: String,
+    pub lines: usize,
+    pub is_truncated: bool,
+}
