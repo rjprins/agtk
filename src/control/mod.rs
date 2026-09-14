@@ -13,7 +13,7 @@ pub use protocol::{
 };
 pub use server::{ControlServer, PendingRequest};
 pub use state::{
-    AppState, AttentionSummary, Bounds, ProjectSummary, SessionState, SessionSummary, TextSnapshot,
-    UiInspection, UiNode, WindowState, WorktreeGroupSummary,
+    AppState, AttentionSummary, Bounds, CaptureResult, ProjectSummary, SessionState,
+    SessionSummary, TextSnapshot, UiInspection, UiNode, WindowState, WorktreeGroupSummary,
 };
 pub use wait::WaitCondition;

@@ -1,5 +1,6 @@
 //! Shared domain and session-lifecycle code for agmux native.
 
+pub mod capture;
 pub mod control;
 pub mod history;
 pub mod instance;

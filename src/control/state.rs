@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::path::PathBuf;
 
 use super::SessionKind;
 
@@ -102,4 +103,13 @@ pub struct TextSnapshot {
     pub text: String,
     pub lines: usize,
     pub is_truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureResult {
+    pub path: PathBuf,
+    pub width: i32,
+    pub height: i32,
+    pub sha256: String,
 }

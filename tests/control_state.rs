@@ -1,6 +1,6 @@
 use agmux_native::control::{
-    AppState, AttentionSummary, Bounds, SessionKind, SessionState, SessionSummary, TextSnapshot,
-    UiInspection, UiNode, WindowState,
+    AppState, AttentionSummary, Bounds, CaptureResult, SessionKind, SessionState, SessionSummary,
+    TextSnapshot, UiInspection, UiNode, WindowState,
 };
 
 #[test]
@@ -64,6 +64,26 @@ fn terminal_text_snapshot_has_truncation_metadata() {
             "text": "prompt output",
             "lines": 1,
             "isTruncated": true
+        })
+    );
+}
+
+#[test]
+fn capture_result_identifies_the_private_png_and_its_digest() {
+    let result = CaptureResult {
+        path: "/run/user/1000/agmux-native/test/captures/capture-1.png".into(),
+        width: 1200,
+        height: 800,
+        sha256: "abc123".to_owned(),
+    };
+
+    assert_eq!(
+        serde_json::to_value(result).expect("serialize capture result"),
+        serde_json::json!({
+            "path": "/run/user/1000/agmux-native/test/captures/capture-1.png",
+            "width": 1200,
+            "height": 800,
+            "sha256": "abc123"
         })
     );
 }
