@@ -1,4 +1,5 @@
 mod protocol;
+mod server;
 
 pub use protocol::{
     CloseSessionParams, ControlCommand, ControlError, ControlRequest, ControlResponse,
@@ -6,3 +7,4 @@ pub use protocol::{
     ResponseBody, SendInputParams, SessionIdParams, SessionKind, decode_request, encode_request,
     encode_response,
 };
+pub use server::{ControlServer, PendingRequest};

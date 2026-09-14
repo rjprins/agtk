@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 
 pub const PROTOCOL_VERSION: u16 = 1;
-pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 const MAX_REQUEST_ID_CHARS: usize = 128;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
@@ -330,10 +330,18 @@ impl ControlResponse {
             }),
         }
     }
+
+    pub(crate) fn from_error(id: impl Into<String>, error: ControlError) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            id: id.into(),
+            body: ResponseBody::Failure(error),
+        }
+    }
 }
 
 impl ControlError {
-    fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
