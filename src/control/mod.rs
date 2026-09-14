@@ -1,5 +1,6 @@
 mod protocol;
 mod server;
+mod state;
 
 pub use protocol::{
     CloseSessionParams, ControlCommand, ControlError, ControlRequest, ControlResponse,
@@ -8,3 +9,7 @@ pub use protocol::{
     encode_response,
 };
 pub use server::{ControlServer, PendingRequest};
+pub use state::{
+    AppState, AttentionSummary, ProjectSummary, SessionState, SessionSummary, WindowState,
+    WorktreeGroupSummary,
+};
