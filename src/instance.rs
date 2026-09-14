@@ -66,6 +66,21 @@ impl InstancePaths {
         }
     }
 
+    pub fn from_environment(name: InstanceName) -> Self {
+        let runtime_root = std::env::var_os("AGMUX_RUNTIME_ROOT")
+            .or_else(|| std::env::var_os("XDG_RUNTIME_DIR"))
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let state_root = std::env::var_os("AGMUX_STATE_ROOT")
+            .or_else(|| std::env::var_os("XDG_STATE_HOME"))
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
+            })
+            .unwrap_or_else(std::env::temp_dir);
+        Self::new(name, &runtime_root, &state_root)
+    }
+
     pub fn name(&self) -> &InstanceName {
         &self.name
     }

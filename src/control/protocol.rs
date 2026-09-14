@@ -97,6 +97,7 @@ pub enum ErrorCode {
     InvalidRequest,
     UnsupportedVersion,
     MethodNotFound,
+    NotImplemented,
     InvalidParams,
     RequestTooLarge,
     SessionNotFound,

@@ -14,7 +14,12 @@ use adw::prelude::*;
 use gtk::pango::FontDescription;
 use vte::prelude::*;
 
+use crate::control::{
+    AppState, AttentionSummary, ControlCommand, ControlResponse, ControlServer, ErrorCode,
+    PROTOCOL_VERSION, PendingRequest, SessionKind, SessionState, SessionSummary, WindowState,
+};
 use crate::history::{InputTracker, history_needle};
+use crate::instance::InstancePaths;
 use crate::session::receive_attachment;
 use crate::terminal_text::cleanup_copied_text;
 
@@ -24,19 +29,22 @@ const PCRE2_UTF: u32 = 0x0008_0000;
 
 #[derive(Clone)]
 struct Workspace {
+    window: adw::ApplicationWindow,
     list: gtk::ListBox,
     stack: gtk::Stack,
     overlay: adw::ToastOverlay,
     history_button: gtk::MenuButton,
     history_list: gtk::Box,
     history_popover: gtk::Popover,
-    runtime_dir: PathBuf,
+    paths: InstancePaths,
     host_binary: PathBuf,
     sessions: Rc<RefCell<HashMap<String, SessionView>>>,
     sequence: Rc<Cell<u64>>,
+    control_server: Rc<RefCell<Option<ControlServer>>>,
 }
 
 struct SessionView {
+    name: String,
     terminal: vte::Terminal,
     page: gtk::ScrolledWindow,
     row: gtk::ListBoxRow,
@@ -45,7 +53,7 @@ struct SessionView {
     control: UnixStream,
 }
 
-pub fn build(app: &adw::Application) {
+pub fn build(app: &adw::Application, paths: InstancePaths) {
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::Single);
     list.add_css_class("navigation-sidebar");
@@ -119,16 +127,18 @@ pub fn build(app: &adw::Application) {
         .build();
 
     let workspace = Workspace {
+        window: window.clone(),
         list: list.clone(),
         stack: stack.clone(),
         overlay,
         history_button,
         history_list,
         history_popover,
-        runtime_dir: runtime_dir(),
+        paths,
         host_binary: sibling_binary("agmux-session"),
         sessions: Rc::new(RefCell::new(HashMap::new())),
         sequence: Rc::new(Cell::new(0)),
+        control_server: Rc::new(RefCell::new(None)),
     };
 
     let selected_workspace = workspace.clone();
@@ -146,7 +156,8 @@ pub fn build(app: &adw::Application) {
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
 
     workspace.discover_sessions();
-    if workspace.sessions.borrow().is_empty() {
+    workspace.start_control_server();
+    if workspace.sessions.borrow().is_empty() && workspace.paths.name().as_str() == "default" {
         workspace.launch_shell();
     }
 
@@ -155,14 +166,12 @@ pub fn build(app: &adw::Application) {
 
 impl Workspace {
     fn discover_sessions(&self) {
-        let Ok(entries) = fs::read_dir(&self.runtime_dir) else {
-            return;
-        };
-        let mut sockets = entries
-            .flatten()
-            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_socket()))
-            .map(|entry| entry.path())
-            .collect::<Vec<_>>();
+        let mut sockets = socket_files(&self.paths.sessions_dir());
+        if self.paths.name().as_str() == "default"
+            && let Some(legacy_dir) = self.paths.runtime_dir().parent()
+        {
+            sockets.extend(socket_files(legacy_dir));
+        }
         sockets.sort();
         for socket in sockets {
             let _ = self.attach(&socket);
@@ -170,13 +179,14 @@ impl Workspace {
     }
 
     fn launch_shell(&self) {
-        if let Err(error) = fs::create_dir_all(&self.runtime_dir) {
+        let sessions_dir = self.paths.sessions_dir();
+        if let Err(error) = fs::create_dir_all(&sessions_dir) {
             self.show_error(&format!("Could not create runtime directory: {error}"));
             return;
         }
 
         let id = self.next_session_id();
-        let socket_path = self.runtime_dir.join(format!("{id}.sock"));
+        let socket_path = sessions_dir.join(format!("{id}.sock"));
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_owned());
         let spawn = Command::new(&self.host_binary)
             .args(["--socket", socket_path.to_string_lossy().as_ref()])
@@ -252,6 +262,7 @@ impl Workspace {
         let scroll = gtk::ScrolledWindow::builder().child(&terminal).build();
         self.stack.add_named(&scroll, Some(&id));
 
+        let name = display_name(&id);
         let row = gtk::ListBoxRow::new();
         row.set_widget_name(&id);
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
@@ -260,7 +271,7 @@ impl Workspace {
         content.set_margin_start(12);
         content.set_margin_end(12);
         content.append(&gtk::Image::from_icon_name("utilities-terminal-symbolic"));
-        let label = gtk::Label::new(Some(&display_name(&id)));
+        let label = gtk::Label::new(Some(&name));
         label.set_xalign(0.0);
         label.set_hexpand(true);
         content.append(&label);
@@ -278,6 +289,7 @@ impl Workspace {
         self.sessions.borrow_mut().insert(
             id.clone(),
             SessionView {
+                name,
                 terminal,
                 page: scroll,
                 row: row.clone(),
@@ -288,6 +300,82 @@ impl Workspace {
         );
         self.list.select_row(Some(&row));
         Ok(())
+    }
+
+    fn start_control_server(&self) {
+        let socket_path = self.paths.control_socket();
+        let (server, requests) = match ControlServer::bind(&socket_path) {
+            Ok(bound) => bound,
+            Err(error) => {
+                self.show_error(&format!("Could not start control socket: {error}"));
+                return;
+            }
+        };
+        self.control_server.borrow_mut().replace(server);
+
+        let workspace = self.clone();
+        // GLib documents timeout_add_local as scheduling on the default main loop.
+        // Source: https://gtk-rs.org/gtk-rs-core/stable/latest/docs/glib/source/fn.timeout_add_local.html
+        glib::timeout_add_local(Duration::from_millis(10), move || {
+            for pending in requests.try_iter() {
+                workspace.handle_control_request(pending);
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    fn handle_control_request(&self, pending: PendingRequest) {
+        let id = pending.request.id.clone();
+        let response = match &pending.request.command {
+            ControlCommand::AppGetState => match serde_json::to_value(self.app_state()) {
+                Ok(state) => ControlResponse::success(id, state),
+                Err(error) => ControlResponse::failure(
+                    id,
+                    ErrorCode::InternalError,
+                    "Could not serialize application state",
+                    Some(serde_json::json!({ "reason": error.to_string() })),
+                ),
+            },
+            command => ControlResponse::failure(
+                id,
+                ErrorCode::NotImplemented,
+                "Control method is not implemented yet",
+                Some(serde_json::json!({ "method": command.method() })),
+            ),
+        };
+        let _ = pending.respond(response);
+    }
+
+    fn app_state(&self) -> AppState {
+        let selected_session_id = self.selected_session_id();
+        let mut sessions = self
+            .sessions
+            .borrow()
+            .iter()
+            .map(|(id, session)| SessionSummary {
+                id: id.clone(),
+                name: session.name.clone(),
+                kind: SessionKind::Shell,
+                state: SessionState::Running,
+                is_selected: selected_session_id.as_deref() == Some(id.as_str()),
+                history_count: session.history.len(),
+            })
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| left.id.cmp(&right.id));
+
+        AppState {
+            instance: self.paths.name().as_str().to_owned(),
+            protocol_version: PROTOCOL_VERSION,
+            selected_session_id,
+            window: WindowState {
+                width: self.window.width(),
+                height: self.window.height(),
+            },
+            projects: Vec::new(),
+            worktree_groups: Vec::new(),
+            sessions,
+            attention: AttentionSummary { count: 0 },
+        }
     }
 
     fn record_input(&self, id: &str, input: String) {
@@ -391,11 +479,15 @@ impl Workspace {
     }
 }
 
-fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("agmux-native")
+fn socket_files(directory: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_socket()))
+        .map(|entry| entry.path())
+        .collect()
 }
 
 fn sibling_binary(name: &str) -> PathBuf {

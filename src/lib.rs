@@ -6,5 +6,3 @@ pub mod instance;
 pub mod session;
 pub mod terminal_text;
 pub mod ui;
-
-pub const APP_ID: &str = "nl.rutger.AgmuxNative.Devel";
