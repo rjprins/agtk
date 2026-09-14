@@ -32,6 +32,7 @@ mod controls;
 mod history_ui;
 mod inspection;
 mod sessions;
+mod style;
 
 const EMPTY_PAGE: &str = "empty";
 const MAX_INSPECTED_SESSIONS: usize = 500;
@@ -48,6 +49,9 @@ struct Workspace {
     history_button: gtk::MenuButton,
     history_list: gtk::Box,
     history_popover: gtk::Popover,
+    top_bar: adw::HeaderBar,
+    sidebar_panel: gtk::Box,
+    status_bar: gtk::Box,
     paths: InstancePaths,
     host_binary: PathBuf,
     sessions: Rc<RefCell<HashMap<String, SessionView>>>,
@@ -63,47 +67,66 @@ struct SessionView {
     page: gtk::ScrolledWindow,
     row: gtk::ListBoxRow,
     label: gtk::Label,
+    state_label: gtk::Label,
     history: Vec<String>,
     _pty: Option<vte::Pty>,
     control: Option<UnixStream>,
 }
 
 pub fn build(app: &adw::Application, paths: InstancePaths) {
+    let display = gtk::gdk::Display::default().expect("GTK application has no display");
+    style::install(&display);
+
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::Single);
-    list.add_css_class("navigation-sidebar");
-    list.set_size_request(240, -1);
+    list.add_css_class("tui-session-list");
 
     let sidebar = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
         .child(&list)
         .build();
+    let sidebar_heading = gtk::Label::new(Some("SESSIONS"));
+    sidebar_heading.set_xalign(0.0);
+    sidebar_heading.add_css_class("tui-sidebar-heading");
+    let sidebar_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    sidebar_panel.add_css_class("tui-sidebar");
+    sidebar_panel.set_size_request(252, -1);
+    sidebar_panel.append(&sidebar_heading);
+    sidebar_panel.append(&sidebar);
 
     let stack = gtk::Stack::builder()
         .hexpand(true)
         .vexpand(true)
-        .transition_type(gtk::StackTransitionType::Crossfade)
+        .transition_type(gtk::StackTransitionType::None)
         .build();
-    let empty = adw::StatusPage::builder()
-        .icon_name("utilities-terminal-symbolic")
-        .title("No sessions")
-        .description("Start a shell to open an embedded terminal")
-        .build();
+    stack.add_css_class("tui-main");
+    let empty = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    empty.set_halign(gtk::Align::Center);
+    empty.set_valign(gtk::Align::Center);
+    empty.add_css_class("tui-empty");
+    let empty_title = gtk::Label::new(Some("NO ACTIVE SESSION"));
+    empty_title.add_css_class("tui-empty-title");
+    let empty_hint = gtk::Label::new(Some("ctrl+shift+`  new shell"));
+    empty.append(&empty_title);
+    empty.append(&empty_hint);
     stack.add_named(&empty, Some(EMPTY_PAGE));
 
     let split = gtk::Paned::new(gtk::Orientation::Horizontal);
-    split.set_start_child(Some(&sidebar));
+    split.set_start_child(Some(&sidebar_panel));
     split.set_end_child(Some(&stack));
     split.set_resize_start_child(false);
     split.set_shrink_start_child(false);
     split.set_position(260);
 
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new(
-        "agmux native",
-        "Terminal prototype",
-    )));
-    let new_shell = gtk::Button::with_label("New shell");
+    header.add_css_class("tui-topbar");
+    header.set_show_title(false);
+    let brand = gtk::Label::new(Some("agmux-native"));
+    brand.add_css_class("tui-brand");
+    header.pack_start(&brand);
+    let new_shell = gtk::Button::with_label("[+ shell]");
+    new_shell.add_css_class("tui-button");
     new_shell.set_tooltip_text(Some("Start a shell session"));
     header.pack_end(&new_shell);
 
@@ -120,18 +143,33 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     let history_popover = gtk::Popover::builder().child(&history_scroller).build();
     let history_button = gtk::MenuButton::builder()
-        .label("History")
+        .label("[history]")
         .popover(&history_popover)
         .sensitive(false)
         .build();
+    history_popover.add_css_class("tui-popover");
+    history_button.add_css_class("tui-button");
     history_button.set_tooltip_text(Some("Scroll to a submitted prompt"));
     header.pack_end(&history_button);
 
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&split));
+    let status_bar = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    status_bar.add_css_class("tui-statusbar");
+    let shortcuts = gtk::Label::new(Some(
+        "ctrl+shift+` new   ctrl+shift+q close   ctrl+shift+\\ sidebar   ctrl+shift+[ ] sessions",
+    ));
+    shortcuts.set_xalign(0.0);
+    shortcuts.set_hexpand(true);
+    let instance = gtk::Label::new(Some(paths.name().as_str()));
+    instance.add_css_class("tui-status-accent");
+    status_bar.append(&shortcuts);
+    status_bar.append(&instance);
+    toolbar.add_bottom_bar(&status_bar);
 
     let overlay = adw::ToastOverlay::new();
+    overlay.add_css_class("tui-root");
     overlay.set_child(Some(&toolbar));
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -150,6 +188,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         history_button,
         history_list,
         history_popover,
+        top_bar: header,
+        sidebar_panel: sidebar_panel.clone(),
+        status_bar: status_bar.clone(),
         paths,
         host_binary: sibling_binary("agmux-session"),
         sessions: Rc::new(RefCell::new(HashMap::new())),
@@ -308,6 +349,15 @@ const fn session_kind_name(kind: SessionKind) -> &'static str {
         SessionKind::Codex => "codex",
         SessionKind::Claude => "claude",
         SessionKind::Custom => "custom",
+    }
+}
+
+const fn session_kind_short(kind: SessionKind) -> &'static str {
+    match kind {
+        SessionKind::Shell => "SH",
+        SessionKind::Codex => "CX",
+        SessionKind::Claude => "CL",
+        SessionKind::Custom => "EX",
     }
 }
 

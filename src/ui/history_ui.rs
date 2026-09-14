@@ -37,7 +37,7 @@ impl Workspace {
             .set_sensitive(!session.history.is_empty());
         for input in session.history.iter().rev() {
             let button = gtk::Button::with_label(input);
-            button.add_css_class("flat");
+            button.add_css_class("tui-button");
             button.set_halign(gtk::Align::Fill);
             button.set_tooltip_text(Some("Scroll the terminal to this prompt"));
 

@@ -23,15 +23,18 @@ pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, 
     let node = snapshot
         .to_node()
         .ok_or("GTK produced an empty render node")?;
-    let renderer = workspace
-        .window
-        .renderer()
-        .ok_or("application window has no renderer")?;
     let viewport = gtk::graphene::Rect::new(0.0, 0.0, width as f32, height as f32);
 
+    // A dedicated Cairo renderer keeps capture deterministic when the live window uses
+    // Vulkan or GL. GTK requires unrealize before the renderer is destroyed.
+    // https://docs.gtk.org/gsk4/class.CairoRenderer.html
+    // https://docs.gtk.org/gsk4/method.Renderer.realize.html
+    let renderer = gtk::gsk::CairoRenderer::new();
+    renderer.realize_for_display(&gtk::prelude::WidgetExt::display(&workspace.window))?;
     // GTK documents render_texture as rendering a scene graph into a GDK texture.
     // Source: https://docs.gtk.org/gsk4/method.Renderer.render_texture.html
     let texture = renderer.render_texture(&node, Some(&viewport));
+    renderer.unrealize();
     // save_to_png_bytes is the in-memory counterpart of GTK's debugging and testing PNG API.
     // Source: https://docs.gtk.org/gdk4/method.Texture.save_to_png.html
     let png = texture.save_to_png_bytes();

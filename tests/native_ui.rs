@@ -3,6 +3,7 @@
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,10 +17,14 @@ struct App {
     child: Option<Child>,
 }
 
+static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 impl App {
     fn new() -> Self {
         let directory = tempfile::tempdir().unwrap();
-        let name = InstanceName::parse(&format!("ui-test-{}", std::process::id())).unwrap();
+        let sequence = TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let name =
+            InstanceName::parse(&format!("ui-test-{}-{sequence}", std::process::id())).unwrap();
         let paths = InstancePaths::new(name, directory.path(), directory.path());
         let mut app = Self {
             directory,
@@ -164,4 +169,26 @@ fn metadata_and_child_survive_ui_restart() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn workspace_inspection_preserves_two_pane_tui_structure() {
+    let app = App::new();
+    let inspection = app.request("ui.inspect", json!({}));
+    let root = inspection["root"].as_object().unwrap();
+    let children = root["children"].as_array().unwrap();
+    let ids = children
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["top-bar", "sidebar", "terminal-pane", "status-bar"]);
+    let sidebar = children
+        .iter()
+        .find(|node| node["id"] == "sidebar")
+        .unwrap();
+    assert_eq!(sidebar["role"], "complementary");
+    assert_eq!(sidebar["children"][0]["id"], "sessions");
+    assert_eq!(children[2]["role"], "main");
+    assert!(children[3]["label"].as_str().unwrap().contains("new"));
 }

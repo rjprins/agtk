@@ -381,18 +381,40 @@ impl Workspace {
         };
         let row = gtk::ListBoxRow::new();
         row.set_widget_name(&id);
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        content.set_margin_top(10);
-        content.set_margin_bottom(10);
-        content.set_margin_start(12);
-        content.set_margin_end(12);
-        content.append(&gtk::Image::from_icon_name("utilities-terminal-symbolic"));
+        row.add_css_class("tui-session-row");
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 7);
+        content.add_css_class("tui-session-content");
+        let state_label = gtk::Label::new(Some(if record.state == SessionState::Exited {
+            "x"
+        } else {
+            "*"
+        }));
+        state_label.add_css_class("tui-state");
+        if record.state == SessionState::Exited {
+            state_label.add_css_class("tui-state-exited");
+        }
+        state_label.set_tooltip_text(Some(if record.state == SessionState::Exited {
+            "Exited"
+        } else {
+            "Running"
+        }));
+        let eof_indicator = state_label.clone();
+        terminal.connect_eof(move |_| {
+            eof_indicator.set_text("x");
+            eof_indicator.add_css_class("tui-state-exited");
+            eof_indicator.set_tooltip_text(Some("Exited"));
+        });
+        content.append(&state_label);
         let label = gtk::Label::new(Some(&name));
         label.set_xalign(0.0);
         label.set_hexpand(true);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         content.append(&label);
-        let close = gtk::Button::from_icon_name("window-close-symbolic");
-        close.add_css_class("flat");
+        let kind = gtk::Label::new(Some(session_kind_short(record.kind)));
+        kind.add_css_class("tui-kind");
+        content.append(&kind);
+        let close = gtk::Button::with_label("[x]");
+        close.add_css_class("tui-button");
         close.set_tooltip_text(Some("Close this shell session"));
         content.append(&close);
         row.set_child(Some(&content));
@@ -412,6 +434,7 @@ impl Workspace {
                 page: scroll,
                 row: row.clone(),
                 label,
+                state_label,
                 history: Vec::new(),
                 _pty: pty,
                 control,
