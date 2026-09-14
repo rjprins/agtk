@@ -1,10 +1,12 @@
 use std::env;
 use std::process::ExitCode;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use agmux_native::control::{
     ClientError, CloseSessionParams, ControlClient, ControlCommand, ControlRequest,
-    CreateSessionParams, GetTextParams, PROTOCOL_VERSION, RenameSessionParams, ResponseBody,
-    SendInputParams, SessionIdParams, SessionKind,
+    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, RenameSessionParams,
+    ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionState, WaitCondition,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
 
@@ -30,6 +32,10 @@ fn main() -> ExitCode {
             }
             ExitCode::from(EXIT_USAGE_OR_PROTOCOL)
         }
+        Err(Failure::Timeout(message)) => {
+            eprintln!("{message}");
+            ExitCode::from(EXIT_TIMEOUT)
+        }
     }
 }
 
@@ -46,6 +52,12 @@ fn run() -> Result<(), Failure> {
         InstanceName::from_environment().map_err(|error| Failure::Usage(error.to_string()))?
     };
 
+    let paths = InstancePaths::from_environment(instance);
+    let client = ControlClient::new(paths.control_socket());
+    if arguments.first().is_some_and(|argument| argument == "wait") {
+        return run_wait(&client, parse_wait(&arguments[1..])?);
+    }
+
     let command = match arguments.as_slice() {
         [command] if command == "state" => ControlCommand::AppGetState,
         [group, command] if group == "ui" && command == "inspect" => ControlCommand::UiInspect,
@@ -54,8 +66,6 @@ fn run() -> Result<(), Failure> {
             return Err(Failure::Usage(usage().to_owned()));
         }
     };
-    let paths = InstancePaths::from_environment(instance);
-    let client = ControlClient::new(paths.control_socket());
     let response = client
         .send(&ControlRequest {
             version: PROTOCOL_VERSION,
@@ -75,6 +85,179 @@ fn run() -> Result<(), Failure> {
         }
         ResponseBody::Failure(error) => Err(Failure::Server(error)),
     }
+}
+
+#[derive(Debug)]
+struct WaitOptions {
+    condition: WaitCondition,
+    timeout: Duration,
+    poll_interval: Duration,
+}
+
+fn parse_wait(arguments: &[String]) -> Result<WaitOptions, Failure> {
+    let mut session_id = None;
+    let mut selected_id = None;
+    let mut exists = false;
+    let mut text = None;
+    let mut state = None;
+    let mut lines = 200;
+    let mut timeout_ms = 5_000;
+    let mut poll_ms = 50;
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        if option == "--exists" {
+            exists = true;
+            index += 1;
+            continue;
+        }
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?
+            .clone();
+        match option {
+            "--session" => session_id = Some(value),
+            "--selected" => selected_id = Some(value),
+            "--text" => text = Some(value),
+            "--state" => state = Some(parse_session_state(&value)?),
+            "--lines" => lines = parse_bounded_u32("--lines", &value, 1, 20_000)?,
+            "--timeout-ms" => {
+                timeout_ms = parse_bounded_u64("--timeout-ms", &value, 1, 3_600_000)?;
+            }
+            "--poll-ms" => poll_ms = parse_bounded_u64("--poll-ms", &value, 1, 5_000)?,
+            _ => return Err(Failure::Usage(format!("unknown wait option: {option}"))),
+        }
+        index += 2;
+    }
+
+    let condition_count = usize::from(exists)
+        + usize::from(text.is_some())
+        + usize::from(state.is_some())
+        + usize::from(selected_id.is_some());
+    if condition_count != 1 {
+        return Err(Failure::Usage(
+            "wait requires exactly one of --exists, --text, --state, or --selected".to_owned(),
+        ));
+    }
+    let condition = if let Some(selected_id) = selected_id {
+        if session_id.is_some() {
+            return Err(Failure::Usage(
+                "--selected cannot be combined with --session".to_owned(),
+            ));
+        }
+        WaitCondition::SelectedSession(selected_id)
+    } else {
+        let session_id = session_id
+            .ok_or_else(|| Failure::Usage("wait condition requires --session".to_owned()))?;
+        if exists {
+            WaitCondition::SessionExists(session_id)
+        } else if let Some(literal) = text {
+            if literal.is_empty() {
+                return Err(Failure::Usage("--text cannot be empty".to_owned()));
+            }
+            WaitCondition::TerminalText {
+                session_id,
+                literal,
+                lines,
+            }
+        } else {
+            WaitCondition::SessionState {
+                session_id,
+                state: state.expect("condition count guarantees state"),
+            }
+        }
+    };
+
+    Ok(WaitOptions {
+        condition,
+        timeout: Duration::from_millis(timeout_ms),
+        poll_interval: Duration::from_millis(poll_ms),
+    })
+}
+
+fn run_wait(client: &ControlClient, options: WaitOptions) -> Result<(), Failure> {
+    let deadline = Instant::now() + options.timeout;
+    let mut sequence = 0_u64;
+    loop {
+        let response = client
+            .send(&ControlRequest {
+                version: PROTOCOL_VERSION,
+                id: format!("ctl-{}-wait-{sequence}", std::process::id()),
+                command: options.condition.observation(),
+            })
+            .map_err(Failure::Client)?;
+        match response.body {
+            ResponseBody::Success(result) => {
+                if options.condition.is_satisfied(&result) {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&result)
+                            .map_err(|error| Failure::Usage(error.to_string()))?
+                    );
+                    return Ok(());
+                }
+            }
+            ResponseBody::Failure(error)
+                if error.code == ErrorCode::SessionNotFound
+                    && matches!(options.condition, WaitCondition::TerminalText { .. }) => {}
+            ResponseBody::Failure(error) => return Err(Failure::Server(error)),
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(Failure::Timeout(format!(
+                "wait timed out after {} ms",
+                options.timeout.as_millis()
+            )));
+        }
+        thread::sleep(options.poll_interval.min(deadline - now));
+        sequence += 1;
+    }
+}
+
+fn parse_session_state(value: &str) -> Result<SessionState, Failure> {
+    match value {
+        "running" => Ok(SessionState::Running),
+        "busy" => Ok(SessionState::Busy),
+        "ready" => Ok(SessionState::Ready),
+        "waiting" => Ok(SessionState::Waiting),
+        "exited" => Ok(SessionState::Exited),
+        "reconnecting" => Ok(SessionState::Reconnecting),
+        _ => Err(Failure::Usage(format!("unknown session state: {value}"))),
+    }
+}
+
+fn parse_bounded_u32(
+    option: &str,
+    value: &str,
+    minimum: u32,
+    maximum: u32,
+) -> Result<u32, Failure> {
+    let parsed = value
+        .parse::<u32>()
+        .map_err(|_| Failure::Usage(format!("{option} requires an integer")))?;
+    if !(minimum..=maximum).contains(&parsed) {
+        return Err(Failure::Usage(format!(
+            "{option} must be between {minimum} and {maximum}"
+        )));
+    }
+    Ok(parsed)
+}
+
+fn parse_bounded_u64(
+    option: &str,
+    value: &str,
+    minimum: u64,
+    maximum: u64,
+) -> Result<u64, Failure> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| Failure::Usage(format!("{option} requires an integer")))?;
+    if !(minimum..=maximum).contains(&parsed) {
+        return Err(Failure::Usage(format!(
+            "{option} must be between {minimum} and {maximum}"
+        )));
+    }
+    Ok(parsed)
 }
 
 fn parse_session_command(action: &str, arguments: &[String]) -> Result<ControlCommand, Failure> {
@@ -227,7 +410,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {
@@ -251,4 +434,5 @@ enum Failure {
     Usage(String),
     Client(ClientError),
     Server(agmux_native::control::ControlError),
+    Timeout(String),
 }
