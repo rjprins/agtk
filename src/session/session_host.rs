@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::io::{self, Read};
 use std::os::fd::AsFd;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -11,7 +12,7 @@ use nix::fcntl::{FcntlArg, OFlag, fcntl};
 use nix::pty::{ForkptyResult, Winsize, forkpty};
 use nix::sys::signal::{Signal, killpg};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
-use nix::unistd::{Pid, dup, execvp};
+use nix::unistd::{Pid, dup, execvpe};
 
 use super::{ReplayBuffer, send_attachment};
 
@@ -19,6 +20,7 @@ const REPLAY_CAPACITY: usize = 1024 * 1024;
 
 pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()> {
     let command = prepare_command(command)?;
+    let environment = prepare_environment()?;
     let winsize = Winsize {
         ws_row: 30,
         ws_col: 120,
@@ -26,10 +28,10 @@ pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()
         ws_ypixel: 0,
     };
 
-    // SAFETY: the child branch calls only execvp and _exit with data prepared before fork.
+    // SAFETY: the child branch calls only execvpe and _exit with data prepared before fork.
     let fork = unsafe { forkpty(&winsize, None) }.map_err(io::Error::from)?;
     let ForkptyResult::Parent { child, master } = fork else {
-        let _ = execvp(&command[0], &command);
+        let _ = execvpe(&command[0], &command, &environment);
         // SAFETY: exec failed and _exit is async-signal-safe.
         unsafe { libc::_exit(127) }
     };
@@ -69,6 +71,26 @@ pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()
             Err(error) => return Err(error),
         }
     }
+}
+
+fn prepare_environment() -> io::Result<Vec<CString>> {
+    let mut environment = std::env::vars_os()
+        .filter(|(key, _)| !matches!(key.as_bytes(), b"TERM" | b"COLORTERM"))
+        .map(|(key, value)| {
+            let mut entry = key.as_bytes().to_vec();
+            entry.push(b'=');
+            entry.extend_from_slice(value.as_bytes());
+            CString::new(entry).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "environment contains a NUL byte",
+                )
+            })
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    environment.push(CString::new("TERM=xterm-256color").expect("static environment variable"));
+    environment.push(CString::new("COLORTERM=truecolor").expect("static environment variable"));
+    Ok(environment)
 }
 
 fn prepare_command(command: &[String]) -> io::Result<Vec<CString>> {

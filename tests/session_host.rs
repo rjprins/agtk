@@ -15,6 +15,7 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
     let directory = tempfile::tempdir().expect("create runtime directory");
     let socket_path = directory.path().join("session.sock");
     let script = concat!(
+        "printf 'env:%s:%s\\n' \"$TERM\" \"$COLORTERM\"; ",
         "printf 'ready\\n'; ",
         "IFS= read -r first; printf 'got:%s\\n' \"$first\"; ",
         "sleep 0.2; printf 'detached\\n'; ",
@@ -35,9 +36,11 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
     let first_control = UnixStream::connect(&socket_path).expect("connect first client");
     let first_attachment = receive_attachment(&first_control).expect("attach first client");
     let mut first_pty = File::from(first_attachment.pty);
-    if !String::from_utf8_lossy(&first_attachment.replay).contains("ready") {
-        assert!(read_until(&mut first_pty, "ready", Duration::from_secs(2)).contains("ready"));
+    let mut initial_output = String::from_utf8_lossy(&first_attachment.replay).into_owned();
+    if !initial_output.contains("ready") {
+        initial_output.push_str(&read_until(&mut first_pty, "ready", Duration::from_secs(2)));
     }
+    assert!(initial_output.contains("env:xterm-256color:truecolor"));
     first_pty.write_all(b"one\n").expect("write first input");
     assert!(read_until(&mut first_pty, "got:one", Duration::from_secs(2)).contains("got:one"));
 
