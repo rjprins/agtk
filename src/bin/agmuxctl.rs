@@ -46,9 +46,10 @@ fn run() -> Result<(), Failure> {
 
     let command = match arguments.as_slice() {
         [command] if command == "state" => ControlCommand::AppGetState,
+        [group, command] if group == "ui" && command == "inspect" => ControlCommand::UiInspect,
         _ => {
             return Err(Failure::Usage(
-                "usage: agmuxctl [--instance NAME] state".to_owned(),
+                "usage: agmuxctl [--instance NAME] <state|ui inspect>".to_owned(),
             ));
         }
     };

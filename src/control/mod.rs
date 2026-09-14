@@ -12,6 +12,6 @@ pub use protocol::{
 };
 pub use server::{ControlServer, PendingRequest};
 pub use state::{
-    AppState, AttentionSummary, ProjectSummary, SessionState, SessionSummary, WindowState,
-    WorktreeGroupSummary,
+    AppState, AttentionSummary, Bounds, ProjectSummary, SessionState, SessionSummary, UiInspection,
+    UiNode, WindowState, WorktreeGroupSummary,
 };

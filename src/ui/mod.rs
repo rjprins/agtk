@@ -15,8 +15,9 @@ use gtk::pango::FontDescription;
 use vte::prelude::*;
 
 use crate::control::{
-    AppState, AttentionSummary, ControlCommand, ControlResponse, ControlServer, ErrorCode,
-    PROTOCOL_VERSION, PendingRequest, SessionKind, SessionState, SessionSummary, WindowState,
+    AppState, AttentionSummary, Bounds, ControlCommand, ControlResponse, ControlServer, ErrorCode,
+    PROTOCOL_VERSION, PendingRequest, SessionKind, SessionState, SessionSummary, UiInspection,
+    UiNode, WindowState,
 };
 use crate::history::{InputTracker, history_needle};
 use crate::instance::InstancePaths;
@@ -24,6 +25,7 @@ use crate::session::receive_attachment;
 use crate::terminal_text::cleanup_copied_text;
 
 const EMPTY_PAGE: &str = "empty";
+const MAX_INSPECTED_SESSIONS: usize = 500;
 const PCRE2_LITERAL: u32 = 0x0200_0000;
 const PCRE2_UTF: u32 = 0x0008_0000;
 
@@ -33,6 +35,7 @@ struct Workspace {
     list: gtk::ListBox,
     stack: gtk::Stack,
     overlay: adw::ToastOverlay,
+    new_shell_button: gtk::Button,
     history_button: gtk::MenuButton,
     history_list: gtk::Box,
     history_popover: gtk::Popover,
@@ -131,6 +134,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         list: list.clone(),
         stack: stack.clone(),
         overlay,
+        new_shell_button: new_shell.clone(),
         history_button,
         history_list,
         history_popover,
@@ -336,6 +340,15 @@ impl Workspace {
                     Some(serde_json::json!({ "reason": error.to_string() })),
                 ),
             },
+            ControlCommand::UiInspect => match serde_json::to_value(self.ui_inspection()) {
+                Ok(inspection) => ControlResponse::success(id, inspection),
+                Err(error) => ControlResponse::failure(
+                    id,
+                    ErrorCode::InternalError,
+                    "Could not serialize UI inspection",
+                    Some(serde_json::json!({ "reason": error.to_string() })),
+                ),
+            },
             command => ControlResponse::failure(
                 id,
                 ErrorCode::NotImplemented,
@@ -375,6 +388,82 @@ impl Workspace {
             worktree_groups: Vec::new(),
             sessions,
             attention: AttentionSummary { count: 0 },
+        }
+    }
+
+    fn ui_inspection(&self) -> UiInspection {
+        let selected_session_id = self.selected_session_id();
+        let sessions = self.sessions.borrow();
+        let mut session_ids = sessions.keys().cloned().collect::<Vec<_>>();
+        session_ids.sort();
+        let is_truncated = session_ids.len() > MAX_INSPECTED_SESSIONS;
+
+        let session_nodes = session_ids
+            .into_iter()
+            .take(MAX_INSPECTED_SESSIONS)
+            .filter_map(|id| {
+                let session = sessions.get(&id)?;
+                Some(UiNode {
+                    id: format!("session-{id}"),
+                    role: "terminal-session".to_owned(),
+                    label: Some(session.name.clone()),
+                    is_visible: session.row.is_visible(),
+                    is_enabled: session.row.is_sensitive(),
+                    is_selected: selected_session_id.as_deref() == Some(id.as_str()),
+                    bounds: widget_bounds(&session.row, &self.window),
+                    children: Vec::new(),
+                })
+            })
+            .collect();
+
+        UiInspection {
+            root: UiNode {
+                id: "main-window".to_owned(),
+                role: "window".to_owned(),
+                label: Some("agmux native".to_owned()),
+                is_visible: self.window.is_visible(),
+                is_enabled: self.window.is_sensitive(),
+                is_selected: false,
+                bounds: Bounds {
+                    x: 0.0,
+                    y: 0.0,
+                    width: self.window.width() as f32,
+                    height: self.window.height() as f32,
+                },
+                children: vec![
+                    UiNode {
+                        id: "new-shell".to_owned(),
+                        role: "button".to_owned(),
+                        label: Some("New shell".to_owned()),
+                        is_visible: self.new_shell_button.is_visible(),
+                        is_enabled: self.new_shell_button.is_sensitive(),
+                        is_selected: false,
+                        bounds: widget_bounds(&self.new_shell_button, &self.window),
+                        children: Vec::new(),
+                    },
+                    UiNode {
+                        id: "history".to_owned(),
+                        role: "button".to_owned(),
+                        label: Some("History".to_owned()),
+                        is_visible: self.history_button.is_visible(),
+                        is_enabled: self.history_button.is_sensitive(),
+                        is_selected: self.history_popover.is_visible(),
+                        bounds: widget_bounds(&self.history_button, &self.window),
+                        children: Vec::new(),
+                    },
+                    UiNode {
+                        id: "sessions".to_owned(),
+                        role: "list".to_owned(),
+                        label: Some("Sessions".to_owned()),
+                        is_visible: self.list.is_visible(),
+                        is_enabled: self.list.is_sensitive(),
+                        is_selected: false,
+                        bounds: widget_bounds(&self.list, &self.window),
+                        children: session_nodes,
+                    },
+                ],
+            },
+            is_truncated,
         }
     }
 
@@ -476,6 +565,18 @@ impl Workspace {
 
     fn show_error(&self, message: &str) {
         self.overlay.add_toast(adw::Toast::new(message));
+    }
+}
+
+fn widget_bounds(widget: &impl IsA<gtk::Widget>, window: &impl IsA<gtk::Widget>) -> Bounds {
+    let Some(bounds) = widget.compute_bounds(window) else {
+        return Bounds::default();
+    };
+    Bounds {
+        x: bounds.x(),
+        y: bounds.y(),
+        width: bounds.width(),
+        height: bounds.height(),
     }
 }
 

@@ -65,3 +65,32 @@ pub struct SessionSummary {
 pub struct AttentionSummary {
     pub count: usize,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiInspection {
+    pub root: UiNode,
+    pub is_truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiNode {
+    pub id: String,
+    pub role: String,
+    pub label: Option<String>,
+    pub is_visible: bool,
+    pub is_enabled: bool,
+    pub is_selected: bool,
+    pub bounds: Bounds,
+    pub children: Vec<UiNode>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bounds {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}

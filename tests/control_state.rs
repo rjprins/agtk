@@ -1,5 +1,6 @@
 use agmux_native::control::{
-    AppState, AttentionSummary, SessionKind, SessionState, SessionSummary, WindowState,
+    AppState, AttentionSummary, Bounds, SessionKind, SessionState, SessionSummary, UiInspection,
+    UiNode, WindowState,
 };
 
 #[test]
@@ -45,4 +46,42 @@ fn application_state_has_a_stable_machine_readable_shape() {
             "attention": { "count": 0 }
         })
     );
+}
+
+#[test]
+fn ui_inspection_describes_controls_without_terminal_or_clipboard_content() {
+    let inspection = UiInspection {
+        root: UiNode {
+            id: "main-window".to_owned(),
+            role: "window".to_owned(),
+            label: Some("agmux native".to_owned()),
+            is_visible: true,
+            is_enabled: true,
+            is_selected: false,
+            bounds: Bounds {
+                x: 0.0,
+                y: 0.0,
+                width: 1200.0,
+                height: 800.0,
+            },
+            children: vec![UiNode {
+                id: "new-shell".to_owned(),
+                role: "button".to_owned(),
+                label: Some("New shell".to_owned()),
+                is_visible: true,
+                is_enabled: true,
+                is_selected: false,
+                bounds: Bounds::default(),
+                children: Vec::new(),
+            }],
+        },
+        is_truncated: false,
+    };
+
+    let json = serde_json::to_value(inspection).expect("serialize UI inspection");
+
+    assert_eq!(json["root"]["role"], "window");
+    assert_eq!(json["root"]["children"][0]["id"], "new-shell");
+    assert_eq!(json["isTruncated"], false);
+    assert!(json.to_string().find("terminal contents").is_none());
 }
