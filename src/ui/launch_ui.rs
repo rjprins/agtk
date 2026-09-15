@@ -239,7 +239,7 @@ impl Workspace {
     }
 
     pub(super) fn refresh_launch_worktree_choices(&self) {
-        let root = self.launch_project.text().trim().to_owned();
+        let root = launch_path_text(&self.launch_project).unwrap_or_default();
         let sequence = self.launch_choice_sequence.get().wrapping_add(1);
         self.launch_choice_sequence.set(sequence);
         if root.is_empty() {
@@ -301,7 +301,7 @@ impl Workspace {
             move || manager.list(Path::new(&worker_root), &live_paths),
             move |workspace, result| {
                 if workspace.launch_choice_sequence.get() != sequence
-                    || workspace.launch_project.text().trim() != root
+                    || launch_path_text(&workspace.launch_project).as_deref() != Some(root.as_str())
                 {
                     return;
                 }
@@ -535,7 +535,7 @@ impl Workspace {
     }
 
     fn refresh_launch_base_branches(&self) {
-        let root = self.launch_project.text().trim().to_owned();
+        let root = launch_path_text(&self.launch_project).unwrap_or_default();
         if root.is_empty() {
             replace_string_list(&self.launch_base_branch_choices, &[]);
             self.launch_base_branch.set_placeholder_text(Some("main"));
@@ -750,7 +750,11 @@ fn replace_completion_items(
 }
 
 fn optional_path(entry: &gtk::Entry) -> Option<PathBuf> {
-    optional_text(entry).map(PathBuf::from)
+    optional_text(entry).map(|path| launch_model::expand_user_path(&path))
+}
+
+fn launch_path_text(entry: &gtk::Entry) -> Option<String> {
+    optional_path(entry).map(|path| path.to_string_lossy().into_owned())
 }
 
 fn optional_text(entry: &gtk::Entry) -> Option<String> {

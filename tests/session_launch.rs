@@ -28,6 +28,28 @@ fn custom_session_plan_preserves_validated_launch_details() {
 }
 
 #[test]
+fn session_plan_expands_home_shorthand_for_launch_directories() {
+    let home = std::env::var_os("HOME").expect("HOME is set for launch path expansion");
+    let home = std::fs::canonicalize(home).expect("home directory is accessible");
+    let params = CreateSessionParams {
+        kind: SessionKind::Custom,
+        command: Some("/bin/sh".to_owned()),
+        args: Vec::new(),
+        cwd: Some(PathBuf::from("~")),
+        name: None,
+        project_root: Some(PathBuf::from("~")),
+        worktree_path: Some(PathBuf::from("~")),
+        initial_input: None,
+    };
+
+    let plan = SessionLaunchPlan::new(params).expect("home shorthand is a valid directory");
+
+    assert_eq!(plan.cwd.as_deref(), Some(home.as_path()));
+    assert_eq!(plan.project_root.as_deref(), Some(home.as_path()));
+    assert_eq!(plan.worktree_path.as_deref(), Some(home.as_path()));
+}
+
+#[test]
 fn session_plan_rejects_a_missing_working_directory() {
     let params = CreateSessionParams {
         kind: SessionKind::Shell,

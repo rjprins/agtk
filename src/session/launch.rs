@@ -78,6 +78,7 @@ fn canonical_directory(
     label: &str,
 ) -> Result<Option<PathBuf>, LaunchPlanError> {
     path.map(|path| {
+        let path = crate::launch_model::expand_user_path(path.to_string_lossy().as_ref());
         if !path.is_dir() {
             return Err(LaunchPlanError(format!(
                 "{label} does not exist or is not a directory: {}",

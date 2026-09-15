@@ -46,6 +46,20 @@ fn path_completions_only_return_matching_directories() {
         path_completions(&prefix),
         vec![temp.path().join("alpha").to_string_lossy()]
     );
+
+    let home = PathBuf::from(std::env::var_os("HOME").expect("HOME is set for tilde completion"));
+    let home_temp = tempfile::tempdir_in(&home).expect("create home-relative completion root");
+    std::fs::create_dir(home_temp.path().join("alpha")).expect("alpha directory");
+    let relative = home_temp
+        .path()
+        .strip_prefix(&home)
+        .expect("temporary path is below HOME")
+        .to_string_lossy();
+    let tilde_prefix = format!("~/{relative}/a");
+    assert_eq!(
+        path_completions(&tilde_prefix),
+        vec![format!("~/{relative}/alpha")]
+    );
 }
 
 #[test]
@@ -63,6 +77,15 @@ fn empty_worktree_selection_uses_the_project_directory() {
     assert_eq!(
         agmux_native::launch_model::effective_worktree_path(None, None),
         None
+    );
+}
+
+#[test]
+fn launch_paths_expand_home_directory_shorthand() {
+    let home = std::env::var_os("HOME").expect("HOME is set for launch path expansion");
+    assert_eq!(
+        agmux_native::launch_model::expand_user_path("~/fastapi-restly"),
+        PathBuf::from(home).join("fastapi-restly")
     );
 }
 

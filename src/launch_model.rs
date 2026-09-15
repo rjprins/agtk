@@ -25,6 +25,16 @@ pub fn effective_worktree_path(
         .or_else(|| project_root.map(Path::to_path_buf))
 }
 
+/// Expand the shell-style home shorthand accepted by the launch fields.
+pub fn expand_user_path(value: &str) -> PathBuf {
+    if (value == "~" || value.starts_with("~/"))
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(value.strip_prefix("~/").unwrap_or_default());
+    }
+    PathBuf::from(value)
+}
+
 pub fn worktree_choices(
     project_root: &str,
     worktrees: impl IntoIterator<Item = (String, String)>,
@@ -78,6 +88,7 @@ pub fn path_completions(prefix: &str) -> Vec<String> {
         return Vec::new();
     }
     let expanded = expand_home(prefix);
+    let preserve_tilde = prefix.starts_with('~');
     let (parent, fragment) = match expanded.rsplit_once('/') {
         Some((parent, fragment)) if !parent.is_empty() => (PathBuf::from(parent), fragment),
         _ => (PathBuf::from("."), expanded.as_str()),
@@ -96,6 +107,20 @@ pub fn path_completions(prefix: &str) -> Vec<String> {
         .collect::<Vec<_>>();
     completions.sort();
     completions
+        .into_iter()
+        .map(|path| {
+            if preserve_tilde && let Some(home) = std::env::var_os("HOME") {
+                let home = PathBuf::from(home).to_string_lossy().into_owned();
+                if path == home {
+                    return "~".to_owned();
+                }
+                if let Some(suffix) = path.strip_prefix(&(home + "/")) {
+                    return format!("~/{suffix}");
+                }
+            }
+            path
+        })
+        .collect()
 }
 
 pub fn provider_args(
@@ -151,13 +176,5 @@ fn project_name(path: &str) -> String {
 }
 
 fn expand_home(value: &str) -> String {
-    if (value == "~" || value.starts_with("~/"))
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home)
-            .join(value.strip_prefix("~/").unwrap_or_default())
-            .to_string_lossy()
-            .into_owned();
-    }
-    value.to_owned()
+    expand_user_path(value).to_string_lossy().into_owned()
 }
