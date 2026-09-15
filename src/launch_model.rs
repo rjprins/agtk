@@ -57,6 +57,13 @@ pub fn directory_choices(paths: impl IntoIterator<Item = PathBuf>) -> Vec<Choice
 }
 
 pub fn path_completions(prefix: &str) -> Vec<String> {
+    if !(prefix.starts_with('/')
+        || prefix.starts_with('~')
+        || prefix.starts_with('.')
+        || prefix.contains('/'))
+    {
+        return Vec::new();
+    }
     let expanded = expand_home(prefix);
     let (parent, fragment) = match expanded.rsplit_once('/') {
         Some((parent, fragment)) if !parent.is_empty() => (PathBuf::from(parent), fragment),

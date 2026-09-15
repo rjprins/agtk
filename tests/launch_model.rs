@@ -35,6 +35,7 @@ fn directory_choices_are_sorted_by_project_name() {
 
 #[test]
 fn path_completions_only_return_matching_directories() {
+    assert!(path_completions("alpha").is_empty());
     let temp = tempfile::tempdir().expect("temp directory");
     std::fs::create_dir(temp.path().join("alpha")).expect("alpha directory");
     std::fs::create_dir(temp.path().join("beta")).expect("beta directory");
