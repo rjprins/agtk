@@ -547,6 +547,8 @@ impl Workspace {
         row.add_css_class("tui-session-row");
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 7);
         content.add_css_class("tui-session-content");
+        let kind = provider_icons::session_icon(record.kind, &record.program);
+        content.append(&kind);
         let state_label = gtk::Label::new(Some(agents_ui::session_state_indicator(record.state)));
         state_label.add_css_class("tui-state");
         if record.state == SessionState::Exited {
@@ -593,8 +595,6 @@ impl Workspace {
             details.append(&worktree_label);
         }
         content.append(&details);
-        let kind = provider_icons::session_icon(record.kind, &record.program);
-        content.append(&kind);
         let edit = gtk::Button::builder()
             .icon_name("document-edit-symbolic")
             .build();
