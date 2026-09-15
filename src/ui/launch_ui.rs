@@ -68,6 +68,7 @@ impl Workspace {
         let flags = self.current_launch_flags(kind);
         let mut args = raw_args.clone();
         args.extend(flags_to_arguments(kind, &flags));
+        let launch_args = args;
         let creating_worktree = self
             .launch_branch
             .parent()
@@ -107,7 +108,7 @@ impl Workspace {
                         CreateSessionParams {
                             kind,
                             command: None,
-                            args: preferences.args,
+                            args: launch_args,
                             cwd: Some(created.path.clone()),
                             name,
                             project_root: preferences.project_root,
@@ -127,7 +128,7 @@ impl Workspace {
                 CreateSessionParams {
                     kind,
                     command: None,
-                    args: preferences.args,
+                    args: launch_args,
                     cwd: preferences.cwd,
                     name,
                     project_root: preferences.project_root,
