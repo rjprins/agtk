@@ -105,6 +105,26 @@ const TUI_CSS: &str = r#"
 .tui-state-exited { color: @danger; }
 .tui-kind { color: @muted; font-size: 11px; }
 
+.tui-group-row { background: @panel; border-top: 1px solid @line; }
+.tui-group-button {
+  min-height: 27px;
+  padding: 3px 7px;
+  color: @text;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-weight: bold;
+}
+.tui-group-button:hover { color: @background; background: @accent; }
+.tui-subgroup-row {
+  padding: 3px 8px;
+  color: @muted;
+  background: @background;
+  font-size: 11px;
+  border-bottom: 1px solid @line;
+}
+
 .tui-main { background: @background; }
 .tui-empty { color: @muted; }
 .tui-empty-title { color: @text; font-weight: bold; }
@@ -124,6 +144,14 @@ const TUI_CSS: &str = r#"
   border: 1px solid @line;
   border-radius: 0;
   box-shadow: none;
+}
+
+.tui-surface {
+  color: @text;
+  background: @panel;
+  border: 1px solid @line;
+  font-family: monospace;
+  font-size: 13px;
 }
 
 .tui-setting-row { padding: 2px 7px; }

@@ -29,8 +29,18 @@ fn application_state_has_a_stable_machine_readable_shape() {
             width: 1200,
             height: 800,
         },
-        projects: Vec::new(),
-        worktree_groups: Vec::new(),
+        projects: vec![agmux_native::control::ProjectSummary {
+            root: "/work/agmux".to_owned(),
+            name: "agmux".to_owned(),
+            is_pinned: true,
+            is_collapsed: false,
+        }],
+        worktree_groups: vec![agmux_native::control::WorktreeGroupSummary {
+            project_root: "/work/agmux".to_owned(),
+            path: "/work/agmux-feature".to_owned(),
+            branch: "feature".to_owned(),
+            session_ids: vec!["shell-1".to_owned()],
+        }],
         sessions: vec![SessionSummary {
             cwd: None,
             project_root: None,
@@ -71,8 +81,18 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 "isActive": true
             }],
             "window": { "width": 1200, "height": 800 },
-            "projects": [],
-            "worktreeGroups": [],
+            "projects": [{
+                "root": "/work/agmux",
+                "name": "agmux",
+                "isPinned": true,
+                "isCollapsed": false
+            }],
+            "worktreeGroups": [{
+                "projectRoot": "/work/agmux",
+                "path": "/work/agmux-feature",
+                "branch": "feature",
+                "sessionIds": ["shell-1"]
+            }],
             "sessions": [{
                 "id": "shell-1",
                 "name": "Shell 1",

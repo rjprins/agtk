@@ -8,8 +8,9 @@ pub use client::{ClientError, ControlClient};
 pub use protocol::{
     AppearanceSetParams, CloseSessionParams, ControlCommand, ControlError, ControlRequest,
     ControlResponse, CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION,
-    RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind,
-    ShortcutSetParams, decode_request, decode_response, encode_request, encode_response,
+    ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams,
+    SessionKind, ShortcutSetParams, UiShowParams, UiSurface, decode_request, decode_response,
+    encode_request, encode_response,
 };
 pub use server::{ControlServer, PendingRequest};
 pub use state::{

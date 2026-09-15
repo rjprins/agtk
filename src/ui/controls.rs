@@ -36,56 +36,32 @@ impl Workspace {
             self.set_shortcut(params.clone(), Some(pending));
             return;
         }
+        if let ControlCommand::ProjectSet(params) = &pending.request.command {
+            self.set_project_preferences(
+                params.root.to_string_lossy().to_string(),
+                params.is_pinned,
+                params.is_collapsed,
+                Some(pending),
+            );
+            return;
+        }
         if let ControlCommand::SessionClose(params) = &pending.request.command
             && self.sessions.borrow().contains_key(&params.session_id)
         {
             self.stop_session(&params.session_id.clone(), Some(pending));
             return;
         }
-        if let ControlCommand::SessionRename(params) = &pending.request.command {
-            let record = self
-                .sessions
-                .borrow()
-                .get(&params.session_id)
-                .map(|s| s.record.clone());
-            if let Some(mut record) = record {
-                record.name.clone_from(&params.name);
-                let updated = record.clone();
-                let store = self.store.borrow().clone().expect("workspace loaded");
-                self.run_io(
-                    move || store.save_session(&record),
-                    move |workspace, result| match result {
-                        Ok(()) => {
-                            if let Some(session) =
-                                workspace.sessions.borrow_mut().get_mut(&updated.id)
-                            {
-                                session.record.name = updated.name.clone();
-                                session.label.set_text(&updated.name);
-                            }
-                            let summary = workspace
-                                .session_summary(&updated.id)
-                                .and_then(|s| serde_json::to_value(s).map_err(|e| e.to_string()));
-                            match summary {
-                                Ok(summary) => {
-                                    let id = pending.request.id.clone();
-                                    let _ = pending.respond(ControlResponse::success(id, summary));
-                                }
-                                Err(error) => workspace.report_launch_failure(
-                                    Some(pending),
-                                    "Could not describe session",
-                                    error,
-                                ),
-                            }
-                        }
-                        Err(error) => workspace.report_launch_failure(
-                            Some(pending),
-                            "Could not rename session",
-                            error.to_string(),
-                        ),
-                    },
-                );
-                return;
+        let rename = match &pending.request.command {
+            ControlCommand::SessionRename(params) => {
+                Some((params.session_id.clone(), params.name.clone()))
             }
+            _ => None,
+        };
+        if let Some((session_id, name)) = rename
+            && self.sessions.borrow().contains_key(&session_id)
+        {
+            self.rename_session(&session_id, name, Some(pending));
+            return;
         }
 
         let id = pending.request.id.clone();
@@ -119,6 +95,42 @@ impl Workspace {
                     Some(serde_json::json!({ "reason": error.to_string() })),
                 ),
             },
+            ControlCommand::UiShow(params) => {
+                let shown = match params.surface {
+                    UiSurface::Launch => {
+                        self.launch_popover.set_autohide(false);
+                        self.launch_popover.popup();
+                        true
+                    }
+                    UiSurface::Appearance => {
+                        self.theme_popover.set_autohide(false);
+                        self.theme_popover.popup();
+                        true
+                    }
+                    UiSurface::Shortcuts => {
+                        self.shortcut_popover.set_autohide(false);
+                        self.shortcut_popover.popup();
+                        true
+                    }
+                    UiSurface::History if self.history_button.is_sensitive() => {
+                        self.history_popover.set_autohide(false);
+                        self.history_popover.popup();
+                        true
+                    }
+                    UiSurface::History => false,
+                    UiSurface::Search if self.search_button.is_sensitive() => {
+                        self.search_popover.set_autohide(false);
+                        self.search_popover.popup();
+                        self.search_entry.grab_focus();
+                        true
+                    }
+                    UiSurface::Search => false,
+                };
+                ControlResponse::success(
+                    id,
+                    serde_json::json!({ "surface": params.surface, "shown": shown }),
+                )
+            }
             ControlCommand::SessionGetText(params) => {
                 let sessions = self.sessions.borrow();
                 match sessions.get(&params.session_id) {
@@ -216,7 +228,8 @@ impl Workspace {
             }
             ControlCommand::SessionCreate(_)
             | ControlCommand::AppearanceSet(_)
-            | ControlCommand::ShortcutSet(_) => {
+            | ControlCommand::ShortcutSet(_)
+            | ControlCommand::ProjectSet(_) => {
                 unreachable!("asynchronous command handled above")
             }
         };

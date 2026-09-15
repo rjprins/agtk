@@ -20,12 +20,14 @@ use crate::control::{
     AppState, AppearanceSetParams, AppearanceSummary, AttentionSummary, Bounds, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, ErrorCode, PROTOCOL_VERSION,
     PendingRequest, SessionKind, SessionState, SessionSummary, ShortcutSetParams, ShortcutSummary,
-    TextSnapshot, UiInspection, UiNode, WindowState,
+    TextSnapshot, UiInspection, UiNode, UiSurface, WindowState,
 };
 use crate::history::{InputTracker, history_needle};
 use crate::instance::InstancePaths;
 use crate::io_worker::IoWorker;
+use crate::launch_preferences::QuickLaunchPreferences;
 use crate::persist::{PersistResult, SessionRecord, Store};
+use crate::projects::ProjectPreferences;
 use crate::session::{SessionLaunchPlan, receive_attachment};
 use crate::shortcuts::{ShortcutAction, ShortcutPreferences};
 use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
@@ -35,6 +37,9 @@ mod capture;
 mod controls;
 mod history_ui;
 mod inspection;
+mod launch_ui;
+mod projects_ui;
+mod search_ui;
 mod sessions;
 mod shortcuts_ui;
 mod style;
@@ -52,9 +57,20 @@ struct Workspace {
     stack: gtk::Stack,
     overlay: adw::ToastOverlay,
     new_shell_button: gtk::Button,
+    launch_button: gtk::MenuButton,
+    launch_popover: gtk::Popover,
+    launch_cwd: gtk::Entry,
+    launch_project: gtk::Entry,
+    launch_worktree: gtk::Entry,
+    launch_name: gtk::Entry,
+    launch_args: gtk::Entry,
+    launch_prompt: gtk::Entry,
     history_button: gtk::MenuButton,
     history_list: gtk::Box,
     history_popover: gtk::Popover,
+    search_button: gtk::MenuButton,
+    search_popover: gtk::Popover,
+    search_entry: gtk::Entry,
     theme_button: gtk::MenuButton,
     theme_popover: gtk::Popover,
     follow_system_toggle: gtk::CheckButton,
@@ -68,6 +84,7 @@ struct Workspace {
     paths: InstancePaths,
     host_binary: PathBuf,
     sessions: Rc<RefCell<HashMap<String, SessionView>>>,
+    selected_session: Rc<RefCell<Option<String>>>,
     sequence: Rc<Cell<u64>>,
     control_server: Rc<RefCell<Option<ControlServer>>>,
     io: IoWorker,
@@ -76,6 +93,8 @@ struct Workspace {
     chrome_style: style::ChromeStyle,
     style_manager: adw::StyleManager,
     shortcuts: Rc<RefCell<ShortcutPreferences>>,
+    projects: Rc<RefCell<ProjectPreferences>>,
+    quick_launch: Rc<RefCell<QuickLaunchPreferences>>,
 }
 
 struct SessionView {
@@ -83,7 +102,7 @@ struct SessionView {
     terminal: vte::Terminal,
     page: gtk::ScrolledWindow,
     row: gtk::ListBoxRow,
-    label: gtk::Label,
+    label: gtk::EditableLabel,
     state_label: gtk::Label,
     history: Vec<String>,
     _pty: Option<vte::Pty>,
@@ -153,7 +172,57 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     new_shell.set_tooltip_text(Some("Start a shell session"));
     header.pack_end(&new_shell);
 
+    let launch_form = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    launch_form.add_css_class("tui-surface");
+    launch_form.set_margin_top(6);
+    launch_form.set_margin_bottom(6);
+    launch_form.set_margin_start(6);
+    launch_form.set_margin_end(6);
+    let launch_heading = gtk::Label::new(Some("QUICK LAUNCH"));
+    launch_heading.set_xalign(0.0);
+    launch_heading.add_css_class("tui-sidebar-heading");
+    launch_form.append(&launch_heading);
+    let launch_cwd = launch_entry("Working directory", "cwd");
+    let launch_project = launch_entry("Project root", "project root (optional)");
+    let launch_worktree = launch_entry("Worktree", "worktree path (optional)");
+    let launch_name = launch_entry("Name", "session name (optional)");
+    let launch_args = launch_entry(
+        "Arguments",
+        "JSON array, for example [\"--model\",\"opus\"]",
+    );
+    let launch_prompt = launch_entry("Initial input", "initial prompt (optional)");
+    for row in [
+        &launch_cwd.0,
+        &launch_project.0,
+        &launch_worktree.0,
+        &launch_name.0,
+        &launch_args.0,
+        &launch_prompt.0,
+    ] {
+        launch_form.append(row);
+    }
+    let launch_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let launch_shell = gtk::Button::with_label("[shell]");
+    let launch_codex = gtk::Button::with_label("[codex]");
+    let launch_claude = gtk::Button::with_label("[claude]");
+    for button in [&launch_shell, &launch_codex, &launch_claude] {
+        button.add_css_class("tui-button");
+        launch_actions.append(button);
+    }
+    launch_form.append(&launch_actions);
+    let launch_popover = gtk::Popover::builder().child(&launch_form).build();
+    launch_popover.add_css_class("tui-popover");
+    let launch_button = gtk::MenuButton::builder()
+        .label("[launch]")
+        .popover(&launch_popover)
+        .sensitive(false)
+        .build();
+    launch_button.add_css_class("tui-button");
+    launch_button.set_tooltip_text(Some("Launch a shell, Codex, or Claude session"));
+    header.pack_end(&launch_button);
+
     let history_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    history_list.add_css_class("tui-surface");
     history_list.set_margin_top(6);
     history_list.set_margin_bottom(6);
     history_list.set_margin_start(6);
@@ -175,7 +244,37 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     history_button.set_tooltip_text(Some("Scroll to a submitted prompt"));
     header.pack_end(&history_button);
 
+    let search_surface = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    search_surface.add_css_class("tui-surface");
+    search_surface.set_margin_top(5);
+    search_surface.set_margin_bottom(5);
+    search_surface.set_margin_start(5);
+    search_surface.set_margin_end(5);
+    let search_entry = gtk::Entry::builder()
+        .placeholder_text("Find literal text")
+        .width_chars(36)
+        .build();
+    search_entry.add_css_class("tui-setting-entry");
+    search_surface.append(&search_entry);
+    let search_previous = gtk::Button::with_label("[prev]");
+    search_previous.add_css_class("tui-button");
+    search_surface.append(&search_previous);
+    let search_next = gtk::Button::with_label("[next]");
+    search_next.add_css_class("tui-button");
+    search_surface.append(&search_next);
+    let search_popover = gtk::Popover::builder().child(&search_surface).build();
+    search_popover.add_css_class("tui-popover");
+    let search_button = gtk::MenuButton::builder()
+        .label("[search]")
+        .popover(&search_popover)
+        .sensitive(false)
+        .build();
+    search_button.add_css_class("tui-button");
+    search_button.set_tooltip_text(Some("Search selected terminal scrollback"));
+    header.pack_end(&search_button);
+
     let theme_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    theme_list.add_css_class("tui-surface");
     theme_list.set_margin_top(5);
     theme_list.set_margin_bottom(5);
     theme_list.set_margin_start(5);
@@ -223,6 +322,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     header.pack_end(&theme_button);
 
     let shortcut_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    shortcut_list.add_css_class("tui-surface");
     shortcut_list.set_margin_top(5);
     shortcut_list.set_margin_bottom(5);
     shortcut_list.set_margin_start(5);
@@ -303,9 +403,20 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         stack: stack.clone(),
         overlay,
         new_shell_button: new_shell.clone(),
+        launch_button,
+        launch_popover,
+        launch_cwd: launch_cwd.1,
+        launch_project: launch_project.1,
+        launch_worktree: launch_worktree.1,
+        launch_name: launch_name.1,
+        launch_args: launch_args.1,
+        launch_prompt: launch_prompt.1,
         history_button,
         history_list,
         history_popover,
+        search_button,
+        search_popover,
+        search_entry: search_entry.clone(),
         theme_button,
         theme_popover,
         follow_system_toggle: follow_system_toggle.clone(),
@@ -319,6 +430,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         paths,
         host_binary: sibling_binary("agmux-session"),
         sessions: Rc::new(RefCell::new(HashMap::new())),
+        selected_session: Rc::new(RefCell::new(None)),
         sequence: Rc::new(Cell::new(0)),
         control_server: Rc::new(RefCell::new(None)),
         io: IoWorker::default(),
@@ -327,22 +439,45 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         chrome_style,
         style_manager: style_manager.clone(),
         shortcuts: Rc::new(RefCell::new(ShortcutPreferences::default())),
+        projects: Rc::new(RefCell::new(ProjectPreferences::default())),
+        quick_launch: Rc::new(RefCell::new(QuickLaunchPreferences::default())),
     };
 
     let selected_workspace = workspace.clone();
     list.connect_row_selected(move |_, row| {
         let Some(row) = row else { return };
         let id = row.widget_name();
+        selected_workspace
+            .selected_session
+            .borrow_mut()
+            .replace(id.to_string());
         selected_workspace.stack.set_visible_child_name(&id);
         if let Some(session) = selected_workspace.sessions.borrow().get(id.as_str()) {
             session.terminal.grab_focus();
         }
         selected_workspace.render_history(Some(id.as_str()));
+        selected_workspace.search_button.set_sensitive(true);
         selected_workspace.save_preference("selectedSessionId", serde_json::json!(id.as_str()));
     });
 
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
+
+    for (kind, button) in [
+        (SessionKind::Shell, launch_shell),
+        (SessionKind::Codex, launch_codex),
+        (SessionKind::Claude, launch_claude),
+    ] {
+        let quick_launch_workspace = workspace.clone();
+        button.connect_clicked(move |_| quick_launch_workspace.launch_from_form(kind));
+    }
+
+    let search_workspace = workspace.clone();
+    search_next.connect_clicked(move |_| search_workspace.search_selected(true));
+    let search_workspace = workspace.clone();
+    search_previous.connect_clicked(move |_| search_workspace.search_selected(false));
+    let search_workspace = workspace.clone();
+    search_entry.connect_activate(move |_| search_workspace.search_selected(true));
 
     for (key, choice) in theme_buttons {
         let appearance_workspace = workspace.clone();
@@ -435,13 +570,24 @@ impl Workspace {
             return;
         };
         self.stack.remove(&session.page);
-        self.list.remove(&session.row);
+        if session.row.parent().is_some() {
+            self.list.remove(&session.row);
+        }
+        self.rebuild_sidebar();
         if was_selected {
-            if let Some(row) = self.list.row_at_index(0) {
+            let row = self
+                .sessions
+                .borrow()
+                .values()
+                .min_by_key(|session| session.record.position)
+                .map(|session| session.row.clone());
+            if let Some(row) = row {
                 self.list.select_row(Some(&row));
             } else {
                 self.stack.set_visible_child_name(EMPTY_PAGE);
+                self.selected_session.borrow_mut().take();
                 self.render_history(None);
+                self.search_button.set_sensitive(false);
                 self.save_preference("selectedSessionId", serde_json::Value::Null);
             }
         }
@@ -491,9 +637,7 @@ impl Workspace {
     }
 
     fn selected_session_id(&self) -> Option<String> {
-        self.list
-            .selected_row()
-            .map(|row| row.widget_name().to_string())
+        self.selected_session.borrow().clone()
     }
 
     fn next_session_id(&self, kind: SessionKind) -> String {
@@ -604,6 +748,23 @@ fn sibling_binary(name: &str) -> PathBuf {
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.join(name)))
         .unwrap_or_else(|| PathBuf::from(name))
+}
+
+fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+    row.add_css_class("tui-setting-row");
+    let label = gtk::Label::new(Some(label));
+    label.set_xalign(0.0);
+    label.set_width_chars(18);
+    row.append(&label);
+    let entry = gtk::Entry::builder()
+        .placeholder_text(placeholder)
+        .width_chars(42)
+        .hexpand(true)
+        .build();
+    entry.add_css_class("tui-setting-entry");
+    row.append(&entry);
+    (row, entry)
 }
 
 fn display_name(id: &str) -> String {

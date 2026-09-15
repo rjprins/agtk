@@ -9,15 +9,16 @@ use crate::control::CaptureResult;
 use super::Workspace;
 
 pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, Box<dyn Error>> {
-    let width = workspace.overlay.width();
-    let height = workspace.overlay.height();
+    let target = active_surface(workspace);
+    let width = target.width();
+    let height = target.height();
     if width <= 0 || height <= 0 {
         return Err("application content has no drawable size".into());
     }
 
     // WidgetPaintable snapshots only this GTK widget subtree, never desktop pixels.
     // Source: https://docs.gtk.org/gtk4/class.WidgetPaintable.html
-    let paintable = gtk::WidgetPaintable::new(Some(&workspace.overlay));
+    let paintable = gtk::WidgetPaintable::new(Some(&target));
     let snapshot = gtk::Snapshot::new();
     paintable.snapshot(&snapshot, f64::from(width), f64::from(height));
     let node = snapshot
@@ -45,4 +46,21 @@ pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, 
         texture.height(),
     )
     .map_err(Into::into)
+}
+
+fn active_surface(workspace: &Workspace) -> gtk::Widget {
+    for popover in [
+        &workspace.launch_popover,
+        &workspace.shortcut_popover,
+        &workspace.theme_popover,
+        &workspace.history_popover,
+        &workspace.search_popover,
+    ] {
+        if popover.is_mapped() {
+            return popover
+                .child()
+                .expect("visible agmux popover has capture content");
+        }
+    }
+    workspace.overlay.clone().upcast()
 }

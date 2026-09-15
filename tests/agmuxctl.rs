@@ -5,8 +5,8 @@ use std::thread;
 use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AppearanceSetParams, CloseSessionParams, ControlCommand, ControlResponse, ControlServer,
-    CreateSessionParams, GetTextParams, RenameSessionParams, SendInputParams, SessionIdParams,
-    SessionKind, ShortcutSetParams,
+    CreateSessionParams, GetTextParams, ProjectSetParams, RenameSessionParams, SendInputParams,
+    SessionIdParams, SessionKind, ShortcutSetParams, UiShowParams, UiSurface,
 };
 use agmux_native::shortcuts::ShortcutAction;
 use serde_json::json;
@@ -113,6 +113,16 @@ fn ui_capture_command_requests_an_app_only_png() {
     );
     assert!(output.stderr.is_empty());
     worker.join().expect("request worker");
+}
+
+#[test]
+fn ui_show_command_opens_a_named_transient_surface() {
+    assert_fixture_command(
+        &["ui", "show", "launch"],
+        ControlCommand::UiShow(UiShowParams {
+            surface: UiSurface::Launch,
+        }),
+    );
 }
 
 #[test]
@@ -301,6 +311,26 @@ fn shortcut_commands_have_typed_protocol_mappings() {
             action: ShortcutAction::ToggleSidebar,
             accelerator: None,
             reset: true,
+        }),
+    );
+}
+
+#[test]
+fn project_set_command_has_a_typed_protocol_mapping() {
+    assert_fixture_command(
+        &[
+            "project",
+            "set",
+            "/work/agmux",
+            "--pinned",
+            "true",
+            "--collapsed",
+            "false",
+        ],
+        ControlCommand::ProjectSet(ProjectSetParams {
+            root: "/work/agmux".into(),
+            is_pinned: Some(true),
+            is_collapsed: Some(false),
         }),
     );
 }

@@ -33,11 +33,19 @@ impl Workspace {
                 terminal.paste_clipboard();
             }
         });
+        self.add_action("search", true, |workspace| {
+            if workspace.selected_session_id().is_some() {
+                workspace.search_popover.popup();
+                workspace.search_entry.grab_focus();
+            }
+        });
 
         self.application
             .set_accels_for_action("win.copy", &["<Control><Shift>c"]);
         self.application
             .set_accels_for_action("win.paste", &["<Control><Shift>v"]);
+        self.application
+            .set_accels_for_action("win.search", &["<Control><Shift>f"]);
         self.apply_shortcuts();
     }
 

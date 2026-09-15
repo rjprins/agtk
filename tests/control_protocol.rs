@@ -1,8 +1,8 @@
 use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AppearanceSetParams, ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION,
-    ResponseBody, SessionIdParams, SessionKind, ShortcutSetParams, decode_request, decode_response,
-    encode_request, encode_response,
+    ProjectSetParams, ResponseBody, SessionIdParams, SessionKind, ShortcutSetParams,
+    decode_request, decode_response, encode_request, encode_response,
 };
 use agmux_native::shortcuts::ShortcutAction;
 use serde_json::json;
@@ -88,6 +88,7 @@ fn every_core_method_decodes_to_a_typed_command() {
         ("app.get_state", "{}", "AppGetState"),
         ("ui.inspect", "{}", "UiInspect"),
         ("ui.capture", "{}", "UiCapture"),
+        ("ui.show", r#"{"surface":"launch"}"#, "UiShow"),
         (
             "appearance.set",
             r#"{"theme":"neutral-light"}"#,
@@ -97,6 +98,11 @@ fn every_core_method_decodes_to_a_typed_command() {
             "shortcut.set",
             r#"{"action":"new-shell","accelerator":"<Control><Shift>n"}"#,
             "ShortcutSet",
+        ),
+        (
+            "project.set",
+            r#"{"root":"/work/agmux","isPinned":true}"#,
+            "ProjectSet",
         ),
         (
             "session.create",
@@ -135,6 +141,30 @@ fn every_core_method_decodes_to_a_typed_command() {
         let wire = format!(r#"{{"version":1,"id":"req","method":"{method}","params":{params}}}"#);
         let request = decode_request(wire.as_bytes()).expect(method);
         assert_eq!(request.command.method(), method, "{expected_variant}");
+    }
+}
+
+#[test]
+fn project_updates_require_an_absolute_root_and_one_change() {
+    let request = decode_request(br#"{"version":1,"id":"project","method":"project.set","params":{"root":"/work/agmux","isPinned":true,"isCollapsed":false}}"#)
+        .expect("decode project update");
+    assert_eq!(
+        request.command,
+        ControlCommand::ProjectSet(ProjectSetParams {
+            root: "/work/agmux".into(),
+            is_pinned: Some(true),
+            is_collapsed: Some(false),
+        })
+    );
+
+    for invalid in [
+        br#"{"version":1,"id":"project","method":"project.set","params":{"root":"relative","isPinned":true}}"#.as_slice(),
+        br#"{"version":1,"id":"project","method":"project.set","params":{"root":"/work/agmux"}}"#.as_slice(),
+    ] {
+        assert_eq!(
+            decode_request(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams
+        );
     }
 }
 

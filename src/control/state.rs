@@ -54,11 +54,13 @@ pub struct ProjectSummary {
     pub root: String,
     pub name: String,
     pub is_pinned: bool,
+    pub is_collapsed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeGroupSummary {
+    pub project_root: String,
     pub path: String,
     pub branch: String,
     pub session_ids: Vec<String>,

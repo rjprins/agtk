@@ -24,8 +24,10 @@ pub enum ControlCommand {
     AppGetState,
     UiInspect,
     UiCapture,
+    UiShow(UiShowParams),
     AppearanceSet(AppearanceSetParams),
     ShortcutSet(ShortcutSetParams),
+    ProjectSet(ProjectSetParams),
     SessionCreate(CreateSessionParams),
     SessionSelect(SessionIdParams),
     SessionSendInput(SendInputParams),
@@ -111,6 +113,30 @@ pub struct ShortcutSetParams {
     pub accelerator: Option<String>,
     #[serde(default)]
     pub reset: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectSetParams {
+    pub root: PathBuf,
+    pub is_pinned: Option<bool>,
+    pub is_collapsed: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UiSurface {
+    Launch,
+    Appearance,
+    Shortcuts,
+    History,
+    Search,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiShowParams {
+    pub surface: UiSurface,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,6 +257,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             decode_empty_params(wire.params)?;
             ControlCommand::UiCapture
         }
+        "ui.show" => ControlCommand::UiShow(decode_params(wire.params)?),
         "appearance.set" => {
             let params: AppearanceSetParams = decode_params(wire.params)?;
             validate_appearance(&params)?;
@@ -240,6 +267,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             let params: ShortcutSetParams = decode_params(wire.params)?;
             validate_shortcut(&params)?;
             ControlCommand::ShortcutSet(params)
+        }
+        "project.set" => {
+            let params: ProjectSetParams = decode_params(wire.params)?;
+            validate_project(&params)?;
+            ControlCommand::ProjectSet(params)
         }
         "session.create" => {
             let params: CreateSessionParams = decode_params(wire.params)?;
@@ -366,8 +398,10 @@ impl ControlCommand {
             Self::AppGetState => "app.get_state",
             Self::UiInspect => "ui.inspect",
             Self::UiCapture => "ui.capture",
+            Self::UiShow(_) => "ui.show",
             Self::AppearanceSet(_) => "appearance.set",
             Self::ShortcutSet(_) => "shortcut.set",
+            Self::ProjectSet(_) => "project.set",
             Self::SessionCreate(_) => "session.create",
             Self::SessionSelect(_) => "session.select",
             Self::SessionSendInput(_) => "session.send_input",
@@ -383,8 +417,10 @@ impl ControlCommand {
             Self::AppGetState => Ok(("app.get_state", empty_params())),
             Self::UiInspect => Ok(("ui.inspect", empty_params())),
             Self::UiCapture => Ok(("ui.capture", empty_params())),
+            Self::UiShow(params) => Ok(("ui.show", serde_json::to_value(params)?)),
             Self::AppearanceSet(params) => Ok(("appearance.set", serde_json::to_value(params)?)),
             Self::ShortcutSet(params) => Ok(("shortcut.set", serde_json::to_value(params)?)),
+            Self::ProjectSet(params) => Ok(("project.set", serde_json::to_value(params)?)),
             Self::SessionCreate(params) => Ok(("session.create", serde_json::to_value(params)?)),
             Self::SessionSelect(params) => Ok(("session.select", serde_json::to_value(params)?)),
             Self::SessionSendInput(params) => {
@@ -537,6 +573,16 @@ fn validate_shortcut(params: &ShortcutSetParams) -> Result<(), ControlError> {
         return Err(invalid_params(
             "accelerator must be trimmed and contain between 1 and 120 characters",
         ));
+    }
+    Ok(())
+}
+
+fn validate_project(params: &ProjectSetParams) -> Result<(), ControlError> {
+    if !params.root.is_absolute() {
+        return Err(invalid_params("project root must be an absolute path"));
+    }
+    if params.is_pinned.is_none() && params.is_collapsed.is_none() {
+        return Err(invalid_params("at least one project setting is required"));
     }
     Ok(())
 }

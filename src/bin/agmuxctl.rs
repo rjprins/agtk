@@ -7,8 +7,8 @@ use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AppearanceSetParams, ClientError, CloseSessionParams, ControlClient, ControlCommand,
     ControlRequest, CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION,
-    RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionState,
-    ShortcutSetParams, WaitCondition,
+    ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams,
+    SessionKind, SessionState, ShortcutSetParams, UiShowParams, UiSurface, WaitCondition,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
 use agmux_native::shortcuts::ShortcutAction;
@@ -65,10 +65,18 @@ fn run() -> Result<(), Failure> {
         [command] if command == "state" => ControlCommand::AppGetState,
         [group, command] if group == "ui" && command == "inspect" => ControlCommand::UiInspect,
         [group, command] if group == "ui" && command == "capture" => ControlCommand::UiCapture,
+        [group, command, surface] if group == "ui" && command == "show" => {
+            ControlCommand::UiShow(UiShowParams {
+                surface: parse_ui_surface(surface)?,
+            })
+        }
         [group, action, rest @ ..] if group == "appearance" && action == "set" => {
             parse_appearance_set(rest)?
         }
         [group, action, rest @ ..] if group == "shortcut" => parse_shortcut_command(action, rest)?,
+        [group, action, rest @ ..] if group == "project" && action == "set" => {
+            parse_project_set(rest)?
+        }
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
             return Err(Failure::Usage(usage().to_owned()));
@@ -240,6 +248,17 @@ fn parse_session_state(value: &str) -> Result<SessionState, Failure> {
         "exited" => Ok(SessionState::Exited),
         "reconnecting" => Ok(SessionState::Reconnecting),
         _ => Err(Failure::Usage(format!("unknown session state: {value}"))),
+    }
+}
+
+fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
+    match value {
+        "launch" => Ok(UiSurface::Launch),
+        "appearance" => Ok(UiSurface::Appearance),
+        "shortcuts" => Ok(UiSurface::Shortcuts),
+        "history" => Ok(UiSurface::History),
+        "search" => Ok(UiSurface::Search),
+        _ => Err(Failure::Usage(format!("unknown UI surface: {value}"))),
     }
 }
 
@@ -519,12 +538,51 @@ fn parse_shortcut_action(value: &str) -> Result<ShortcutAction, Failure> {
         .ok_or_else(|| Failure::Usage(format!("unknown shortcut action: {value}")))
 }
 
+fn parse_project_set(arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let Some(root) = arguments.first() else {
+        return Err(Failure::Usage("project set requires a root".to_owned()));
+    };
+    let mut is_pinned = None;
+    let mut is_collapsed = None;
+    let mut index = 1;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?;
+        match option {
+            "--pinned" => is_pinned = Some(parse_bool(option, value)?),
+            "--collapsed" => is_collapsed = Some(parse_bool(option, value)?),
+            _ => return Err(Failure::Usage(format!("unknown project option: {option}"))),
+        }
+        index += 2;
+    }
+    if is_pinned.is_none() && is_collapsed.is_none() {
+        return Err(Failure::Usage(
+            "project set requires --pinned or --collapsed".to_owned(),
+        ));
+    }
+    Ok(ControlCommand::ProjectSet(ProjectSetParams {
+        root: root.into(),
+        is_pinned,
+        is_collapsed,
+    }))
+}
+
+fn parse_bool(option: &str, value: &str) -> Result<bool, Failure> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(Failure::Usage(format!("{option} requires true or false"))),
+    }
+}
+
 fn usage_failure() -> Failure {
     Failure::Usage(usage().to_owned())
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

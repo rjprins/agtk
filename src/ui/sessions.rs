@@ -3,6 +3,72 @@ use crate::session::Attachment;
 use std::time::Instant;
 
 impl Workspace {
+    pub(super) fn rename_session(
+        &self,
+        id: &str,
+        name: String,
+        pending: Option<PendingRequest>,
+    ) -> bool {
+        let record = self.sessions.borrow().get(id).map(|s| s.record.clone());
+        let Some(mut record) = record else {
+            return false;
+        };
+        if name.trim() != name || !(1..=80).contains(&name.chars().count()) {
+            if let Some(session) = self.sessions.borrow().get(id) {
+                session.label.set_text(&session.record.name);
+            }
+            self.report_failure(
+                pending,
+                ErrorCode::InvalidParams,
+                "Session name is invalid",
+                "use a trimmed name between 1 and 80 characters".to_owned(),
+            );
+            return true;
+        }
+        record.name = name;
+        let updated = record.clone();
+        let Some(store) = self.store.borrow().clone() else {
+            self.report_launch_failure(
+                pending,
+                "Could not rename session",
+                "workspace is loading".to_owned(),
+            );
+            return true;
+        };
+        self.run_io(
+            move || store.save_session(&record),
+            move |workspace, result| match result {
+                Ok(()) => {
+                    if let Some(session) = workspace.sessions.borrow_mut().get_mut(&updated.id) {
+                        session.record.name = updated.name.clone();
+                        session.label.set_text(&updated.name);
+                    }
+                    if let Some(pending) = pending {
+                        match workspace.session_summary(&updated.id).and_then(|summary| {
+                            serde_json::to_value(summary).map_err(|error| error.to_string())
+                        }) {
+                            Ok(summary) => {
+                                let id = pending.request.id.clone();
+                                let _ = pending.respond(ControlResponse::success(id, summary));
+                            }
+                            Err(error) => workspace.report_launch_failure(
+                                Some(pending),
+                                "Could not describe session",
+                                error,
+                            ),
+                        }
+                    }
+                }
+                Err(error) => workspace.report_launch_failure(
+                    pending,
+                    "Could not rename session",
+                    error.to_string(),
+                ),
+            },
+        );
+        true
+    }
+
     pub(super) fn discover_sessions(&self) {
         self.new_shell_button.set_sensitive(false);
         let paths = self.paths.clone();
@@ -20,6 +86,16 @@ impl Workspace {
                 let shortcuts = store
                     .preference("shortcuts")?
                     .map(serde_json::from_value::<ShortcutPreferences>)
+                    .transpose()?
+                    .unwrap_or_default();
+                let projects = store
+                    .preference("projects")?
+                    .map(serde_json::from_value::<ProjectPreferences>)
+                    .transpose()?
+                    .unwrap_or_default();
+                let quick_launch = store
+                    .preference("quickLaunch")?
+                    .map(serde_json::from_value::<QuickLaunchPreferences>)
                     .transpose()?
                     .unwrap_or_default();
                 let mut records = store.sessions()?;
@@ -53,13 +129,23 @@ impl Workspace {
                     store.save_session(&record)?;
                     recovered.push((record, connected));
                 }
-                Ok((store, selected, appearance, shortcuts, recovered))
+                Ok((
+                    store,
+                    selected,
+                    appearance,
+                    shortcuts,
+                    projects,
+                    quick_launch,
+                    recovered,
+                ))
             },
             |workspace, result| match result {
-                Ok((store, selected, appearance, shortcuts, recovered)) => {
+                Ok((store, selected, appearance, shortcuts, projects, quick_launch, recovered)) => {
                     *workspace.store.borrow_mut() = Some(store);
                     workspace.load_appearance(appearance);
                     workspace.load_shortcuts(shortcuts);
+                    workspace.load_projects(projects);
+                    workspace.load_quick_launch(quick_launch);
                     for (record, connected) in recovered {
                         let (control, attachment) =
                             connected.map_or((None, None), |(c, a)| (Some(c), Some(a)));
@@ -80,6 +166,7 @@ impl Workspace {
                     workspace.new_shell_button.set_sensitive(true);
                     workspace.theme_button.set_sensitive(true);
                     workspace.shortcut_button.set_sensitive(true);
+                    workspace.launch_button.set_sensitive(true);
                     workspace.start_control_server();
                     if workspace.sessions.borrow().is_empty()
                         && workspace.paths.name().as_str() == "default"
@@ -419,10 +506,19 @@ impl Workspace {
             eof_indicator.set_tooltip_text(Some("Exited"));
         });
         content.append(&state_label);
-        let label = gtk::Label::new(Some(&name));
-        label.set_xalign(0.0);
-        label.set_hexpand(true);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        let label = gtk::EditableLabel::builder()
+            .xalign(0.0)
+            .hexpand(true)
+            .build();
+        label.set_text(&name);
+        label.set_tooltip_text(Some("Double-click to rename this session"));
+        let rename_workspace = self.clone();
+        let rename_id = id.clone();
+        label.connect_editing_notify(move |label| {
+            if !label.is_editing() {
+                rename_workspace.rename_session(&rename_id, label.text().trim().to_owned(), None);
+            }
+        });
         content.append(&label);
         let kind = gtk::Label::new(Some(session_kind_short(record.kind)));
         kind.add_css_class("tui-kind");
@@ -432,8 +528,6 @@ impl Workspace {
         close.set_tooltip_text(Some("Close this shell session"));
         content.append(&close);
         row.set_child(Some(&content));
-        self.list.append(&row);
-
         let close_workspace = self.clone();
         let close_id = id.clone();
         close.connect_clicked(move |_| {
@@ -454,6 +548,7 @@ impl Workspace {
                 control,
             },
         );
+        self.rebuild_sidebar();
         self.list.select_row(Some(&row));
         Ok(())
     }

@@ -202,8 +202,23 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         .collect::<Vec<_>>();
     assert_eq!(
         top_bar_ids,
-        ["new-shell", "shortcuts", "appearance", "history"]
+        [
+            "new-shell",
+            "launch",
+            "shortcuts",
+            "appearance",
+            "search",
+            "history"
+        ]
     );
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"launch"}))["shown"],
+        true
+    );
+    thread::sleep(Duration::from_millis(50));
+    let transient = app.request("ui.capture", json!({}));
+    assert!(transient["width"].as_i64().unwrap() < 1280);
+    assert!(transient["height"].as_i64().unwrap() < 800);
 }
 
 #[test]
@@ -290,5 +305,63 @@ fn shortcut_overrides_are_validated_and_survive_ui_restart() {
     app.request(
         "shortcut.set",
         json!({"action":"toggle-sidebar","reset":true}),
+    );
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn sessions_group_by_project_and_worktree_with_durable_project_state() {
+    let mut app = App::new();
+    let worktree = app.directory.path().join("feature-worktree");
+    std::fs::create_dir(&worktree).unwrap();
+    let main = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c", "exec sleep 30"],
+            "name":"main session",
+            "cwd":app.directory.path(),
+            "projectRoot":app.directory.path()
+        }),
+    );
+    let feature = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c", "exec sleep 30"],
+            "name":"feature session",
+            "cwd":worktree,
+            "projectRoot":app.directory.path(),
+            "worktreePath":worktree
+        }),
+    );
+    let root = app.directory.path().to_string_lossy();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(state["projects"][0]["root"], root.as_ref());
+    assert_eq!(state["worktreeGroups"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        state["worktreeGroups"][0]["path"],
+        worktree.to_string_lossy().as_ref()
+    );
+
+    app.request(
+        "project.set",
+        json!({"root":root.as_ref(),"isPinned":true,"isCollapsed":true}),
+    );
+    app.stop();
+    app.start();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["projects"][0]["isPinned"], true);
+    assert_eq!(state["projects"][0]["isCollapsed"], true);
+    app.request(
+        "session.close",
+        json!({"sessionId":main["id"].as_str().unwrap()}),
+    );
+    app.request(
+        "session.close",
+        json!({"sessionId":feature["id"].as_str().unwrap()}),
     );
 }
