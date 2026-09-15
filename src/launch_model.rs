@@ -12,6 +12,19 @@ pub struct Choice {
 
 pub const NEW_WORKTREE: &str = "__new__";
 
+/// Resolve the directory used when a launch has no explicit worktree.
+///
+/// The project directory is itself a valid launch context, so an empty
+/// worktree selection must not be sent to the session host as a missing path.
+pub fn effective_worktree_path(
+    project_root: Option<&Path>,
+    worktree: Option<&Path>,
+) -> Option<PathBuf> {
+    worktree
+        .map(Path::to_path_buf)
+        .or_else(|| project_root.map(Path::to_path_buf))
+}
+
 pub fn worktree_choices(
     project_root: &str,
     worktrees: impl IntoIterator<Item = (String, String)>,

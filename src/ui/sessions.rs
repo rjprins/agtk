@@ -562,21 +562,10 @@ impl Workspace {
             eof_indicator.set_tooltip_text(Some("Exited"));
         });
         content.append(&state_label);
-        let label = gtk::EditableLabel::builder()
-            .editable(false)
-            .focus_on_click(false)
-            .build();
-        label.set_text(&name);
+        let label = gtk::Label::new(Some(&name));
+        label.set_xalign(0.0);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.set_tooltip_text(Some("Select session"));
-        let rename_workspace = self.clone();
-        let rename_id = id.clone();
-        let rename_label = label.clone();
-        label.connect_editing_notify(move |label| {
-            if !label.is_editing() {
-                rename_label.set_editable(false);
-                rename_workspace.rename_session(&rename_id, label.text().trim().to_owned(), None);
-            }
-        });
         let details = gtk::Box::new(gtk::Orientation::Vertical, 0);
         details.set_hexpand(true);
         details.append(&label);
@@ -600,10 +589,32 @@ impl Workspace {
             .build();
         edit.add_css_class("tui-button");
         edit.set_tooltip_text(Some("Rename session"));
+        let edit_details = details.clone();
         let edit_label = label.clone();
+        let edit_workspace = self.clone();
+        let edit_id = id.clone();
         edit.connect_clicked(move |_| {
-            edit_label.set_editable(true);
-            edit_label.start_editing();
+            let editor = gtk::EditableLabel::builder()
+                .editable(true)
+                .focus_on_click(true)
+                .build();
+            editor.set_text(&edit_label.text());
+            edit_details.remove(&edit_label);
+            edit_details.prepend(&editor);
+            let finish_details = edit_details.clone();
+            let finish_label = edit_label.clone();
+            let finish_workspace = edit_workspace.clone();
+            let finish_id = edit_id.clone();
+            editor.connect_editing_notify(move |editor| {
+                if editor.is_editing() {
+                    return;
+                }
+                let name = editor.text().trim().to_owned();
+                finish_details.remove(editor);
+                finish_details.prepend(&finish_label);
+                finish_workspace.rename_session(&finish_id, name, None);
+            });
+            editor.start_editing();
         });
         content.append(&edit);
         if let (Some(project_root), Some(worktree)) = (

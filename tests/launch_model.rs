@@ -49,6 +49,24 @@ fn path_completions_only_return_matching_directories() {
 }
 
 #[test]
+fn empty_worktree_selection_uses_the_project_directory() {
+    let project = PathBuf::from("/tmp/project");
+    assert_eq!(
+        agmux_native::launch_model::effective_worktree_path(Some(&project), None),
+        Some(project.clone())
+    );
+    let selected = PathBuf::from("/tmp/project-worktree");
+    assert_eq!(
+        agmux_native::launch_model::effective_worktree_path(Some(&project), Some(&selected)),
+        Some(selected)
+    );
+    assert_eq!(
+        agmux_native::launch_model::effective_worktree_path(None, None),
+        None
+    );
+}
+
+#[test]
 fn provider_args_translate_saved_options_without_affecting_shell() {
     let flags = [
         ("--ask-for-approval".to_owned(), json!("never")),
