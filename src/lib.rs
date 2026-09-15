@@ -7,6 +7,7 @@ pub mod history;
 pub mod instance;
 pub mod io_worker;
 pub mod launch_preferences;
+pub mod mcp;
 pub mod persist;
 pub mod projects;
 pub mod providers;
