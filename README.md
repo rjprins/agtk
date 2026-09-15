@@ -35,11 +35,18 @@ Azure PR support additionally needs the Azure CLI with the Azure DevOps extensio
 
 ## Build and run
 
-Build every cooperating binary before starting the workspace:
+From a checkout, start the workspace with:
+
+```sh
+./start.sh
+```
+
+The script incrementally builds every cooperating debug binary and forwards any
+arguments to `agmux-native`. Build and run manually when needed:
 
 ```sh
 cargo build --bins
-cargo run --bin agmux-native
+./target/debug/agmux-native
 ```
 
 The development UI finds `agmux-session` beside its own executable. Runtime sockets live below `$XDG_RUNTIME_DIR/agmux-native/default`. Durable metadata lives below `$XDG_STATE_HOME/agmux-native/default`, or `~/.local/state` when `XDG_STATE_HOME` is unset.
