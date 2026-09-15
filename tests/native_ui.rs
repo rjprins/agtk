@@ -1,6 +1,7 @@
 //! Run against a private compositor, never the user's display:
 //! AGMUX_TEST_DISPLAY=/absolute/path/to/wayland-socket cargo test --test native_ui -- --ignored
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,6 +29,13 @@ impl App {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let directory = tempfile::tempdir().unwrap();
+        let fake_agent = directory.path().join("fake-agent");
+        std::fs::write(
+            &fake_agent,
+            "#!/bin/sh\nprintf '__RESTORE_ARGS_%s_%s__\\n' \"$1\" \"$2\"\nexec sleep 30\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_agent, std::fs::Permissions::from_mode(0o700)).unwrap();
         let sequence = TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let name =
             InstanceName::parse(&format!("ui-test-{}-{sequence}", std::process::id())).unwrap();
@@ -53,6 +61,10 @@ impl App {
                 .env("AGMUX_INSTANCE", self.paths.name().as_str())
                 .env("AGMUX_RUNTIME_ROOT", self.directory.path())
                 .env("AGMUX_STATE_ROOT", self.directory.path())
+                .env("CLAUDE_CONFIG_DIR", self.directory.path().join("claude"))
+                .env("CODEX_HOME", self.directory.path().join("codex"))
+                .env("AGMUX_CODEX_BIN", self.directory.path().join("fake-agent"))
+                .env("AGMUX_CLAUDE_BIN", self.directory.path().join("fake-agent"))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .spawn()
@@ -213,6 +225,7 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
             "new-shell",
             "launch",
             "worktrees",
+            "agents",
             "shortcuts",
             "appearance",
             "search",
@@ -460,4 +473,83 @@ fn control_api_completes_disposable_worktree_lifecycle() {
     assert_eq!(result["branchDeleted"], true);
     assert!(!std::path::Path::new(created_path).exists());
     assert!(result["atticTag"].as_str().unwrap().starts_with("attic/"));
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn recent_agent_surface_uses_isolated_logs_and_readiness_survives_restart() {
+    let mut app = App::new();
+    let codex_logs = app.directory.path().join("codex/sessions/2026/09/15");
+    let project = app.directory.path().join("provider-project");
+    std::fs::create_dir_all(&codex_logs).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        codex_logs.join("session.jsonl"),
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"codex-native-1\",\"cwd\":{:?}}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"role\":\"user\",\"content\":\"Inspect the restored native workspace\"}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"role\":\"assistant\",\"content\":\"The workspace is ready.\"}}}}\n",
+            project.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    let discovered = app.request("agent.list", json!({"limit":20,"maxAgeDays":30}));
+    assert_eq!(discovered.as_array().unwrap().len(), 1);
+    assert_eq!(discovered[0]["providerSessionId"], "codex-native-1");
+    let preview = app.request(
+        "agent.preview",
+        json!({"provider":"codex","providerSessionId":"codex-native-1","maxMessages":10}),
+    );
+    assert_eq!(preview["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"agents"}))["shown"],
+        true
+    );
+    thread::sleep(Duration::from_millis(120));
+    let capture = app.request("ui.capture", json!({}));
+    assert!(capture["width"].as_i64().unwrap() < 1280);
+    assert!(capture["height"].as_i64().unwrap() < 800);
+
+    let restored = app.request(
+        "agent.restore",
+        json!({
+            "provider":"codex",
+            "providerSessionId":"codex-native-1",
+            "cwd":project,
+            "projectRoot":project,
+            "name":"restored provider"
+        }),
+    );
+    let restored_id = restored["id"].as_str().unwrap();
+    assert_eq!(restored["state"], "busy");
+    app.wait_text(restored_id, "__RESTORE_ARGS_resume_codex-native-1__");
+    assert!(
+        app.request("agent.list", json!({"limit":20,"maxAgeDays":30}))
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    app.request("session.close", json!({"sessionId":restored_id}));
+
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"codex",
+            "command":"/bin/sh",
+            "args":["-c","exec sleep 30"],
+            "cwd":project,
+            "name":"readiness probe"
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    assert_eq!(session["state"], "busy");
+    let ready = app.request("session.set_state", json!({"sessionId":id,"state":"ready"}));
+    assert_eq!(ready["state"], "ready");
+    assert_eq!(
+        app.request("app.get_state", json!({}))["attention"]["count"],
+        1
+    );
+    app.stop();
+    app.start();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["sessions"][0]["state"], "ready");
+    app.request("session.close", json!({"sessionId":id}));
 }

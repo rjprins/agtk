@@ -36,7 +36,19 @@ impl Workspace {
             projects: self.project_summaries(),
             worktree_groups: self.worktree_group_summaries(),
             sessions,
-            attention: AttentionSummary { count: 0 },
+            attention: AttentionSummary {
+                count: self
+                    .sessions
+                    .borrow()
+                    .values()
+                    .filter(|session| {
+                        matches!(
+                            session.record.state,
+                            SessionState::Ready | SessionState::Waiting
+                        )
+                    })
+                    .count(),
+            },
         }
     }
 
@@ -147,6 +159,16 @@ impl Workspace {
                                 is_enabled: self.worktree_button.is_sensitive(),
                                 is_selected: self.worktree_popover.is_mapped(),
                                 bounds: widget_bounds(&self.worktree_button, &self.window),
+                                children: Vec::new(),
+                            },
+                            UiNode {
+                                id: "agents".to_owned(),
+                                role: "button".to_owned(),
+                                label: Some("Recent agent sessions".to_owned()),
+                                is_visible: self.agent_button.is_visible(),
+                                is_enabled: self.agent_button.is_sensitive(),
+                                is_selected: self.agent_popover.is_mapped(),
+                                bounds: widget_bounds(&self.agent_button, &self.window),
                                 children: Vec::new(),
                             },
                             UiNode {

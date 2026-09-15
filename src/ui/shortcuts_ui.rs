@@ -19,7 +19,9 @@ impl Workspace {
         self.add_action("previous-session", true, |workspace| {
             workspace.select_relative_session(-1);
         });
-        self.add_action("next-ready-session", false, |_| {});
+        self.add_action("next-ready-session", true, |workspace| {
+            workspace.select_next_ready_session();
+        });
         self.add_action("reopen-pr-list", false, |_| {});
         self.add_action("claude-model-preset", false, |_| {});
 
@@ -207,5 +209,31 @@ impl Workspace {
         let selected = self.list.selected_row().map_or(0, |row| row.index());
         let index = (selected + offset).rem_euclid(rows.len() as i32) as usize;
         self.list.select_row(Some(&rows[index]));
+    }
+
+    fn select_next_ready_session(&self) {
+        let sessions = self.sessions.borrow();
+        let mut ready = sessions
+            .values()
+            .filter(|session| {
+                matches!(
+                    session.record.state,
+                    SessionState::Ready | SessionState::Waiting
+                )
+            })
+            .collect::<Vec<_>>();
+        ready.sort_by_key(|session| session.record.position);
+        if ready.is_empty() {
+            self.show_error("No agent session is ready");
+            return;
+        }
+        let selected = self.selected_session_id();
+        let index = ready
+            .iter()
+            .position(|session| selected.as_deref() == Some(session.record.id.as_str()))
+            .map_or(0, |index| (index + 1) % ready.len());
+        let row = ready[index].row.clone();
+        drop(sessions);
+        self.list.select_row(Some(&row));
     }
 }

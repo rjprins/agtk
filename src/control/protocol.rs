@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 
 use crate::appearance::ThemeKey;
+use crate::providers::AgentProvider;
 use crate::shortcuts::ShortcutAction;
 use crate::worktrees::DeleteBranch;
 
@@ -32,12 +33,16 @@ pub enum ControlCommand {
     WorktreeList(WorktreeListParams),
     WorktreeCreate(WorktreeCreateParams),
     WorktreeReap(WorktreeReapParams),
+    AgentList(AgentListParams),
+    AgentPreview(AgentPreviewParams),
+    AgentRestore(AgentRestoreParams),
     SessionCreate(CreateSessionParams),
     SessionSelect(SessionIdParams),
     SessionSendInput(SendInputParams),
     SessionGetText(GetTextParams),
     SessionRename(RenameSessionParams),
     SessionClose(CloseSessionParams),
+    SessionSetState(SessionSetStateParams),
     HistoryList(SessionIdParams),
 }
 
@@ -151,6 +156,50 @@ pub struct WorktreeReapParams {
     pub delete_branch: DeleteBranch,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentListParams {
+    #[serde(default = "default_agent_limit")]
+    pub limit: u32,
+    #[serde(default = "default_agent_max_age_days")]
+    pub max_age_days: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentPreviewParams {
+    pub provider: AgentProvider,
+    pub provider_session_id: String,
+    #[serde(default = "default_preview_messages")]
+    pub max_messages: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentRestoreParams {
+    pub provider: AgentProvider,
+    pub provider_session_id: String,
+    pub cwd: Option<PathBuf>,
+    pub project_root: Option<PathBuf>,
+    pub worktree_path: Option<PathBuf>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentSignalState {
+    Busy,
+    Ready,
+    Waiting,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionSetStateParams {
+    pub session_id: String,
+    pub state: AgentSignalState,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UiSurface {
@@ -160,6 +209,7 @@ pub enum UiSurface {
     History,
     Search,
     Worktrees,
+    Agents,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -318,6 +368,21 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             validate_worktree_reap(&params)?;
             ControlCommand::WorktreeReap(params)
         }
+        "agent.list" => {
+            let params: AgentListParams = decode_params(wire.params)?;
+            validate_agent_list(&params)?;
+            ControlCommand::AgentList(params)
+        }
+        "agent.preview" => {
+            let params: AgentPreviewParams = decode_params(wire.params)?;
+            validate_agent_preview(&params)?;
+            ControlCommand::AgentPreview(params)
+        }
+        "agent.restore" => {
+            let params: AgentRestoreParams = decode_params(wire.params)?;
+            validate_agent_restore(&params)?;
+            ControlCommand::AgentRestore(params)
+        }
         "session.create" => {
             let params: CreateSessionParams = decode_params(wire.params)?;
             validate_create_session(&params)?;
@@ -350,6 +415,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             let params: CloseSessionParams = decode_params(wire.params)?;
             validate_session_id(&params.session_id)?;
             ControlCommand::SessionClose(params)
+        }
+        "session.set_state" => {
+            let params: SessionSetStateParams = decode_params(wire.params)?;
+            validate_session_id(&params.session_id)?;
+            ControlCommand::SessionSetState(params)
         }
         "history.list" => ControlCommand::HistoryList(decode_session_params(wire.params)?),
         _ => {
@@ -450,12 +520,16 @@ impl ControlCommand {
             Self::WorktreeList(_) => "worktree.list",
             Self::WorktreeCreate(_) => "worktree.create",
             Self::WorktreeReap(_) => "worktree.reap",
+            Self::AgentList(_) => "agent.list",
+            Self::AgentPreview(_) => "agent.preview",
+            Self::AgentRestore(_) => "agent.restore",
             Self::SessionCreate(_) => "session.create",
             Self::SessionSelect(_) => "session.select",
             Self::SessionSendInput(_) => "session.send_input",
             Self::SessionGetText(_) => "session.get_text",
             Self::SessionRename(_) => "session.rename",
             Self::SessionClose(_) => "session.close",
+            Self::SessionSetState(_) => "session.set_state",
             Self::HistoryList(_) => "history.list",
         }
     }
@@ -472,6 +546,9 @@ impl ControlCommand {
             Self::WorktreeList(params) => Ok(("worktree.list", serde_json::to_value(params)?)),
             Self::WorktreeCreate(params) => Ok(("worktree.create", serde_json::to_value(params)?)),
             Self::WorktreeReap(params) => Ok(("worktree.reap", serde_json::to_value(params)?)),
+            Self::AgentList(params) => Ok(("agent.list", serde_json::to_value(params)?)),
+            Self::AgentPreview(params) => Ok(("agent.preview", serde_json::to_value(params)?)),
+            Self::AgentRestore(params) => Ok(("agent.restore", serde_json::to_value(params)?)),
             Self::SessionCreate(params) => Ok(("session.create", serde_json::to_value(params)?)),
             Self::SessionSelect(params) => Ok(("session.select", serde_json::to_value(params)?)),
             Self::SessionSendInput(params) => {
@@ -480,6 +557,9 @@ impl ControlCommand {
             Self::SessionGetText(params) => Ok(("session.get_text", serde_json::to_value(params)?)),
             Self::SessionRename(params) => Ok(("session.rename", serde_json::to_value(params)?)),
             Self::SessionClose(params) => Ok(("session.close", serde_json::to_value(params)?)),
+            Self::SessionSetState(params) => {
+                Ok(("session.set_state", serde_json::to_value(params)?))
+            }
             Self::HistoryList(params) => Ok(("history.list", serde_json::to_value(params)?)),
         }
     }
@@ -672,6 +752,52 @@ fn validate_worktree_reap(params: &WorktreeReapParams) -> Result<(), ControlErro
     Ok(())
 }
 
+fn validate_agent_list(params: &AgentListParams) -> Result<(), ControlError> {
+    if !(1..=500).contains(&params.limit) {
+        return Err(invalid_params("limit must be between 1 and 500"));
+    }
+    if !(1..=3_650).contains(&params.max_age_days) {
+        return Err(invalid_params("maxAgeDays must be between 1 and 3650"));
+    }
+    Ok(())
+}
+
+fn validate_agent_preview(params: &AgentPreviewParams) -> Result<(), ControlError> {
+    validate_provider_session_id(&params.provider_session_id)?;
+    if !(1..=100).contains(&params.max_messages) {
+        return Err(invalid_params("maxMessages must be between 1 and 100"));
+    }
+    Ok(())
+}
+
+fn validate_agent_restore(params: &AgentRestoreParams) -> Result<(), ControlError> {
+    validate_provider_session_id(&params.provider_session_id)?;
+    for (path, label) in [
+        (&params.cwd, "cwd"),
+        (&params.project_root, "project root"),
+        (&params.worktree_path, "worktree path"),
+    ] {
+        if let Some(path) = path {
+            validate_absolute_path(path, label)?;
+        }
+    }
+    if let Some(name) = &params.name {
+        validate_name(name)?;
+    }
+    Ok(())
+}
+
+fn validate_provider_session_id(value: &str) -> Result<(), ControlError> {
+    if value.trim() != value
+        || !(1..=240).contains(&value.chars().count())
+        || value.chars().any(char::is_whitespace)
+        || value.contains('\0')
+    {
+        return Err(invalid_params("provider session ID is invalid"));
+    }
+    Ok(())
+}
+
 fn validate_absolute_path(path: &std::path::Path, label: &str) -> Result<(), ControlError> {
     if !path.is_absolute() {
         return Err(invalid_params(&format!("{label} must be an absolute path")));
@@ -739,4 +865,16 @@ const fn default_true() -> bool {
 
 const fn default_text_lines() -> u32 {
     200
+}
+
+const fn default_agent_limit() -> u32 {
+    100
+}
+
+const fn default_agent_max_age_days() -> u32 {
+    90
+}
+
+const fn default_preview_messages() -> u32 {
+    40
 }

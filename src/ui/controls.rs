@@ -58,6 +58,16 @@ impl Workspace {
             self.handle_worktree_control(pending);
             return;
         }
+        if matches!(
+            &pending.request.command,
+            ControlCommand::AgentList(_)
+                | ControlCommand::AgentPreview(_)
+                | ControlCommand::AgentRestore(_)
+                | ControlCommand::SessionSetState(_)
+        ) {
+            self.handle_agent_control(pending);
+            return;
+        }
         if let ControlCommand::SessionClose(params) = &pending.request.command
             && self.sessions.borrow().contains_key(&params.session_id)
         {
@@ -137,6 +147,11 @@ impl Workspace {
                             false
                         }
                     }
+                    UiSurface::Agents => {
+                        self.agent_popover.set_autohide(false);
+                        self.agent_popover.popup();
+                        true
+                    }
                 };
                 ControlResponse::success(
                     id,
@@ -210,6 +225,9 @@ impl Workspace {
                         terminal.feed_child(b"\n");
                         bytes_written += 1;
                     }
+                    if params.append_enter {
+                        self.mark_agent_busy(&params.session_id);
+                    }
                     ControlResponse::success(
                         id,
                         serde_json::json!({ "bytesWritten": bytes_written }),
@@ -244,7 +262,11 @@ impl Workspace {
             | ControlCommand::ProjectSet(_)
             | ControlCommand::WorktreeList(_)
             | ControlCommand::WorktreeCreate(_)
-            | ControlCommand::WorktreeReap(_) => {
+            | ControlCommand::WorktreeReap(_)
+            | ControlCommand::AgentList(_)
+            | ControlCommand::AgentPreview(_)
+            | ControlCommand::AgentRestore(_)
+            | ControlCommand::SessionSetState(_) => {
                 unreachable!("asynchronous command handled above")
             }
         };

@@ -74,6 +74,7 @@ impl ShortcutAction {
                 | Self::ToggleSidebar
                 | Self::NextSession
                 | Self::PreviousSession
+                | Self::NextReadySession
         )
     }
 }

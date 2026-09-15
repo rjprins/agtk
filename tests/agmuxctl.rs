@@ -4,11 +4,13 @@ use std::thread;
 
 use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
-    AppearanceSetParams, CloseSessionParams, ControlCommand, ControlResponse, ControlServer,
-    CreateSessionParams, GetTextParams, ProjectSetParams, RenameSessionParams, SendInputParams,
-    SessionIdParams, SessionKind, ShortcutSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
-    WorktreeListParams, WorktreeReapParams,
+    AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
+    CloseSessionParams, ControlCommand, ControlResponse, ControlServer, CreateSessionParams,
+    GetTextParams, ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams,
+    SessionKind, SessionSetStateParams, ShortcutSetParams, UiShowParams, UiSurface,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
+use agmux_native::providers::AgentProvider;
 use agmux_native::shortcuts::ShortcutAction;
 use agmux_native::worktrees::DeleteBranch;
 use serde_json::json;
@@ -381,6 +383,61 @@ fn worktree_commands_have_typed_protocol_mappings() {
             expected_head: "0123456789abcdef".to_owned(),
             expected_status_hash: "abcdef".to_owned(),
             delete_branch: DeleteBranch::Force,
+        }),
+    );
+}
+
+#[test]
+fn agent_and_readiness_commands_have_typed_protocol_mappings() {
+    assert_fixture_command(
+        &["agent", "list", "--limit", "25", "--max-age-days", "30"],
+        ControlCommand::AgentList(AgentListParams {
+            limit: 25,
+            max_age_days: 30,
+        }),
+    );
+    assert_fixture_command(
+        &[
+            "agent",
+            "preview",
+            "codex",
+            "codex-1",
+            "--max-messages",
+            "20",
+        ],
+        ControlCommand::AgentPreview(AgentPreviewParams {
+            provider: AgentProvider::Codex,
+            provider_session_id: "codex-1".to_owned(),
+            max_messages: 20,
+        }),
+    );
+    assert_fixture_command(
+        &[
+            "agent",
+            "restore",
+            "claude",
+            "claude-1",
+            "--cwd",
+            "/work/agmux",
+            "--project-root",
+            "/work/agmux",
+            "--name",
+            "Recovered",
+        ],
+        ControlCommand::AgentRestore(AgentRestoreParams {
+            provider: AgentProvider::Claude,
+            provider_session_id: "claude-1".to_owned(),
+            cwd: Some("/work/agmux".into()),
+            project_root: Some("/work/agmux".into()),
+            worktree_path: None,
+            name: Some("Recovered".to_owned()),
+        }),
+    );
+    assert_fixture_command(
+        &["session", "state", "claude-1", "ready"],
+        ControlCommand::SessionSetState(SessionSetStateParams {
+            session_id: "claude-1".to_owned(),
+            state: AgentSignalState::Ready,
         }),
     );
 }

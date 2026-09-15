@@ -141,6 +141,21 @@ const TUI_CSS: &str = r#"
   background: @background;
   border-top: 1px solid @line;
 }
+.tui-agent-row {
+  min-height: 38px;
+  padding: 4px 7px;
+  color: @text;
+  background: @background;
+  border: 0;
+  border-bottom: 1px solid @line;
+  border-radius: 0;
+  box-shadow: none;
+}
+.tui-agent-row:hover { color: @background; background: @accent; }
+.tui-agent-message {
+  padding: 5px 7px;
+  border-bottom: 1px solid @line;
+}
 
 .tui-main { background: @background; }
 .tui-empty { color: @muted; }

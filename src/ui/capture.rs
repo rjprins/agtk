@@ -87,6 +87,7 @@ fn active_surface(workspace: &Workspace) -> gtk::Widget {
         &workspace.history_popover,
         &workspace.search_popover,
         &workspace.worktree_popover,
+        &workspace.agent_popover,
     ] {
         if popover.is_mapped() {
             return popover

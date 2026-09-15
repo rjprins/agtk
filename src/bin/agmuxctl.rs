@@ -5,13 +5,15 @@ use std::time::{Duration, Instant};
 
 use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
-    AppearanceSetParams, ClientError, CloseSessionParams, ControlClient, ControlCommand,
-    ControlRequest, CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION,
-    ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams,
-    SessionKind, SessionState, ShortcutSetParams, UiShowParams, UiSurface, WaitCondition,
+    AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
+    ClientError, CloseSessionParams, ControlClient, ControlCommand, ControlRequest,
+    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, ProjectSetParams,
+    RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind,
+    SessionSetStateParams, SessionState, ShortcutSetParams, UiShowParams, UiSurface, WaitCondition,
     WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
+use agmux_native::providers::AgentProvider;
 use agmux_native::shortcuts::ShortcutAction;
 use agmux_native::worktrees::DeleteBranch;
 
@@ -80,6 +82,7 @@ fn run() -> Result<(), Failure> {
             parse_project_set(rest)?
         }
         [group, action, rest @ ..] if group == "worktree" => parse_worktree_command(action, rest)?,
+        [group, action, rest @ ..] if group == "agent" => parse_agent_command(action, rest)?,
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
             return Err(Failure::Usage(usage().to_owned()));
@@ -262,6 +265,7 @@ fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
         "history" => Ok(UiSurface::History),
         "search" => Ok(UiSurface::Search),
         "worktrees" => Ok(UiSurface::Worktrees),
+        "agents" => Ok(UiSurface::Agents),
         _ => Err(Failure::Usage(format!("unknown UI surface: {value}"))),
     }
 }
@@ -346,6 +350,13 @@ fn parse_session_command(action: &str, arguments: &[String]) -> Result<ControlCo
                     allow_missing: true,
                 }))
             }
+            _ => Err(usage_failure()),
+        },
+        "state" => match arguments {
+            [session_id, state] => Ok(ControlCommand::SessionSetState(SessionSetStateParams {
+                session_id: session_id.clone(),
+                state: parse_agent_signal_state(state)?,
+            })),
             _ => Err(usage_failure()),
         },
         _ => Err(usage_failure()),
@@ -673,6 +684,126 @@ fn parse_worktree_reap(arguments: &[String]) -> Result<ControlCommand, Failure> 
     }))
 }
 
+fn parse_agent_command(action: &str, arguments: &[String]) -> Result<ControlCommand, Failure> {
+    match action {
+        "list" => parse_agent_list(arguments),
+        "preview" => parse_agent_preview(arguments),
+        "restore" => parse_agent_restore(arguments),
+        _ => Err(usage_failure()),
+    }
+}
+
+fn parse_agent_list(arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let mut limit = 100;
+    let mut max_age_days = 90;
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?;
+        match option {
+            "--limit" => limit = parse_bounded_u32(option, value, 1, 500)?,
+            "--max-age-days" => max_age_days = parse_bounded_u32(option, value, 1, 3_650)?,
+            _ => {
+                return Err(Failure::Usage(format!(
+                    "unknown agent list option: {option}"
+                )));
+            }
+        }
+        index += 2;
+    }
+    Ok(ControlCommand::AgentList(AgentListParams {
+        limit,
+        max_age_days,
+    }))
+}
+
+fn parse_agent_preview(arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let [provider, provider_session_id, rest @ ..] = arguments else {
+        return Err(usage_failure());
+    };
+    let mut max_messages = 40;
+    let mut index = 0;
+    while index < rest.len() {
+        let option = rest[index].as_str();
+        let value = rest
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?;
+        match option {
+            "--max-messages" => max_messages = parse_bounded_u32(option, value, 1, 100)?,
+            _ => {
+                return Err(Failure::Usage(format!(
+                    "unknown agent preview option: {option}"
+                )));
+            }
+        }
+        index += 2;
+    }
+    Ok(ControlCommand::AgentPreview(AgentPreviewParams {
+        provider: parse_agent_provider(provider)?,
+        provider_session_id: provider_session_id.clone(),
+        max_messages,
+    }))
+}
+
+fn parse_agent_restore(arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let [provider, provider_session_id, rest @ ..] = arguments else {
+        return Err(usage_failure());
+    };
+    let mut cwd = None;
+    let mut project_root = None;
+    let mut worktree_path = None;
+    let mut name = None;
+    let mut index = 0;
+    while index < rest.len() {
+        let option = rest[index].as_str();
+        let value = rest
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?
+            .clone();
+        match option {
+            "--cwd" => cwd = Some(value.into()),
+            "--project-root" => project_root = Some(value.into()),
+            "--worktree-path" => worktree_path = Some(value.into()),
+            "--name" => name = Some(value),
+            _ => {
+                return Err(Failure::Usage(format!(
+                    "unknown agent restore option: {option}"
+                )));
+            }
+        }
+        index += 2;
+    }
+    Ok(ControlCommand::AgentRestore(AgentRestoreParams {
+        provider: parse_agent_provider(provider)?,
+        provider_session_id: provider_session_id.clone(),
+        cwd,
+        project_root,
+        worktree_path,
+        name,
+    }))
+}
+
+fn parse_agent_provider(value: &str) -> Result<AgentProvider, Failure> {
+    match value {
+        "codex" => Ok(AgentProvider::Codex),
+        "claude" => Ok(AgentProvider::Claude),
+        _ => Err(Failure::Usage(format!("unknown agent provider: {value}"))),
+    }
+}
+
+fn parse_agent_signal_state(value: &str) -> Result<AgentSignalState, Failure> {
+    match value {
+        "busy" => Ok(AgentSignalState::Busy),
+        "ready" => Ok(AgentSignalState::Ready),
+        "waiting" => Ok(AgentSignalState::Waiting),
+        _ => Err(Failure::Usage(format!(
+            "unknown agent signal state: {value}"
+        ))),
+    }
+}
+
 fn parse_bool(option: &str, value: &str) -> Result<bool, Failure> {
     match value {
         "true" => Ok(true),
@@ -686,7 +817,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session state ID STATE|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

@@ -14,6 +14,8 @@ impl Workspace {
         }
         drop(sessions);
 
+        self.mark_agent_busy(id);
+
         if self.selected_session_id().as_deref() == Some(id) {
             self.render_history(Some(id));
         }

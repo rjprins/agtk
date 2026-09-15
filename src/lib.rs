@@ -9,6 +9,7 @@ pub mod io_worker;
 pub mod launch_preferences;
 pub mod persist;
 pub mod projects;
+pub mod providers;
 pub mod session;
 pub mod shortcuts;
 pub mod terminal_text;

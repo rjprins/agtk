@@ -1,10 +1,12 @@
 use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
-    AppearanceSetParams, ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION,
-    ProjectSetParams, ResponseBody, SessionIdParams, SessionKind, ShortcutSetParams,
-    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams, decode_request, decode_response,
-    encode_request, encode_response,
+    AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
+    ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, ProjectSetParams, ResponseBody,
+    SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams, WorktreeCreateParams,
+    WorktreeListParams, WorktreeReapParams, decode_request, decode_response, encode_request,
+    encode_response,
 };
+use agmux_native::providers::AgentProvider;
 use agmux_native::shortcuts::ShortcutAction;
 use agmux_native::worktrees::DeleteBranch;
 use serde_json::json;
@@ -121,6 +123,22 @@ fn every_core_method_decodes_to_a_typed_command() {
             r#"{"path":"/work/agmux-native-ui","expectedHead":"0123456789abcdef","expectedStatusHash":"abcdef","deleteBranch":"auto"}"#,
             "WorktreeReap",
         ),
+        ("agent.list", "{}", "AgentList"),
+        (
+            "agent.preview",
+            r#"{"provider":"codex","providerSessionId":"codex-1","maxMessages":20}"#,
+            "AgentPreview",
+        ),
+        (
+            "agent.restore",
+            r#"{"provider":"claude","providerSessionId":"claude-1","cwd":"/work/agmux"}"#,
+            "AgentRestore",
+        ),
+        (
+            "session.set_state",
+            r#"{"sessionId":"claude-1","state":"ready"}"#,
+            "SessionSetState",
+        ),
         (
             "session.create",
             r#"{"kind":"custom","command":"printf","args":["hello"],"cwd":"/tmp","name":"Probe"}"#,
@@ -158,6 +176,63 @@ fn every_core_method_decodes_to_a_typed_command() {
         let wire = format!(r#"{{"version":1,"id":"req","method":"{method}","params":{params}}}"#);
         let request = decode_request(wire.as_bytes()).expect(method);
         assert_eq!(request.command.method(), method, "{expected_variant}");
+    }
+}
+
+#[test]
+fn provider_commands_are_bounded_and_typed() {
+    assert_eq!(
+        decode_request(br#"{"version":1,"id":"agent","method":"agent.list","params":{}}"#)
+            .unwrap()
+            .command,
+        ControlCommand::AgentList(AgentListParams {
+            limit: 100,
+            max_age_days: 90,
+        })
+    );
+    assert_eq!(
+        decode_request(br#"{"version":1,"id":"agent","method":"agent.preview","params":{"provider":"codex","providerSessionId":"codex-1"}}"#)
+            .unwrap()
+            .command,
+        ControlCommand::AgentPreview(AgentPreviewParams {
+            provider: AgentProvider::Codex,
+            provider_session_id: "codex-1".to_owned(),
+            max_messages: 40,
+        })
+    );
+    assert_eq!(
+        decode_request(br#"{"version":1,"id":"agent","method":"agent.restore","params":{"provider":"claude","providerSessionId":"claude-1","cwd":"/work/agmux","name":"Recovered"}}"#)
+            .unwrap()
+            .command,
+        ControlCommand::AgentRestore(AgentRestoreParams {
+            provider: AgentProvider::Claude,
+            provider_session_id: "claude-1".to_owned(),
+            cwd: Some("/work/agmux".into()),
+            project_root: None,
+            worktree_path: None,
+            name: Some("Recovered".to_owned()),
+        })
+    );
+    assert_eq!(
+        decode_request(br#"{"version":1,"id":"agent","method":"session.set_state","params":{"sessionId":"claude-1","state":"waiting"}}"#)
+            .unwrap()
+            .command,
+        ControlCommand::SessionSetState(SessionSetStateParams {
+            session_id: "claude-1".to_owned(),
+            state: AgentSignalState::Waiting,
+        })
+    );
+
+    for invalid in [
+        br#"{"version":1,"id":"agent","method":"agent.list","params":{"limit":0}}"#.as_slice(),
+        br#"{"version":1,"id":"agent","method":"agent.preview","params":{"provider":"codex","providerSessionId":"bad id"}}"#.as_slice(),
+        br#"{"version":1,"id":"agent","method":"agent.preview","params":{"provider":"codex","providerSessionId":"ok","maxMessages":101}}"#.as_slice(),
+        br#"{"version":1,"id":"agent","method":"agent.restore","params":{"provider":"claude","providerSessionId":"ok","cwd":"relative"}}"#.as_slice(),
+    ] {
+        assert_eq!(
+            decode_request(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams
+        );
     }
 }
 

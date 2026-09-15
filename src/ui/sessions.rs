@@ -122,7 +122,14 @@ impl Workspace {
                 for mut record in records {
                     let connected = connect_session(&record.socket_path).ok();
                     record.state = if connected.is_some() {
-                        SessionState::Running
+                        if matches!(
+                            record.state,
+                            SessionState::Busy | SessionState::Ready | SessionState::Waiting
+                        ) {
+                            record.state
+                        } else {
+                            SessionState::Running
+                        }
                     } else {
                         SessionState::Exited
                     };
@@ -167,6 +174,7 @@ impl Workspace {
                     workspace.theme_button.set_sensitive(true);
                     workspace.shortcut_button.set_sensitive(true);
                     workspace.launch_button.set_sensitive(true);
+                    workspace.agent_button.set_sensitive(true);
                     workspace.start_control_server();
                     if workspace.sessions.borrow().is_empty()
                         && workspace.paths.name().as_str() == "default"
@@ -208,6 +216,15 @@ impl Workspace {
         params: CreateSessionParams,
         pending: Option<PendingRequest>,
     ) {
+        self.launch_controlled_with_conversation(params, None, pending);
+    }
+
+    pub(super) fn launch_controlled_with_conversation(
+        &self,
+        params: CreateSessionParams,
+        conversation_id: Option<String>,
+        pending: Option<PendingRequest>,
+    ) {
         let Some(store) = self.store.borrow().clone() else {
             self.report_launch_failure(
                 pending,
@@ -226,6 +243,7 @@ impl Workspace {
             .unwrap_or(-1)
             + 1;
         let socket = self.paths.sessions_dir().join(format!("{id}.sock"));
+        let paths = self.paths.clone();
         let host_binary = self.host_binary.clone();
         self.run_io(
             move || {
@@ -239,6 +257,7 @@ impl Workspace {
                 record.cwd = plan.cwd;
                 record.project_root = plan.project_root;
                 record.worktree_path = plan.worktree_path;
+                record.conversation_id = conversation_id;
                 record.position = position;
                 record.state = SessionState::Reconnecting;
                 store.save_session(&record)?;
@@ -252,6 +271,10 @@ impl Workspace {
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
+                command
+                    .env("AGMUX_INSTANCE", paths.name().as_str())
+                    .env("AGMUX_SESSION_ID", &id)
+                    .env("AGMUX_CONTROL_SOCKET", paths.control_socket());
                 if let Some(cwd) = &record.cwd {
                     command.current_dir(cwd);
                 }
@@ -280,7 +303,11 @@ impl Workspace {
                     let _ = child.wait();
                 });
                 let (control, attachment) = connected?;
-                record.state = SessionState::Running;
+                record.state = if matches!(record.kind, SessionKind::Codex | SessionKind::Claude) {
+                    SessionState::Busy
+                } else {
+                    SessionState::Running
+                };
                 store.save_session(&record)?;
                 Ok((record, control, attachment, plan.initial_input))
             },
@@ -365,6 +392,7 @@ impl Workspace {
             return;
         };
         let id = id.to_owned();
+        self.closing_sessions.borrow_mut().insert(id.clone());
         self.run_io(
             move || {
                 if let Some(mut control) = control? {
@@ -392,6 +420,7 @@ impl Workspace {
             move |workspace, result| match result {
                 Ok(()) => {
                     workspace.remove_session_view(&id);
+                    workspace.closing_sessions.borrow_mut().remove(&id);
                     if let Some(pending) = pending {
                         let request_id = pending.request.id.clone();
                         let _ = pending.respond(ControlResponse::success(
@@ -400,11 +429,14 @@ impl Workspace {
                         ));
                     }
                 }
-                Err(error) => workspace.report_launch_failure(
-                    pending,
-                    "Could not stop session",
-                    error.to_string(),
-                ),
+                Err(error) => {
+                    workspace.closing_sessions.borrow_mut().remove(&id);
+                    workspace.report_launch_failure(
+                        pending,
+                        "Could not stop session",
+                        error.to_string(),
+                    );
+                }
             },
         );
     }
@@ -448,7 +480,9 @@ impl Workspace {
                     session.record.clone()
                 })
             };
-            if let Some(record) = record {
+            if let Some(record) = record
+                && !eof_workspace.closing_sessions.borrow().contains(&eof_id)
+            {
                 eof_workspace.persist_record(record);
             }
         });
@@ -485,20 +519,12 @@ impl Workspace {
         row.add_css_class("tui-session-row");
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 7);
         content.add_css_class("tui-session-content");
-        let state_label = gtk::Label::new(Some(if record.state == SessionState::Exited {
-            "x"
-        } else {
-            "*"
-        }));
+        let state_label = gtk::Label::new(Some(agents_ui::session_state_indicator(record.state)));
         state_label.add_css_class("tui-state");
         if record.state == SessionState::Exited {
             state_label.add_css_class("tui-state-exited");
         }
-        state_label.set_tooltip_text(Some(if record.state == SessionState::Exited {
-            "Exited"
-        } else {
-            "Running"
-        }));
+        state_label.set_tooltip_text(Some(agents_ui::session_state_name(record.state)));
         let eof_indicator = state_label.clone();
         terminal.connect_eof(move |_| {
             eof_indicator.set_text("x");

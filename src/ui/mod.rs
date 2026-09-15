@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::io::{self, Write};
@@ -28,10 +28,12 @@ use crate::io_worker::IoWorker;
 use crate::launch_preferences::QuickLaunchPreferences;
 use crate::persist::{PersistResult, SessionRecord, Store};
 use crate::projects::ProjectPreferences;
+use crate::providers::ProviderSession;
 use crate::session::{SessionLaunchPlan, receive_attachment};
 use crate::shortcuts::{ShortcutAction, ShortcutPreferences};
 use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
 
+mod agents_ui;
 mod appearance_ui;
 mod capture;
 mod controls;
@@ -73,6 +75,15 @@ struct Workspace {
     worktree_base: gtk::Entry,
     worktree_purpose: gtk::Entry,
     worktree_list: gtk::Box,
+    agent_button: gtk::MenuButton,
+    agent_popover: gtk::Popover,
+    agent_list: gtk::Box,
+    agent_preview: gtk::Box,
+    agent_restore_cwd: gtk::Entry,
+    agent_restore_project: gtk::Entry,
+    agent_restore_worktree: gtk::Entry,
+    agent_restore_button: gtk::Button,
+    selected_agent: Rc<RefCell<Option<ProviderSession>>>,
     history_button: gtk::MenuButton,
     history_list: gtk::Box,
     history_popover: gtk::Popover,
@@ -92,6 +103,7 @@ struct Workspace {
     paths: InstancePaths,
     host_binary: PathBuf,
     sessions: Rc<RefCell<HashMap<String, SessionView>>>,
+    closing_sessions: Rc<RefCell<HashSet<String>>>,
     selected_session: Rc<RefCell<Option<String>>>,
     sequence: Rc<Cell<u64>>,
     control_server: Rc<RefCell<Option<ControlServer>>>,
@@ -272,6 +284,67 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     worktree_button.add_css_class("tui-button");
     worktree_button.set_tooltip_text(Some("Inspect, create, and safely reap worktrees"));
     header.pack_end(&worktree_button);
+
+    let agent_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    agent_surface.add_css_class("tui-surface");
+    agent_surface.set_margin_top(6);
+    agent_surface.set_margin_bottom(6);
+    agent_surface.set_margin_start(6);
+    agent_surface.set_margin_end(6);
+    let agent_heading_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let agent_heading = gtk::Label::new(Some("RECENT AGENT SESSIONS"));
+    agent_heading.set_xalign(0.0);
+    agent_heading.set_hexpand(true);
+    agent_heading.add_css_class("tui-sidebar-heading");
+    agent_heading_row.append(&agent_heading);
+    let agent_refresh = gtk::Button::with_label("[refresh]");
+    agent_refresh.add_css_class("tui-button");
+    agent_heading_row.append(&agent_refresh);
+    agent_surface.append(&agent_heading_row);
+    let agent_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let agent_list_scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .min_content_width(310)
+        .min_content_height(360)
+        .child(&agent_list)
+        .build();
+    let agent_detail = gtk::Box::new(gtk::Orientation::Vertical, 3);
+    let agent_preview = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let agent_preview_scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .min_content_width(520)
+        .min_content_height(230)
+        .vexpand(true)
+        .child(&agent_preview)
+        .build();
+    agent_detail.append(&agent_preview_scroller);
+    let agent_restore_cwd = launch_entry("Working directory", "original cwd");
+    let agent_restore_project = launch_entry("Project root", "optional project root");
+    let agent_restore_worktree = launch_entry("Worktree", "optional worktree path");
+    agent_detail.append(&agent_restore_cwd.0);
+    agent_detail.append(&agent_restore_project.0);
+    agent_detail.append(&agent_restore_worktree.0);
+    let agent_restore_button = gtk::Button::with_label("[restore selected]");
+    agent_restore_button.add_css_class("tui-button");
+    agent_restore_button.set_sensitive(false);
+    agent_detail.append(&agent_restore_button);
+    let agent_split = gtk::Paned::new(gtk::Orientation::Horizontal);
+    agent_split.set_start_child(Some(&agent_list_scroller));
+    agent_split.set_end_child(Some(&agent_detail));
+    agent_split.set_resize_start_child(false);
+    agent_split.set_shrink_start_child(false);
+    agent_split.set_position(320);
+    agent_surface.append(&agent_split);
+    let agent_popover = gtk::Popover::builder().child(&agent_surface).build();
+    agent_popover.add_css_class("tui-popover");
+    let agent_button = gtk::MenuButton::builder()
+        .label("[recent]")
+        .popover(&agent_popover)
+        .sensitive(false)
+        .build();
+    agent_button.add_css_class("tui-button");
+    agent_button.set_tooltip_text(Some("Preview and restore recent Codex and Claude sessions"));
+    header.pack_end(&agent_button);
 
     let history_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
     history_list.add_css_class("tui-surface");
@@ -470,6 +543,15 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         worktree_base: worktree_base.1,
         worktree_purpose: worktree_purpose.1,
         worktree_list,
+        agent_button,
+        agent_popover,
+        agent_list,
+        agent_preview,
+        agent_restore_cwd: agent_restore_cwd.1,
+        agent_restore_project: agent_restore_project.1,
+        agent_restore_worktree: agent_restore_worktree.1,
+        agent_restore_button: agent_restore_button.clone(),
+        selected_agent: Rc::new(RefCell::new(None)),
         history_button,
         history_list,
         history_popover,
@@ -489,6 +571,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         paths,
         host_binary: sibling_binary("agmux-session"),
         sessions: Rc::new(RefCell::new(HashMap::new())),
+        closing_sessions: Rc::new(RefCell::new(HashSet::new())),
         selected_session: Rc::new(RefCell::new(None)),
         sequence: Rc::new(Cell::new(0)),
         control_server: Rc::new(RefCell::new(None)),
@@ -530,6 +613,14 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     workspace.worktree_popover.connect_show(move |_| {
         worktree_workspace.prepare_worktree_panel();
     });
+    let agent_workspace = workspace.clone();
+    agent_refresh.connect_clicked(move |_| agent_workspace.refresh_agent_panel());
+    let agent_workspace = workspace.clone();
+    agent_restore_button.connect_clicked(move |_| agent_workspace.restore_agent_from_panel());
+    let agent_workspace = workspace.clone();
+    workspace
+        .agent_popover
+        .connect_show(move |_| agent_workspace.refresh_agent_panel());
 
     for (kind, button) in [
         (SessionKind::Shell, launch_shell),
