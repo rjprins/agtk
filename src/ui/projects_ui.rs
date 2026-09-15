@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::projects::ProjectSettings;
@@ -178,7 +178,7 @@ impl Workspace {
             for (worktree, mut project_sessions) in grouped {
                 project_sessions.sort_by_key(|session| session.record.position);
                 if let Some(worktree) = worktree {
-                    let row = group_label(&format!("  ├ {}", project_name(&worktree)));
+                    let row = self.worktree_header(&project.root, &worktree);
                     row.set_visible(!project.is_collapsed);
                     self.list.append(&row);
                 }
@@ -282,6 +282,33 @@ impl Workspace {
         let launch_workspace = self.clone();
         let launch_root = root.to_owned();
         launch.connect_clicked(move |_| launch_workspace.open_launch_for_project(&launch_root));
+        content.append(&launch);
+        row.set_child(Some(&content));
+        row
+    }
+
+    fn worktree_header(&self, project_root: &str, worktree: &str) -> gtk::ListBoxRow {
+        let row = gtk::ListBoxRow::new();
+        row.set_selectable(false);
+        row.set_activatable(false);
+        row.add_css_class("tui-subgroup-row");
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let label = gtk::Label::new(Some(&format!("├ {}", project_name(worktree))));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        label.set_tooltip_text(Some(worktree));
+        content.append(&label);
+        let launch = gtk::Button::builder()
+            .icon_name("list-add-symbolic")
+            .build();
+        launch.add_css_class("tui-button");
+        launch.set_tooltip_text(Some("Launch in this worktree"));
+        let workspace = self.clone();
+        let project_root = PathBuf::from(project_root);
+        let worktree = PathBuf::from(worktree);
+        launch
+            .connect_clicked(move |_| workspace.open_launch_for_worktree(&project_root, &worktree));
         content.append(&launch);
         row.set_child(Some(&content));
         row
