@@ -27,6 +27,7 @@ impl Workspace {
             instance: self.paths.name().as_str().to_owned(),
             protocol_version: PROTOCOL_VERSION,
             selected_session_id,
+            appearance: self.appearance_summary(),
             window: WindowState {
                 width: self.window.width(),
                 height: self.window.height(),
@@ -125,6 +126,16 @@ impl Workspace {
                                 is_enabled: self.new_shell_button.is_sensitive(),
                                 is_selected: false,
                                 bounds: widget_bounds(&self.new_shell_button, &self.window),
+                                children: Vec::new(),
+                            },
+                            UiNode {
+                                id: "appearance".to_owned(),
+                                role: "button".to_owned(),
+                                label: Some("Terminal appearance".to_owned()),
+                                is_visible: self.theme_button.is_visible(),
+                                is_enabled: self.theme_button.is_sensitive(),
+                                is_selected: self.theme_popover.is_visible(),
+                                bounds: widget_bounds(&self.theme_button, &self.window),
                                 children: Vec::new(),
                             },
                             UiNode {

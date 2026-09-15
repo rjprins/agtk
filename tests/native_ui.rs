@@ -191,4 +191,49 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
     assert_eq!(sidebar["children"][0]["id"], "sessions");
     assert_eq!(children[2]["role"], "main");
     assert!(children[3]["label"].as_str().unwrap().contains("new"));
+    let top_bar_ids = children[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(top_bar_ids, ["new-shell", "appearance", "history"]);
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn terminal_appearance_updates_live_and_survives_ui_restart() {
+    let mut app = App::new();
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c", "printf '\\033[31m__THEME_PROBE__\\033[0m\\n'; exec /bin/sh -i"],
+            "name":"theme probe",
+            "cwd":app.directory.path()
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    app.wait_text(id, "__THEME_PROBE__");
+    let before = app.request("ui.capture", json!({}));
+
+    let appearance = app.request(
+        "appearance.set",
+        json!({"theme":"tokyo-night","followSystem":false,"font":"Monospace 13"}),
+    );
+    assert_eq!(appearance["theme"], "tokyo-night");
+    assert_eq!(appearance["effectiveTheme"], "tokyo-night");
+    assert_eq!(appearance["font"], "Monospace 13");
+    let after = app.request("ui.capture", json!({}));
+    assert_ne!(before["sha256"], after["sha256"]);
+
+    app.stop();
+    app.start();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["appearance"]["theme"], "tokyo-night");
+    assert_eq!(state["appearance"]["effectiveTheme"], "tokyo-night");
+    assert_eq!(state["appearance"]["followSystem"], false);
+    assert_eq!(state["appearance"]["font"], "Monospace 13");
+    app.request("session.close", json!({"sessionId":id}));
 }

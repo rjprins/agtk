@@ -28,6 +28,10 @@ impl Workspace {
             self.launch_controlled_session(params.clone(), pending);
             return;
         }
+        if let ControlCommand::AppearanceSet(params) = &pending.request.command {
+            self.set_appearance(params.clone(), Some(pending));
+            return;
+        }
         if let ControlCommand::SessionClose(params) = &pending.request.command
             && self.sessions.borrow().contains_key(&params.session_id)
         {
@@ -206,7 +210,9 @@ impl Workspace {
                     None => session_not_found(id, &params.session_id),
                 }
             }
-            ControlCommand::SessionCreate(_) => unreachable!("session creation handled above"),
+            ControlCommand::SessionCreate(_) | ControlCommand::AppearanceSet(_) => {
+                unreachable!("asynchronous command handled above")
+            }
         };
         let _ = pending.respond(response);
     }

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::appearance::ThemeKey;
+
 use super::SessionKind;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -9,11 +11,22 @@ pub struct AppState {
     pub instance: String,
     pub protocol_version: u16,
     pub selected_session_id: Option<String>,
+    pub appearance: AppearanceSummary,
     pub window: WindowState,
     pub projects: Vec<ProjectSummary>,
     pub worktree_groups: Vec<WorktreeGroupSummary>,
     pub sessions: Vec<SessionSummary>,
     pub attention: AttentionSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppearanceSummary {
+    pub theme: ThemeKey,
+    pub effective_theme: ThemeKey,
+    pub follow_system: bool,
+    pub font: String,
+    pub available_themes: Vec<ThemeKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

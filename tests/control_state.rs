@@ -1,6 +1,7 @@
+use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
-    AppState, AttentionSummary, Bounds, CaptureResult, SessionKind, SessionState, SessionSummary,
-    TextSnapshot, UiInspection, UiNode, WindowState,
+    AppState, AppearanceSummary, AttentionSummary, Bounds, CaptureResult, SessionKind,
+    SessionState, SessionSummary, TextSnapshot, UiInspection, UiNode, WindowState,
 };
 
 #[test]
@@ -9,6 +10,13 @@ fn application_state_has_a_stable_machine_readable_shape() {
         instance: "test-1".to_owned(),
         protocol_version: 1,
         selected_session_id: Some("shell-1".to_owned()),
+        appearance: AppearanceSummary {
+            theme: ThemeKey::Neutral,
+            effective_theme: ThemeKey::Neutral,
+            follow_system: false,
+            font: "Monospace 11".to_owned(),
+            available_themes: ThemeKey::ALL.to_vec(),
+        },
         window: WindowState {
             width: 1200,
             height: 800,
@@ -37,6 +45,16 @@ fn application_state_has_a_stable_machine_readable_shape() {
             "instance": "test-1",
             "protocolVersion": 1,
             "selectedSessionId": "shell-1",
+            "appearance": {
+                "theme": "neutral",
+                "effectiveTheme": "neutral",
+                "followSystem": false,
+                "font": "Monospace 11",
+                "availableThemes": [
+                    "neutral", "neutral-light", "dracula", "tokyo-night",
+                    "solarized-dark", "solarized-light", "light"
+                ]
+            },
             "window": { "width": 1200, "height": 800 },
             "projects": [],
             "worktreeGroups": [],

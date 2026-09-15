@@ -1,6 +1,8 @@
+use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
-    ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, ResponseBody, SessionIdParams,
-    SessionKind, decode_request, decode_response, encode_request, encode_response,
+    AppearanceSetParams, ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION,
+    ResponseBody, SessionIdParams, SessionKind, decode_request, decode_response, encode_request,
+    encode_response,
 };
 use serde_json::json;
 
@@ -86,6 +88,11 @@ fn every_core_method_decodes_to_a_typed_command() {
         ("ui.inspect", "{}", "UiInspect"),
         ("ui.capture", "{}", "UiCapture"),
         (
+            "appearance.set",
+            r#"{"theme":"neutral-light"}"#,
+            "AppearanceSet",
+        ),
+        (
             "session.create",
             r#"{"kind":"custom","command":"printf","args":["hello"],"cwd":"/tmp","name":"Probe"}"#,
             "SessionCreate",
@@ -122,6 +129,32 @@ fn every_core_method_decodes_to_a_typed_command() {
         let wire = format!(r#"{{"version":1,"id":"req","method":"{method}","params":{params}}}"#);
         let request = decode_request(wire.as_bytes()).expect(method);
         assert_eq!(request.command.method(), method, "{expected_variant}");
+    }
+}
+
+#[test]
+fn appearance_updates_decode_to_a_typed_additive_command() {
+    let request = decode_request(br#"{"version":1,"id":"theme","method":"appearance.set","params":{"theme":"tokyo-night","followSystem":true,"font":"Iosevka 12"}}"#)
+        .expect("decode appearance update");
+    assert_eq!(
+        request.command,
+        ControlCommand::AppearanceSet(AppearanceSetParams {
+            theme: Some(ThemeKey::TokyoNight),
+            follow_system: Some(true),
+            font: Some("Iosevka 12".to_owned()),
+        })
+    );
+
+    for invalid in [
+        br#"{"version":1,"id":"theme","method":"appearance.set","params":{}}"#.as_slice(),
+        br#"{"version":1,"id":"theme","method":"appearance.set","params":{"theme":"missing"}}"#
+            .as_slice(),
+        br#"{"version":1,"id":"theme","method":"appearance.set","params":{"font":""}}"#.as_slice(),
+    ] {
+        assert_eq!(
+            decode_request(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams
+        );
     }
 }
 

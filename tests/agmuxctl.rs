@@ -2,9 +2,11 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::thread;
 
+use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
-    CloseSessionParams, ControlCommand, ControlResponse, ControlServer, CreateSessionParams,
-    GetTextParams, RenameSessionParams, SendInputParams, SessionIdParams, SessionKind,
+    AppearanceSetParams, CloseSessionParams, ControlCommand, ControlResponse, ControlServer,
+    CreateSessionParams, GetTextParams, RenameSessionParams, SendInputParams, SessionIdParams,
+    SessionKind,
 };
 use serde_json::json;
 
@@ -250,6 +252,27 @@ fn session_mutation_commands_have_typed_protocol_mappings() {
         ControlCommand::SessionClose(CloseSessionParams {
             session_id: "shell-42".to_owned(),
             allow_missing: true,
+        }),
+    );
+}
+
+#[test]
+fn appearance_set_command_has_a_typed_protocol_mapping() {
+    assert_fixture_command(
+        &[
+            "appearance",
+            "set",
+            "--theme",
+            "solarized-dark",
+            "--follow-system",
+            "true",
+            "--font",
+            "Iosevka 12",
+        ],
+        ControlCommand::AppearanceSet(AppearanceSetParams {
+            theme: Some(ThemeKey::SolarizedDark),
+            follow_system: Some(true),
+            font: Some("Iosevka 12".to_owned()),
         }),
     );
 }

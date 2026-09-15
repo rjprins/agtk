@@ -3,10 +3,12 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
-    ClientError, CloseSessionParams, ControlClient, ControlCommand, ControlRequest,
-    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, RenameSessionParams,
-    ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionState, WaitCondition,
+    AppearanceSetParams, ClientError, CloseSessionParams, ControlClient, ControlCommand,
+    ControlRequest, CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION,
+    RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionState,
+    WaitCondition,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
 
@@ -62,6 +64,9 @@ fn run() -> Result<(), Failure> {
         [command] if command == "state" => ControlCommand::AppGetState,
         [group, command] if group == "ui" && command == "inspect" => ControlCommand::UiInspect,
         [group, command] if group == "ui" && command == "capture" => ControlCommand::UiCapture,
+        [group, action, rest @ ..] if group == "appearance" && action == "set" => {
+            parse_appearance_set(rest)?
+        }
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
             return Err(Failure::Usage(usage().to_owned()));
@@ -415,12 +420,64 @@ fn parse_session_kind(value: &str) -> Result<SessionKind, Failure> {
     }
 }
 
+fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let mut theme = None;
+    let mut follow_system = None;
+    let mut font = None;
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?
+            .clone();
+        match option {
+            "--theme" => theme = Some(parse_theme(&value)?),
+            "--follow-system" => {
+                follow_system = Some(match value.as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => {
+                        return Err(Failure::Usage(
+                            "--follow-system requires true or false".to_owned(),
+                        ));
+                    }
+                });
+            }
+            "--font" => font = Some(value),
+            _ => {
+                return Err(Failure::Usage(format!(
+                    "unknown appearance set option: {option}"
+                )));
+            }
+        }
+        index += 2;
+    }
+    if theme.is_none() && follow_system.is_none() && font.is_none() {
+        return Err(Failure::Usage(
+            "appearance set requires at least one option".to_owned(),
+        ));
+    }
+    Ok(ControlCommand::AppearanceSet(AppearanceSetParams {
+        theme,
+        follow_system,
+        font,
+    }))
+}
+
+fn parse_theme(value: &str) -> Result<ThemeKey, Failure> {
+    ThemeKey::ALL
+        .into_iter()
+        .find(|key| key.as_str() == value)
+        .ok_or_else(|| Failure::Usage(format!("unknown theme: {value}")))
+}
+
 fn usage_failure() -> Failure {
     Failure::Usage(usage().to_owned())
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|appearance set OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

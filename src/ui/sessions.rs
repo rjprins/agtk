@@ -12,6 +12,11 @@ impl Workspace {
                 let selected = store
                     .preference("selectedSessionId")?
                     .and_then(|v| v.as_str().map(str::to_owned));
+                let appearance = store
+                    .preference("appearance")?
+                    .map(serde_json::from_value::<AppearancePreferences>)
+                    .transpose()?
+                    .unwrap_or_default();
                 let mut records = store.sessions()?;
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
@@ -43,11 +48,12 @@ impl Workspace {
                     store.save_session(&record)?;
                     recovered.push((record, connected));
                 }
-                Ok((store, selected, recovered))
+                Ok((store, selected, appearance, recovered))
             },
             |workspace, result| match result {
-                Ok((store, selected, recovered)) => {
+                Ok((store, selected, appearance, recovered)) => {
                     *workspace.store.borrow_mut() = Some(store);
+                    workspace.load_appearance(appearance);
                     for (record, connected) in recovered {
                         let (control, attachment) =
                             connected.map_or((None, None), |(c, a)| (Some(c), Some(a)));
@@ -66,6 +72,7 @@ impl Workspace {
                         }
                     }
                     workspace.new_shell_button.set_sensitive(true);
+                    workspace.theme_button.set_sensitive(true);
                     workspace.start_control_server();
                     if workspace.sessions.borrow().is_empty()
                         && workspace.paths.name().as_str() == "default"
@@ -323,7 +330,7 @@ impl Workspace {
         terminal.set_vexpand(true);
         terminal.set_scrollback_lines(50_000);
         terminal.set_scroll_on_keystroke(true);
-        terminal.set_font(Some(&FontDescription::from_string("Monospace 11")));
+        self.apply_current_terminal_appearance(&terminal);
         let pty = if let Some(attachment) = attachment {
             terminal.feed(&attachment.replay);
             let pty = vte::Pty::foreign_sync(attachment.pty, None::<&gio::Cancellable>)?;

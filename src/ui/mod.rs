@@ -15,10 +15,12 @@ use adw::prelude::*;
 use gtk::pango::FontDescription;
 use vte::prelude::*;
 
+use crate::appearance::{AppearancePreferences, ThemeKey, theme};
 use crate::control::{
-    AppState, AttentionSummary, Bounds, ControlCommand, ControlResponse, ControlServer,
-    CreateSessionParams, ErrorCode, PROTOCOL_VERSION, PendingRequest, SessionKind, SessionState,
-    SessionSummary, TextSnapshot, UiInspection, UiNode, WindowState,
+    AppState, AppearanceSetParams, AppearanceSummary, AttentionSummary, Bounds, ControlCommand,
+    ControlResponse, ControlServer, CreateSessionParams, ErrorCode, PROTOCOL_VERSION,
+    PendingRequest, SessionKind, SessionState, SessionSummary, TextSnapshot, UiInspection, UiNode,
+    WindowState,
 };
 use crate::history::{InputTracker, history_needle};
 use crate::instance::InstancePaths;
@@ -27,6 +29,7 @@ use crate::persist::{PersistResult, SessionRecord, Store};
 use crate::session::{SessionLaunchPlan, receive_attachment};
 use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
 
+mod appearance_ui;
 mod capture;
 mod controls;
 mod history_ui;
@@ -49,6 +52,10 @@ struct Workspace {
     history_button: gtk::MenuButton,
     history_list: gtk::Box,
     history_popover: gtk::Popover,
+    theme_button: gtk::MenuButton,
+    theme_popover: gtk::Popover,
+    follow_system_toggle: gtk::CheckButton,
+    font_entry: gtk::Entry,
     top_bar: adw::HeaderBar,
     sidebar_panel: gtk::Box,
     status_bar: gtk::Box,
@@ -59,6 +66,9 @@ struct Workspace {
     control_server: Rc<RefCell<Option<ControlServer>>>,
     io: IoWorker,
     store: Rc<RefCell<Option<Store>>>,
+    appearance: Rc<RefCell<AppearancePreferences>>,
+    chrome_style: style::ChromeStyle,
+    style_manager: adw::StyleManager,
 }
 
 struct SessionView {
@@ -75,7 +85,13 @@ struct SessionView {
 
 pub fn build(app: &adw::Application, paths: InstancePaths) {
     let display = gtk::gdk::Display::default().expect("GTK application has no display");
-    style::install(&display);
+    let style_manager = adw::StyleManager::for_display(&display);
+    let chrome_theme = if style_manager.is_dark() {
+        theme(ThemeKey::Neutral)
+    } else {
+        theme(ThemeKey::NeutralLight)
+    };
+    let chrome_style = style::ChromeStyle::install(&display, chrome_theme.chrome);
 
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::Single);
@@ -152,6 +168,53 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     history_button.set_tooltip_text(Some("Scroll to a submitted prompt"));
     header.pack_end(&history_button);
 
+    let theme_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    theme_list.set_margin_top(5);
+    theme_list.set_margin_bottom(5);
+    theme_list.set_margin_start(5);
+    theme_list.set_margin_end(5);
+    let theme_heading = gtk::Label::new(Some("TERMINAL APPEARANCE"));
+    theme_heading.set_xalign(0.0);
+    theme_heading.add_css_class("tui-sidebar-heading");
+    theme_list.append(&theme_heading);
+    let mut theme_buttons = Vec::new();
+    for key in ThemeKey::ALL {
+        let choice = gtk::Button::with_label(&format!("[{}]", theme(key).name));
+        choice.add_css_class("tui-button");
+        choice.set_tooltip_text(Some(&format!(
+            "Use the {} terminal palette",
+            theme(key).name
+        )));
+        theme_list.append(&choice);
+        theme_buttons.push((key, choice));
+    }
+    let follow_system_toggle = gtk::CheckButton::with_label("[follow system light/dark]");
+    follow_system_toggle.add_css_class("tui-setting-row");
+    follow_system_toggle.set_tooltip_text(Some(
+        "Resolve the selected terminal palette to its light or dark partner",
+    ));
+    theme_list.append(&follow_system_toggle);
+    let font_entry = gtk::Entry::builder()
+        .text("Monospace 11")
+        .placeholder_text("Terminal font")
+        .build();
+    font_entry.add_css_class("tui-setting-entry");
+    font_entry.set_tooltip_text(Some("Pango terminal font description"));
+    theme_list.append(&font_entry);
+    let apply_font = gtk::Button::with_label("[apply font]");
+    apply_font.add_css_class("tui-button");
+    theme_list.append(&apply_font);
+    let theme_popover = gtk::Popover::builder().child(&theme_list).build();
+    theme_popover.add_css_class("tui-popover");
+    let theme_button = gtk::MenuButton::builder()
+        .label("[theme: neutral]")
+        .popover(&theme_popover)
+        .sensitive(false)
+        .build();
+    theme_button.add_css_class("tui-button");
+    theme_button.set_tooltip_text(Some("Choose terminal colors and font"));
+    header.pack_end(&theme_button);
+
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&split));
@@ -188,6 +251,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         history_button,
         history_list,
         history_popover,
+        theme_button,
+        theme_popover,
+        follow_system_toggle: follow_system_toggle.clone(),
+        font_entry: font_entry.clone(),
         top_bar: header,
         sidebar_panel: sidebar_panel.clone(),
         status_bar: status_bar.clone(),
@@ -198,6 +265,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         control_server: Rc::new(RefCell::new(None)),
         io: IoWorker::default(),
         store: Rc::new(RefCell::new(None)),
+        appearance: Rc::new(RefCell::new(AppearancePreferences::default())),
+        chrome_style,
+        style_manager: style_manager.clone(),
     };
 
     let selected_workspace = workspace.clone();
@@ -214,6 +284,58 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
+
+    for (key, choice) in theme_buttons {
+        let appearance_workspace = workspace.clone();
+        choice.connect_clicked(move |_| {
+            appearance_workspace.set_appearance(
+                AppearanceSetParams {
+                    theme: Some(key),
+                    follow_system: None,
+                    font: None,
+                },
+                None,
+            );
+        });
+    }
+
+    let system_workspace = workspace.clone();
+    follow_system_toggle.connect_toggled(move |toggle| {
+        system_workspace.set_appearance(
+            AppearanceSetParams {
+                theme: None,
+                follow_system: Some(toggle.is_active()),
+                font: None,
+            },
+            None,
+        );
+    });
+
+    let font_workspace = workspace.clone();
+    apply_font.connect_clicked(move |_| {
+        font_workspace.set_appearance(
+            AppearanceSetParams {
+                theme: None,
+                follow_system: None,
+                font: Some(font_workspace.font_entry.text().to_string()),
+            },
+            None,
+        );
+    });
+    let font_workspace = workspace.clone();
+    font_entry.connect_activate(move |_| {
+        font_workspace.set_appearance(
+            AppearanceSetParams {
+                theme: None,
+                follow_system: None,
+                font: Some(font_workspace.font_entry.text().to_string()),
+            },
+            None,
+        );
+    });
+
+    let system_style_workspace = workspace.clone();
+    style_manager.connect_dark_notify(move |_| system_style_workspace.apply_appearance());
 
     workspace.discover_sessions();
 

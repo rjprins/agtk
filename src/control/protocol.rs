@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
+use crate::appearance::ThemeKey;
+
 pub const PROTOCOL_VERSION: u16 = 1;
 pub(crate) const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 const MAX_REQUEST_ID_CHARS: usize = 128;
@@ -21,6 +23,7 @@ pub enum ControlCommand {
     AppGetState,
     UiInspect,
     UiCapture,
+    AppearanceSet(AppearanceSetParams),
     SessionCreate(CreateSessionParams),
     SessionSelect(SessionIdParams),
     SessionSendInput(SendInputParams),
@@ -89,6 +92,14 @@ pub struct CloseSessionParams {
     pub session_id: String,
     #[serde(default)]
     pub allow_missing: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppearanceSetParams {
+    pub theme: Option<ThemeKey>,
+    pub follow_system: Option<bool>,
+    pub font: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +219,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
         "ui.capture" => {
             decode_empty_params(wire.params)?;
             ControlCommand::UiCapture
+        }
+        "appearance.set" => {
+            let params: AppearanceSetParams = decode_params(wire.params)?;
+            validate_appearance(&params)?;
+            ControlCommand::AppearanceSet(params)
         }
         "session.create" => {
             let params: CreateSessionParams = decode_params(wire.params)?;
@@ -334,6 +350,7 @@ impl ControlCommand {
             Self::AppGetState => "app.get_state",
             Self::UiInspect => "ui.inspect",
             Self::UiCapture => "ui.capture",
+            Self::AppearanceSet(_) => "appearance.set",
             Self::SessionCreate(_) => "session.create",
             Self::SessionSelect(_) => "session.select",
             Self::SessionSendInput(_) => "session.send_input",
@@ -349,6 +366,7 @@ impl ControlCommand {
             Self::AppGetState => Ok(("app.get_state", empty_params())),
             Self::UiInspect => Ok(("ui.inspect", empty_params())),
             Self::UiCapture => Ok(("ui.capture", empty_params())),
+            Self::AppearanceSet(params) => Ok(("appearance.set", serde_json::to_value(params)?)),
             Self::SessionCreate(params) => Ok(("session.create", serde_json::to_value(params)?)),
             Self::SessionSelect(params) => Ok(("session.select", serde_json::to_value(params)?)),
             Self::SessionSendInput(params) => {
@@ -466,6 +484,23 @@ fn validate_name(name: &str) -> Result<(), ControlError> {
         return Err(invalid_params(
             "name must be trimmed and contain between 1 and 80 characters",
         ));
+    }
+    Ok(())
+}
+
+fn validate_appearance(params: &AppearanceSetParams) -> Result<(), ControlError> {
+    if params.theme.is_none() && params.follow_system.is_none() && params.font.is_none() {
+        return Err(invalid_params(
+            "at least one appearance setting is required",
+        ));
+    }
+    if let Some(font) = &params.font {
+        let character_count = font.chars().count();
+        if font.trim() != font || !(1..=120).contains(&character_count) || font.contains('\0') {
+            return Err(invalid_params(
+                "font must be trimmed and contain between 1 and 120 characters",
+            ));
+        }
     }
     Ok(())
 }
