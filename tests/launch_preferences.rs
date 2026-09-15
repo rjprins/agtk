@@ -6,6 +6,7 @@ fn quick_launch_preferences_round_trip_project_context() {
     let preferences = QuickLaunchPreferences {
         kind: SessionKind::Codex,
         args: vec!["--model".to_owned(), "gpt-5".to_owned()],
+        flags: std::collections::BTreeMap::new(),
         cwd: Some("/work/agmux-feature".into()),
         project_root: Some("/work/agmux".into()),
         worktree_path: Some("/work/agmux-feature".into()),

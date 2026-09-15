@@ -159,6 +159,38 @@ impl WorktreeManager {
         })
     }
 
+    pub fn branch_names(&self, repo_root: &Path) -> WorktreeResult<Vec<String>> {
+        let repo_root = canonical_repo(repo_root)?;
+        let default = default_branch(&repo_root).ok();
+        let output = git_text(
+            &repo_root,
+            [
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads",
+                "refs/remotes",
+            ],
+        )?;
+        let mut branches = BTreeSet::new();
+        for branch in output
+            .lines()
+            .map(str::trim)
+            .filter(|branch| !branch.is_empty())
+        {
+            let branch = branch.strip_prefix("origin/").unwrap_or(branch);
+            if branch != "HEAD" {
+                branches.insert(branch.to_owned());
+            }
+        }
+        let mut branches = branches.into_iter().collect::<Vec<_>>();
+        branches.sort();
+        if let Some(default) = default {
+            branches.retain(|branch| branch != &default);
+            branches.insert(0, default);
+        }
+        Ok(branches)
+    }
+
     pub fn create(
         &self,
         repo_root: &Path,

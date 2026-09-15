@@ -300,7 +300,10 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
             "launch-project-input",
             "launch-project-dropdown",
             "launch-worktree-input",
-            "launch-worktree-dropdown"
+            "launch-worktree-dropdown",
+            "launch-agent",
+            "launch-branch",
+            "launch-base-branch"
         ]
     );
     thread::sleep(Duration::from_millis(50));

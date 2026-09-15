@@ -63,6 +63,7 @@ pub enum SessionKind {
     Shell,
     Codex,
     Claude,
+    Gemini,
     Custom,
 }
 

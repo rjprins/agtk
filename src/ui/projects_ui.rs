@@ -216,11 +216,14 @@ impl Workspace {
         row.set_activatable(false);
         row.add_css_class("tui-group-row");
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
-        let collapse = gtk::Button::with_label(&format!(
-            "[{}] {}",
-            if settings.is_collapsed { ">" } else { "v" },
-            name
-        ));
+        let collapse = gtk::Button::builder()
+            .label(name)
+            .icon_name(if settings.is_collapsed {
+                "pan-end-symbolic"
+            } else {
+                "pan-down-symbolic"
+            })
+            .build();
         collapse.add_css_class("tui-group-button");
         collapse.set_hexpand(true);
         collapse.set_halign(gtk::Align::Fill);
@@ -236,7 +239,13 @@ impl Workspace {
             );
         });
         content.append(&collapse);
-        let pin = gtk::Button::with_label(if settings.is_pinned { "[*]" } else { "[ ]" });
+        let pin = gtk::Button::builder()
+            .icon_name(if settings.is_pinned {
+                "view-pin-symbolic"
+            } else {
+                "pin-symbolic"
+            })
+            .build();
         pin.add_css_class("tui-button");
         pin.set_tooltip_text(Some(if settings.is_pinned {
             "Unpin project"
@@ -254,7 +263,9 @@ impl Workspace {
             );
         });
         content.append(&pin);
-        let worktrees = gtk::Button::with_label("[wt]");
+        let worktrees = gtk::Button::builder()
+            .icon_name("folder-open-symbolic")
+            .build();
         worktrees.add_css_class("tui-button");
         worktrees.set_tooltip_text(Some("Manage project worktrees"));
         let worktree_workspace = self.clone();
@@ -263,7 +274,9 @@ impl Workspace {
             worktree_workspace.open_worktrees_for_project(&worktree_root)
         });
         content.append(&worktrees);
-        let launch = gtk::Button::with_label("[+]");
+        let launch = gtk::Button::builder()
+            .icon_name("list-add-symbolic")
+            .build();
         launch.add_css_class("tui-button");
         launch.set_tooltip_text(Some("Launch in this project"));
         let launch_workspace = self.clone();

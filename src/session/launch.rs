@@ -35,6 +35,9 @@ impl SessionLaunchPlan {
             SessionKind::Claude => {
                 env::var("AGMUX_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned())
             }
+            SessionKind::Gemini => {
+                env::var("AGMUX_GEMINI_BIN").unwrap_or_else(|_| "gemini".to_owned())
+            }
             SessionKind::Custom => String::new(),
         });
         if command.trim().is_empty() {

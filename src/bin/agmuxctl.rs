@@ -471,6 +471,7 @@ fn parse_session_kind(value: &str) -> Result<SessionKind, Failure> {
         "shell" => Ok(SessionKind::Shell),
         "codex" => Ok(SessionKind::Codex),
         "claude" => Ok(SessionKind::Claude),
+        "gemini" => Ok(SessionKind::Gemini),
         "custom" => Ok(SessionKind::Custom),
         _ => Err(Failure::Usage(format!("unknown session kind: {value}"))),
     }

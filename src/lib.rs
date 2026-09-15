@@ -10,6 +10,7 @@ pub mod emacs;
 pub mod history;
 pub mod instance;
 pub mod io_worker;
+pub mod launch_model;
 pub mod launch_preferences;
 pub mod mcp;
 pub mod persist;

@@ -189,7 +189,7 @@ impl Workspace {
             };
             if !matches!(
                 session.record.kind,
-                SessionKind::Codex | SessionKind::Claude
+                SessionKind::Codex | SessionKind::Claude | SessionKind::Gemini
             ) || session.record.state == SessionState::Exited
             {
                 return;

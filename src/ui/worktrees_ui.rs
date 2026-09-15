@@ -214,7 +214,9 @@ impl Workspace {
         name.set_xalign(0.0);
         name.set_hexpand(true);
         headline.append(&name);
-        let launch = gtk::Button::with_label("[launch]");
+        let launch = gtk::Button::builder()
+            .icon_name("list-add-symbolic")
+            .build();
         launch.add_css_class("tui-button");
         launch.set_tooltip_text(Some("Open quick launch in this worktree"));
         let launch_workspace = self.clone();
@@ -226,7 +228,9 @@ impl Workspace {
         headline.append(&launch);
         if worktree.reap_class.is_some() && !worktree.is_primary && worktree.live_session_count == 0
         {
-            let reap = gtk::Button::with_label("[reap?]");
+            let reap = gtk::Button::builder()
+                .icon_name("user-trash-symbolic")
+                .build();
             reap.add_css_class("tui-danger-button");
             reap.set_tooltip_text(Some("Arm, then confirm guarded reap using this preview"));
             let armed = Rc::new(Cell::new(false));
@@ -237,7 +241,7 @@ impl Workspace {
                     button.set_sensitive(false);
                     reap_workspace.reap_worktree_from_panel(reap_worktree.clone());
                 } else {
-                    button.set_label("[confirm]");
+                    button.set_icon_name("emblem-ok-symbolic");
                 }
             });
             headline.append(&reap);

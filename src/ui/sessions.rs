@@ -328,7 +328,10 @@ impl Workspace {
                     let _ = child.wait();
                 });
                 let (control, attachment) = connected?;
-                record.state = if matches!(record.kind, SessionKind::Codex | SessionKind::Claude) {
+                record.state = if matches!(
+                    record.kind,
+                    SessionKind::Codex | SessionKind::Claude | SessionKind::Gemini
+                ) {
                     SessionState::Busy
                 } else {
                     SessionState::Running
@@ -574,7 +577,9 @@ impl Workspace {
         let kind = gtk::Label::new(Some(session_kind_short(record.kind)));
         kind.add_css_class("tui-kind");
         content.append(&kind);
-        let close = gtk::Button::with_label("[x]");
+        let close = gtk::Button::builder()
+            .icon_name("window-close-symbolic")
+            .build();
         close.add_css_class("tui-button");
         close.set_tooltip_text(Some("Close this shell session"));
         content.append(&close);

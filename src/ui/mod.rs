@@ -79,6 +79,17 @@ struct Workspace {
     updating_pr_toggle: Rc<Cell<bool>>,
     launch_button: gtk::MenuButton,
     launch_popover: gtk::Popover,
+    launch_agent_dropdown: gtk::DropDown,
+    launch_agent_choices: gtk::StringList,
+    launch_agent_options: gtk::Stack,
+    launch_claude_permission: gtk::DropDown,
+    launch_claude_danger: gtk::CheckButton,
+    launch_codex_approval: gtk::DropDown,
+    launch_codex_sandbox: gtk::DropDown,
+    launch_codex_full_auto: gtk::CheckButton,
+    launch_codex_bypass: gtk::CheckButton,
+    launch_gemini_approval: gtk::DropDown,
+    launch_gemini_yolo: gtk::CheckButton,
     launch_cwd: gtk::Entry,
     launch_project: gtk::Entry,
     launch_project_dropdown: gtk::DropDown,
@@ -89,6 +100,12 @@ struct Workspace {
     launch_name: gtk::Entry,
     launch_args: gtk::Entry,
     launch_prompt: gtk::Entry,
+    launch_branch: gtk::Entry,
+    launch_base_branch: gtk::Entry,
+    launch_base_branch_dropdown: gtk::DropDown,
+    launch_base_branch_choices: gtk::StringList,
+    launch_worktree_values: Rc<RefCell<Vec<Option<String>>>>,
+    launch_project_values: Rc<RefCell<Vec<Option<String>>>>,
     worktree_button: gtk::MenuButton,
     worktree_popover: gtk::Popover,
     worktree_root: gtk::Entry,
@@ -218,17 +235,23 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let brand = gtk::Label::new(Some("agmux-native"));
     brand.add_css_class("tui-brand");
     header.pack_start(&brand);
-    let new_shell = gtk::Button::with_label("[+ shell]");
+    let new_shell = gtk::Button::builder()
+        .icon_name("utilities-terminal-symbolic")
+        .build();
     new_shell.add_css_class("tui-button");
     new_shell.set_tooltip_text(Some("Start a shell session"));
     sidebar_actions.append(&new_shell);
     let git_surface = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     git_surface.add_css_class("tui-surface");
-    let magit_button = gtk::Button::with_label("[magit]");
+    let magit_button = gtk::Button::builder()
+        .icon_name("applications-development-symbolic")
+        .build();
     magit_button.add_css_class("tui-button");
     magit_button.set_tooltip_text(Some("Open the selected session worktree in Emacs Magit"));
     git_surface.append(&magit_button);
-    let branch_review_button = gtk::Button::with_label("[review]");
+    let branch_review_button = gtk::Button::builder()
+        .icon_name("document-edit-symbolic")
+        .build();
     branch_review_button.add_css_class("tui-button");
     branch_review_button.set_tooltip_text(Some(
         "Open the selected session worktree in Emacs branch-review",
@@ -237,7 +260,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let git_popover = gtk::Popover::builder().child(&git_surface).build();
     git_popover.add_css_class("tui-popover");
     let git_button = gtk::MenuButton::builder()
-        .label("[git]")
+        .icon_name("applications-development-symbolic")
         .popover(&git_popover)
         .sensitive(false)
         .build();
@@ -250,7 +273,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let claude_model_popover = gtk::Popover::builder().child(&claude_model_list).build();
     claude_model_popover.add_css_class("tui-popover");
     let claude_model_button = gtk::MenuButton::builder()
-        .label("[model]")
+        .icon_name("preferences-system-symbolic")
         .popover(&claude_model_popover)
         .sensitive(false)
         .build();
@@ -271,13 +294,15 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     pr_heading.set_hexpand(true);
     pr_heading.add_css_class("tui-sidebar-heading");
     pr_heading_row.append(&pr_heading);
-    let pr_refresh = gtk::Button::with_label("[refresh]");
+    let pr_refresh = gtk::Button::builder()
+        .icon_name("view-refresh-symbolic")
+        .build();
     pr_refresh.add_css_class("tui-button");
     pr_heading_row.append(&pr_refresh);
     pr_surface.append(&pr_heading_row);
     let pr_root = launch_entry("Project root", "absolute Azure DevOps repository root");
     pr_surface.append(&pr_root.0);
-    let pr_auto_toggle = gtk::CheckButton::with_label("[auto-review new attention]");
+    let pr_auto_toggle = gtk::CheckButton::with_label("Auto-review new attention");
     pr_auto_toggle.add_css_class("tui-setting-row");
     pr_auto_toggle.set_tooltip_text(Some(
         "Opt in to launching Codex review sessions for later PR attention changes",
@@ -296,7 +321,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     pr_popover.add_css_class("tui-popover");
     pr_popover.set_position(gtk::PositionType::Left);
     let pr_button = gtk::MenuButton::builder()
-        .label("[prs]")
+        .icon_name("git-merge-symbolic")
         .popover(&pr_popover)
         .sensitive(false)
         .build();
@@ -316,12 +341,69 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_heading.set_xalign(0.0);
     launch_heading.add_css_class("tui-sidebar-heading");
     launch_form.append(&launch_heading);
+    let launch_agent_choices = gtk::StringList::new(&["claude", "codex", "gemini", "shell"]);
+    let launch_agent_dropdown =
+        gtk::DropDown::new(Some(launch_agent_choices.clone()), None::<&gtk::Expression>);
+    launch_agent_dropdown.set_enable_search(true);
+    launch_agent_dropdown.set_selected(0);
+    let agent_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+    agent_row.add_css_class("tui-setting-row");
+    let agent_label = gtk::Label::new(Some("Agent"));
+    agent_label.set_xalign(0.0);
+    agent_label.set_width_chars(18);
+    agent_row.append(&agent_label);
+    agent_row.append(&launch_agent_dropdown);
+    launch_form.append(&agent_row);
+
+    let launch_agent_options = gtk::Stack::builder()
+        .transition_type(gtk::StackTransitionType::None)
+        .build();
+    let (launch_claude_permission, launch_claude_danger) = claude_launch_options();
+    let (launch_codex_approval, launch_codex_sandbox, launch_codex_full_auto, launch_codex_bypass) =
+        codex_launch_options();
+    let (launch_gemini_approval, launch_gemini_yolo) = gemini_launch_options();
+    launch_claude_danger.set_active(true);
+    launch_codex_full_auto.set_active(true);
+    launch_agent_options.add_named(
+        &launch_option_page(
+            "Permission mode",
+            &launch_claude_permission,
+            "Skip permission prompts",
+            &launch_claude_danger,
+        ),
+        Some("claude"),
+    );
+    launch_agent_options.add_named(
+        &launch_option_page_with_two_dropdowns(
+            "Ask for approval",
+            &launch_codex_approval,
+            "Sandbox",
+            &launch_codex_sandbox,
+            &[
+                ("Full auto", &launch_codex_full_auto),
+                ("Bypass approvals and sandbox", &launch_codex_bypass),
+            ],
+        ),
+        Some("codex"),
+    );
+    launch_agent_options.add_named(
+        &launch_option_page(
+            "Approval mode",
+            &launch_gemini_approval,
+            "YOLO",
+            &launch_gemini_yolo,
+        ),
+        Some("gemini"),
+    );
+    launch_agent_options.add_named(&gtk::Box::new(gtk::Orientation::Vertical, 0), Some("shell"));
+    launch_form.append(&launch_agent_options);
     let launch_cwd = launch_entry("Working directory", "cwd");
     let launch_project = launch_entry("Project root", "project root (optional)");
     let launch_project_choices = gtk::StringList::new(&[]);
     let launch_project_dropdown = searchable_path_dropdown(&launch_project_choices);
     launch_project.0.append(&launch_project_dropdown);
-    let launch_worktree = launch_entry("Worktree", "worktree path (optional)");
+    install_path_completion(&launch_project.1);
+    let launch_worktree = launch_entry("Worktree", "choose a worktree or type a path");
     let launch_worktree_choices = gtk::StringList::new(&[]);
     let launch_worktree_dropdown = searchable_path_dropdown(&launch_worktree_choices);
     launch_worktree.0.append(&launch_worktree_dropdown);
@@ -331,10 +413,19 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         "JSON array, for example [\"--model\",\"opus\"]",
     );
     let launch_prompt = launch_entry("Initial input", "initial prompt (optional)");
+    let launch_branch = launch_entry("Branch name", "generated when empty");
+    let launch_base_branch = launch_entry("Base branch", "main");
+    let launch_base_branch_choices = gtk::StringList::new(&[]);
+    let launch_base_branch_dropdown = searchable_path_dropdown(&launch_base_branch_choices);
+    launch_base_branch.0.append(&launch_base_branch_dropdown);
+    launch_branch.0.set_visible(false);
+    launch_base_branch.0.set_visible(false);
     for row in [
         &launch_cwd.0,
         &launch_project.0,
         &launch_worktree.0,
+        &launch_branch.0,
+        &launch_base_branch.0,
         &launch_name.0,
         &launch_args.0,
         &launch_prompt.0,
@@ -342,9 +433,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_form.append(row);
     }
     let launch_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let launch_shell = gtk::Button::with_label("[shell]");
-    let launch_codex = gtk::Button::with_label("[codex]");
-    let launch_claude = gtk::Button::with_label("[claude]");
+    let launch_submit = gtk::Button::with_label("Launch");
+    launch_submit.add_css_class("suggested-action");
+    launch_actions.append(&launch_submit);
+    let launch_shell = gtk::Button::with_label("Shell");
+    let launch_codex = gtk::Button::with_label("Codex");
+    let launch_claude = gtk::Button::with_label("Claude");
     for button in [&launch_shell, &launch_codex, &launch_claude] {
         button.add_css_class("tui-button");
         launch_actions.append(button);
@@ -353,7 +447,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let launch_popover = gtk::Popover::builder().child(&launch_form).build();
     launch_popover.add_css_class("tui-popover");
     let launch_button = gtk::MenuButton::builder()
-        .label("[launch]")
+        .icon_name("list-add-symbolic")
         .popover(&launch_popover)
         .sensitive(false)
         .build();
@@ -372,7 +466,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     worktree_heading.add_css_class("tui-sidebar-heading");
     worktree_surface.append(&worktree_heading);
     let worktree_root = launch_entry("Project root", "absolute repository root");
-    let worktree_refresh = gtk::Button::with_label("[refresh]");
+    let worktree_refresh = gtk::Button::builder()
+        .icon_name("view-refresh-symbolic")
+        .build();
     worktree_refresh.add_css_class("tui-button");
     worktree_root.0.append(&worktree_refresh);
     worktree_surface.append(&worktree_root.0);
@@ -382,7 +478,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     worktree_surface.append(&worktree_branch.0);
     worktree_surface.append(&worktree_base.0);
     worktree_surface.append(&worktree_purpose.0);
-    let worktree_create = gtk::Button::with_label("[create worktree]");
+    let worktree_create = gtk::Button::builder()
+        .icon_name("list-add-symbolic")
+        .build();
     worktree_create.add_css_class("tui-button");
     worktree_surface.append(&worktree_create);
     let worktree_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -397,7 +495,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let worktree_popover = gtk::Popover::builder().child(&worktree_surface).build();
     worktree_popover.add_css_class("tui-popover");
     let worktree_button = gtk::MenuButton::builder()
-        .label("[wt]")
+        .icon_name("folder-open-symbolic")
         .popover(&worktree_popover)
         .sensitive(false)
         .build();
@@ -417,7 +515,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     agent_heading.set_hexpand(true);
     agent_heading.add_css_class("tui-sidebar-heading");
     agent_heading_row.append(&agent_heading);
-    let agent_refresh = gtk::Button::with_label("[refresh]");
+    let agent_refresh = gtk::Button::builder()
+        .icon_name("view-refresh-symbolic")
+        .build();
     agent_refresh.add_css_class("tui-button");
     agent_heading_row.append(&agent_refresh);
     agent_surface.append(&agent_heading_row);
@@ -444,7 +544,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     agent_detail.append(&agent_restore_cwd.0);
     agent_detail.append(&agent_restore_project.0);
     agent_detail.append(&agent_restore_worktree.0);
-    let agent_restore_button = gtk::Button::with_label("[restore selected]");
+    let agent_restore_button = gtk::Button::builder()
+        .icon_name("document-revert-symbolic")
+        .build();
     agent_restore_button.add_css_class("tui-button");
     agent_restore_button.set_sensitive(false);
     agent_detail.append(&agent_restore_button);
@@ -458,7 +560,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let agent_popover = gtk::Popover::builder().child(&agent_surface).build();
     agent_popover.add_css_class("tui-popover");
     let agent_button = gtk::MenuButton::builder()
-        .label("[recent]")
+        .icon_name("document-open-recent-symbolic")
         .popover(&agent_popover)
         .sensitive(false)
         .build();
@@ -480,7 +582,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     let history_popover = gtk::Popover::builder().child(&history_scroller).build();
     let history_button = gtk::MenuButton::builder()
-        .label("[hist]")
+        .icon_name("view-list-symbolic")
         .popover(&history_popover)
         .sensitive(false)
         .build();
@@ -501,16 +603,16 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     search_entry.add_css_class("tui-setting-entry");
     search_surface.append(&search_entry);
-    let search_previous = gtk::Button::with_label("[prev]");
+    let search_previous = gtk::Button::builder().icon_name("go-up-symbolic").build();
     search_previous.add_css_class("tui-button");
     search_surface.append(&search_previous);
-    let search_next = gtk::Button::with_label("[next]");
+    let search_next = gtk::Button::builder().icon_name("go-down-symbolic").build();
     search_next.add_css_class("tui-button");
     search_surface.append(&search_next);
     let search_popover = gtk::Popover::builder().child(&search_surface).build();
     search_popover.add_css_class("tui-popover");
     let search_button = gtk::MenuButton::builder()
-        .label("[search]")
+        .icon_name("edit-find-symbolic")
         .popover(&search_popover)
         .sensitive(false)
         .build();
@@ -530,7 +632,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     theme_list.append(&theme_heading);
     let mut theme_buttons = Vec::new();
     for key in ThemeKey::ALL {
-        let choice = gtk::Button::with_label(&format!("[{}]", theme(key).name));
+        let choice = gtk::Button::with_label(theme(key).name);
         choice.add_css_class("tui-button");
         choice.set_tooltip_text(Some(&format!(
             "Use the {} terminal palette",
@@ -539,7 +641,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         theme_list.append(&choice);
         theme_buttons.push((key, choice));
     }
-    let follow_system_toggle = gtk::CheckButton::with_label("[follow system light/dark]");
+    let follow_system_toggle = gtk::CheckButton::with_label("Follow system light/dark");
     follow_system_toggle.add_css_class("tui-setting-row");
     follow_system_toggle.set_tooltip_text(Some(
         "Resolve the selected terminal palette to its light or dark partner",
@@ -552,13 +654,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     font_entry.add_css_class("tui-setting-entry");
     font_entry.set_tooltip_text(Some("Pango terminal font description"));
     theme_list.append(&font_entry);
-    let apply_font = gtk::Button::with_label("[apply font]");
+    let apply_font = gtk::Button::with_label("Apply font");
     apply_font.add_css_class("tui-button");
     theme_list.append(&apply_font);
     let theme_popover = gtk::Popover::builder().child(&theme_list).build();
     theme_popover.add_css_class("tui-popover");
     let theme_button = gtk::MenuButton::builder()
-        .label("[neutral]")
+        .icon_name("preferences-desktop-theme-symbolic")
         .popover(&theme_popover)
         .sensitive(false)
         .build();
@@ -591,11 +693,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             .build();
         entry.add_css_class("tui-setting-entry");
         row.append(&entry);
-        let set = gtk::Button::with_label("[set]");
+        let set = gtk::Button::with_label("Set");
         set.add_css_class("tui-button");
         set.set_tooltip_text(Some(&format!("Set shortcut for {}", action.label())));
         row.append(&set);
-        let reset = gtk::Button::with_label("[reset]");
+        let reset = gtk::Button::with_label("Reset");
         reset.add_css_class("tui-button");
         reset.set_tooltip_text(Some(&format!("Reset shortcut for {}", action.label())));
         row.append(&reset);
@@ -616,14 +718,14 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     claude_presets_entry.add_css_class("tui-setting-entry");
     claude_presets_row.append(&claude_presets_entry);
-    let apply_claude_presets = gtk::Button::with_label("[apply]");
+    let apply_claude_presets = gtk::Button::with_label("Apply");
     apply_claude_presets.add_css_class("tui-button");
     claude_presets_row.append(&apply_claude_presets);
     shortcut_list.append(&claude_presets_row);
     let shortcut_popover = gtk::Popover::builder().child(&shortcut_list).build();
     shortcut_popover.add_css_class("tui-popover");
     let shortcut_button = gtk::MenuButton::builder()
-        .label("[keys]")
+        .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
         .popover(&shortcut_popover)
         .sensitive(false)
         .build();
@@ -679,6 +781,17 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         updating_pr_toggle: Rc::new(Cell::new(false)),
         launch_button,
         launch_popover,
+        launch_agent_dropdown,
+        launch_agent_choices,
+        launch_agent_options,
+        launch_claude_permission,
+        launch_claude_danger,
+        launch_codex_approval,
+        launch_codex_sandbox,
+        launch_codex_full_auto,
+        launch_codex_bypass,
+        launch_gemini_approval,
+        launch_gemini_yolo,
         launch_cwd: launch_cwd.1,
         launch_project: launch_project.1,
         launch_project_dropdown,
@@ -689,6 +802,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_name: launch_name.1,
         launch_args: launch_args.1,
         launch_prompt: launch_prompt.1,
+        launch_branch: launch_branch.1,
+        launch_base_branch: launch_base_branch.1,
+        launch_base_branch_dropdown,
+        launch_base_branch_choices,
+        launch_worktree_values: Rc::new(RefCell::new(Vec::new())),
+        launch_project_values: Rc::new(RefCell::new(Vec::new())),
         worktree_button,
         worktree_popover,
         worktree_root: worktree_root.1,
@@ -762,6 +881,29 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     });
 
     workspace.connect_launch_path_controls();
+    let launch_agent_workspace = workspace.clone();
+    workspace
+        .launch_agent_dropdown
+        .connect_selected_notify(move |dropdown| {
+            let kind = match dropdown
+                .selected_item()
+                .and_then(|item| item.downcast::<gtk::StringObject>().ok())
+                .map(|item| item.string().to_string())
+                .as_deref()
+            {
+                Some("codex") => SessionKind::Codex,
+                Some("claude") => SessionKind::Claude,
+                Some("gemini") => SessionKind::Gemini,
+                _ => SessionKind::Shell,
+            };
+            launch_agent_workspace
+                .launch_agent_options
+                .set_visible_child_name(session_kind_name(kind));
+        });
+    let launch_submit_workspace = workspace.clone();
+    launch_submit.connect_clicked(move |_| {
+        launch_submit_workspace.launch_from_form(launch_submit_workspace.selected_launch_agent());
+    });
     let launch_workspace = workspace.clone();
     workspace
         .launch_popover
@@ -840,7 +982,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         (SessionKind::Claude, launch_claude),
     ] {
         let quick_launch_workspace = workspace.clone();
-        button.connect_clicked(move |_| quick_launch_workspace.launch_from_form(kind));
+        button.connect_clicked(move |_| {
+            quick_launch_workspace.set_launch_agent(kind);
+            quick_launch_workspace.launch_from_form(kind);
+        });
     }
 
     let search_workspace = workspace.clone();
@@ -1077,6 +1222,7 @@ const fn session_kind_name(kind: SessionKind) -> &'static str {
         SessionKind::Shell => "shell",
         SessionKind::Codex => "codex",
         SessionKind::Claude => "claude",
+        SessionKind::Gemini => "gemini",
         SessionKind::Custom => "custom",
     }
 }
@@ -1086,6 +1232,7 @@ const fn session_kind_short(kind: SessionKind) -> &'static str {
         SessionKind::Shell => "SH",
         SessionKind::Codex => "CX",
         SessionKind::Claude => "CL",
+        SessionKind::Gemini => "GM",
         SessionKind::Custom => "EX",
     }
 }
@@ -1142,6 +1289,105 @@ fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
     entry.add_css_class("tui-setting-entry");
     row.append(&entry);
     (row, entry)
+}
+
+#[allow(deprecated)]
+fn install_path_completion(entry: &gtk::Entry) {
+    let model = gtk::ListStore::new(&[String::static_type()]);
+    let completion = gtk::EntryCompletion::builder()
+        .model(&model)
+        .minimum_key_length(1)
+        .popup_completion(true)
+        .inline_completion(false)
+        .text_column(0)
+        .build();
+    entry.set_completion(Some(&completion));
+    let completion_model = model.clone();
+    entry.connect_changed(move |entry| {
+        while let Some(row) = completion_model.iter_first() {
+            completion_model.remove(&row);
+        }
+        for completion in crate::launch_model::path_completions(entry.text().as_str()) {
+            let row = completion_model.append();
+            completion_model.set(&row, &[(0, &completion)]);
+        }
+    });
+}
+
+fn launch_dropdown(values: &[&str]) -> gtk::DropDown {
+    let model = gtk::StringList::new(values);
+    let dropdown = gtk::DropDown::new(Some(model), None::<&gtk::Expression>);
+    dropdown.set_enable_search(true);
+    dropdown.set_hexpand(true);
+    dropdown.add_css_class("tui-path-dropdown");
+    dropdown
+}
+
+fn launch_option_row(label: &str, control: &impl IsA<gtk::Widget>) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+    row.add_css_class("tui-setting-row");
+    let label_widget = gtk::Label::new(Some(label));
+    label_widget.set_xalign(0.0);
+    label_widget.set_width_chars(18);
+    row.append(&label_widget);
+    row.append(control);
+    row
+}
+
+fn claude_launch_options() -> (gtk::DropDown, gtk::CheckButton) {
+    (
+        launch_dropdown(&["default", "acceptEdits", "bypassPermissions", "plan"]),
+        gtk::CheckButton::with_label("--dangerously-skip-permissions"),
+    )
+}
+
+fn codex_launch_options() -> (
+    gtk::DropDown,
+    gtk::DropDown,
+    gtk::CheckButton,
+    gtk::CheckButton,
+) {
+    (
+        launch_dropdown(&["untrusted", "on-failure", "on-request", "never"]),
+        launch_dropdown(&["read-only", "workspace-write", "danger-full-access"]),
+        gtk::CheckButton::with_label("--full-auto"),
+        gtk::CheckButton::with_label("--dangerously-bypass-approvals-and-sandbox"),
+    )
+}
+
+fn gemini_launch_options() -> (gtk::DropDown, gtk::CheckButton) {
+    (
+        launch_dropdown(&["default", "auto_edit", "yolo", "plan"]),
+        gtk::CheckButton::with_label("--yolo"),
+    )
+}
+
+fn launch_option_page(
+    dropdown_label: &str,
+    dropdown: &gtk::DropDown,
+    _check_label: &str,
+    check: &gtk::CheckButton,
+) -> gtk::Box {
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    page.append(&launch_option_row(dropdown_label, dropdown));
+    page.append(check);
+    page
+}
+
+fn launch_option_page_with_two_dropdowns(
+    first_label: &str,
+    first: &gtk::DropDown,
+    second_label: &str,
+    second: &gtk::DropDown,
+    checks: &[(&str, &gtk::CheckButton)],
+) -> gtk::Box {
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    page.append(&launch_option_row(first_label, first));
+    page.append(&launch_option_row(second_label, second));
+    for (_, check) in checks {
+        page.append(*check);
+    }
+    page
 }
 
 fn searchable_path_dropdown(model: &gtk::StringList) -> gtk::DropDown {

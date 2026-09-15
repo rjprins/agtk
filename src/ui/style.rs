@@ -81,6 +81,7 @@ const TUI_CSS: &str = r#"
 .tui-button:hover { color: @background; background: @accent; }
 .tui-button:focus-visible { outline: 1px solid @accent; outline-offset: -1px; }
 .tui-button:disabled { color: @muted; }
+.tui-button image { -gtk-icon-size: 16px; }
 .tui-danger-button {
   min-height: 24px;
   min-width: 0;
@@ -138,6 +139,7 @@ const TUI_CSS: &str = r#"
   font-weight: bold;
 }
 .tui-group-button:hover { color: @background; background: @accent; }
+.tui-group-button image { -gtk-icon-size: 14px; margin-right: 4px; }
 .tui-subgroup-row {
   padding: 3px 8px;
   color: @muted;

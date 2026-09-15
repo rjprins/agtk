@@ -224,7 +224,9 @@ impl Workspace {
         title.set_tooltip_text(Some(&item.pull_request.title));
         headline.append(&title);
 
-        let view = gtk::Button::with_label("[view]");
+        let view = gtk::Button::builder()
+            .icon_name("web-browser-symbolic")
+            .build();
         view.add_css_class("tui-button");
         view.set_tooltip_text(Some(
             "Open in the browser and mark current attention viewed",
@@ -259,7 +261,9 @@ impl Workspace {
         });
         headline.append(&view);
 
-        let review = gtk::Button::with_label("[review]");
+        let review = gtk::Button::builder()
+            .icon_name("document-edit-symbolic")
+            .build();
         review.add_css_class("tui-button");
         review.set_tooltip_text(Some("Launch Codex with the review-pr workflow"));
         let review_workspace = self.clone();
@@ -486,11 +490,11 @@ impl Workspace {
     pub(super) fn update_pr_indicator(&self) {
         let count = self.pr_attention_count();
         if count == 0 {
-            self.pr_button.set_label("[prs]");
+            self.pr_button.set_label("PR");
             self.pr_button
                 .set_tooltip_text(Some("Active Azure DevOps pull requests"));
         } else {
-            self.pr_button.set_label("[prs!]");
+            self.pr_button.set_label("PR!");
             self.pr_button
                 .set_tooltip_text(Some(&format!("{count} pull request attention marker(s)")));
         }

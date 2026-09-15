@@ -123,8 +123,10 @@ impl Workspace {
         self.chrome_style
             .apply(theme(chrome_key).chrome, preferences.ui_font_size);
         let effective = self.effective_terminal_theme();
-        self.theme_button
-            .set_label(&format!("[{}]", effective.as_str()));
+        self.theme_button.set_tooltip_text(Some(&format!(
+            "Terminal appearance: {}",
+            effective.as_str()
+        )));
         if self.follow_system_toggle.is_active() != preferences.follow_system {
             self.follow_system_toggle
                 .set_active(preferences.follow_system);
