@@ -1,5 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
+
+use crate::control::SessionKind;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Choice {
     pub value: String,
@@ -72,6 +76,49 @@ pub fn path_completions(prefix: &str) -> Vec<String> {
         .collect::<Vec<_>>();
     completions.sort();
     completions
+}
+
+pub fn provider_args(
+    kind: SessionKind,
+    flags: &std::collections::BTreeMap<String, Value>,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    let value = |key: &str| flags.get(key).and_then(Value::as_str);
+    let enabled = |key: &str| flags.get(key).and_then(Value::as_bool).unwrap_or(false);
+    match kind {
+        SessionKind::Claude => {
+            if let Some(value) = value("--permission-mode") {
+                args.extend(["--permission-mode".to_owned(), value.to_owned()]);
+            }
+            if enabled("--dangerously-skip-permissions") {
+                args.push("--dangerously-skip-permissions".to_owned());
+            }
+        }
+        SessionKind::Codex => {
+            if let Some(value) = value("--ask-for-approval") {
+                args.extend(["--ask-for-approval".to_owned(), value.to_owned()]);
+            }
+            if let Some(value) = value("--sandbox") {
+                args.extend(["--sandbox".to_owned(), value.to_owned()]);
+            }
+            if enabled("--full-auto") {
+                args.push("--full-auto".to_owned());
+            }
+            if enabled("--dangerously-bypass-approvals-and-sandbox") {
+                args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+            }
+        }
+        SessionKind::Gemini => {
+            if let Some(value) = value("--approval-mode") {
+                args.extend(["--approval-mode".to_owned(), value.to_owned()]);
+            }
+            if enabled("--yolo") {
+                args.push("--yolo".to_owned());
+            }
+        }
+        SessionKind::Shell | SessionKind::Custom => {}
+    }
+    args
 }
 
 fn project_name(path: &str) -> String {

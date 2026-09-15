@@ -68,7 +68,7 @@ impl Workspace {
         };
         let flags = self.current_launch_flags(kind);
         let mut args = raw_args.clone();
-        args.extend(flags_to_arguments(kind, &flags));
+        args.extend(launch_model::provider_args(kind, &flags));
         let launch_args = args;
         let creating_worktree = self
             .launch_branch
@@ -635,46 +635,6 @@ fn set_check_value(check: &gtk::CheckButton, value: Option<&Value>) {
     if let Some(value) = value.and_then(Value::as_bool) {
         check.set_active(value);
     }
-}
-
-fn flags_to_arguments(kind: SessionKind, flags: &BTreeMap<String, Value>) -> Vec<String> {
-    let mut args = Vec::new();
-    let value = |key: &str| flags.get(key).and_then(Value::as_str);
-    let enabled = |key: &str| flags.get(key).and_then(Value::as_bool).unwrap_or(false);
-    match kind {
-        SessionKind::Claude => {
-            if let Some(value) = value("--permission-mode") {
-                args.extend(["--permission-mode".to_owned(), value.to_owned()]);
-            }
-            if enabled("--dangerously-skip-permissions") {
-                args.push("--dangerously-skip-permissions".to_owned());
-            }
-        }
-        SessionKind::Codex => {
-            if let Some(value) = value("--ask-for-approval") {
-                args.extend(["--ask-for-approval".to_owned(), value.to_owned()]);
-            }
-            if let Some(value) = value("--sandbox") {
-                args.extend(["--sandbox".to_owned(), value.to_owned()]);
-            }
-            if enabled("--full-auto") {
-                args.push("--full-auto".to_owned());
-            }
-            if enabled("--dangerously-bypass-approvals-and-sandbox") {
-                args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
-            }
-        }
-        SessionKind::Gemini => {
-            if let Some(value) = value("--approval-mode") {
-                args.extend(["--approval-mode".to_owned(), value.to_owned()]);
-            }
-            if enabled("--yolo") {
-                args.push("--yolo".to_owned());
-            }
-        }
-        SessionKind::Shell | SessionKind::Custom => {}
-    }
-    args
 }
 
 fn generated_branch_name() -> String {

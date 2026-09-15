@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
+use agmux_native::control::SessionKind;
 use agmux_native::launch_model::{
-    NEW_WORKTREE, directory_choices, path_completions, worktree_choices,
+    NEW_WORKTREE, directory_choices, path_completions, provider_args, worktree_choices,
 };
+use serde_json::json;
 
 #[test]
 fn worktree_choices_keep_new_and_current_pinned_then_sort_real_worktrees() {
@@ -43,4 +45,26 @@ fn path_completions_only_return_matching_directories() {
         path_completions(&prefix),
         vec![temp.path().join("alpha").to_string_lossy()]
     );
+}
+
+#[test]
+fn provider_args_translate_saved_options_without_affecting_shell() {
+    let flags = [
+        ("--ask-for-approval".to_owned(), json!("never")),
+        ("--sandbox".to_owned(), json!("workspace-write")),
+        ("--full-auto".to_owned(), json!(true)),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        provider_args(SessionKind::Codex, &flags),
+        [
+            "--ask-for-approval",
+            "never",
+            "--sandbox",
+            "workspace-write",
+            "--full-auto"
+        ]
+    );
+    assert!(provider_args(SessionKind::Shell, &flags).is_empty());
 }
