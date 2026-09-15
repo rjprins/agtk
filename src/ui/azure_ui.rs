@@ -276,17 +276,28 @@ impl Workspace {
             .as_ref()
             .map_or("project root".to_owned(), |path| path.display().to_string());
         let details = gtk::Label::new(Some(&format!(
-            "{} -> {}    {}    comments:{}    {}",
+            "{}    comments:{}    {} -> {}",
+            item.pull_request.author,
+            item.pull_request.unresolved_threads,
+            item.pull_request.source_branch,
+            item.pull_request.target_branch,
+        )));
+        details.set_xalign(0.0);
+        details.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        details.add_css_class("tui-muted");
+        details.set_tooltip_text(Some(&format!(
+            "{} -> {} by {}, {} unresolved thread(s)",
             item.pull_request.source_branch,
             item.pull_request.target_branch,
             item.pull_request.author,
-            item.pull_request.unresolved_threads,
-            location
+            item.pull_request.unresolved_threads
         )));
-        details.set_xalign(0.0);
-        details.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        details.add_css_class("tui-muted");
         row.append(&details);
+        let location = gtk::Label::new(Some(&format!("cwd  {location}")));
+        location.set_xalign(0.0);
+        location.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        location.add_css_class("tui-muted");
+        row.append(&location);
         row
     }
 

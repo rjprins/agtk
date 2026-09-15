@@ -30,6 +30,9 @@ impl InstanceName {
     }
 
     pub fn application_id(&self) -> String {
+        if self.0 == "default" {
+            return "nl.rutger.AgmuxNative".to_owned();
+        }
         let suffix = self.0.replace('-', "_");
         format!("nl.rutger.AgmuxNative.Devel.i_{suffix}")
     }

@@ -44,10 +44,7 @@ fn instance_names_produce_distinct_valid_application_ids() {
     let default = InstanceName::parse("default").expect("default instance");
     let test = InstanceName::parse("test-123").expect("test instance");
 
-    assert_eq!(
-        default.application_id(),
-        "nl.rutger.AgmuxNative.Devel.i_default"
-    );
+    assert_eq!(default.application_id(), "nl.rutger.AgmuxNative");
     assert_eq!(
         test.application_id(),
         "nl.rutger.AgmuxNative.Devel.i_test_123"

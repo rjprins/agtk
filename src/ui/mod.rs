@@ -266,6 +266,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     pr_surface.append(&pr_scroller);
     let pr_popover = gtk::Popover::builder().child(&pr_surface).build();
     pr_popover.add_css_class("tui-popover");
+    pr_popover.set_position(gtk::PositionType::Left);
     let pr_button = gtk::MenuButton::builder()
         .label("[prs]")
         .popover(&pr_popover)
