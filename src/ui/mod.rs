@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -80,8 +82,11 @@ struct Workspace {
     updating_pr_toggle: Rc<Cell<bool>>,
     launch_button: gtk::MenuButton,
     launch_popover: gtk::Popover,
+    launch_cancel: gtk::Button,
+    launch_submit: gtk::Button,
     launch_agent_dropdown: gtk::DropDown,
     launch_agent_choices: gtk::StringList,
+    launch_agent_buttons: Rc<Vec<(SessionKind, gtk::ToggleButton)>>,
     launch_agent_options: gtk::Stack,
     launch_claude_permission: gtk::DropDown,
     launch_claude_danger: gtk::CheckButton,
@@ -95,9 +100,13 @@ struct Workspace {
     launch_project: gtk::Entry,
     launch_project_dropdown: gtk::DropDown,
     launch_project_choices: gtk::StringList,
+    launch_project_completion: gtk::ListStore,
+    launch_project_completion_items: Rc<RefCell<Vec<(String, String)>>>,
     launch_worktree: gtk::Entry,
     launch_worktree_dropdown: gtk::DropDown,
     launch_worktree_choices: gtk::StringList,
+    launch_worktree_completion: gtk::ListStore,
+    launch_worktree_completion_items: Rc<RefCell<Vec<(String, String)>>>,
     launch_name: gtk::Entry,
     launch_args: gtk::Entry,
     launch_prompt: gtk::Entry,
@@ -105,6 +114,8 @@ struct Workspace {
     launch_base_branch: gtk::Entry,
     launch_base_branch_dropdown: gtk::DropDown,
     launch_base_branch_choices: gtk::StringList,
+    launch_base_branch_completion: gtk::ListStore,
+    launch_base_branch_completion_items: Rc<RefCell<Vec<(String, String)>>>,
     launch_worktree_values: Rc<RefCell<Vec<Option<String>>>>,
     launch_project_values: Rc<RefCell<Vec<Option<String>>>>,
     launch_project_custom: Rc<Cell<bool>>,
@@ -342,7 +353,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_form.set_margin_bottom(6);
     launch_form.set_margin_start(6);
     launch_form.set_margin_end(6);
-    let launch_heading = gtk::Label::new(Some("QUICK LAUNCH"));
+    let launch_heading = gtk::Label::new(Some("Launch agent"));
     launch_heading.set_xalign(0.0);
     launch_heading.add_css_class("tui-sidebar-heading");
     launch_form.append(&launch_heading);
@@ -351,12 +362,36 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         gtk::DropDown::new(Some(launch_agent_choices.clone()), None::<&gtk::Expression>);
     launch_agent_dropdown.set_enable_search(true);
     launch_agent_dropdown.set_selected(0);
+    launch_agent_dropdown.set_visible(false);
     let agent_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
     agent_row.add_css_class("tui-setting-row");
     let agent_label = gtk::Label::new(Some("Agent"));
     agent_label.set_xalign(0.0);
     agent_label.set_width_chars(18);
     agent_row.append(&agent_label);
+    let launch_agent_button_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    launch_agent_button_box.add_css_class("tui-agent-buttons");
+    let mut launch_agent_buttons = Vec::new();
+    let mut previous_agent_button: Option<gtk::ToggleButton> = None;
+    for (kind, label) in [
+        (SessionKind::Claude, "claude"),
+        (SessionKind::Codex, "codex"),
+        (SessionKind::Gemini, "gemini"),
+        (SessionKind::Shell, "shell"),
+    ] {
+        let button = gtk::ToggleButton::with_label(label);
+        button.add_css_class("tui-agent-button");
+        if let Some(previous) = previous_agent_button.as_ref() {
+            button.set_group(Some(previous));
+        }
+        if kind == SessionKind::Shell {
+            button.set_active(true);
+        }
+        launch_agent_button_box.append(&button);
+        previous_agent_button = Some(button.clone());
+        launch_agent_buttons.push((kind, button));
+    }
+    agent_row.append(&launch_agent_button_box);
     agent_row.append(&launch_agent_dropdown);
     launch_form.append(&agent_row);
 
@@ -403,51 +438,76 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_agent_options.add_named(&gtk::Box::new(gtk::Orientation::Vertical, 0), Some("shell"));
     launch_form.append(&launch_agent_options);
     let launch_cwd = launch_entry("Working directory", "cwd");
-    let launch_project = launch_entry("Project root", "project root (optional)");
+    let launch_project = launch_entry("Project directory", "Search projects or type a path…");
     let launch_project_choices = gtk::StringList::new(&[]);
     let launch_project_dropdown = searchable_path_dropdown(&launch_project_choices);
+    launch_project_dropdown.set_visible(false);
     launch_project.0.append(&launch_project_dropdown);
-    install_path_completion(&launch_project.1);
-    let launch_worktree = launch_entry("Worktree", "choose a worktree or type a path");
+    let launch_project_completion =
+        gtk::ListStore::new(&[String::static_type(), String::static_type()]);
+    let launch_project_completion_items = Rc::new(RefCell::new(Vec::new()));
+    install_choice_completion(
+        &launch_project.1,
+        &launch_project_completion,
+        launch_project_completion_items.clone(),
+        true,
+    );
+    let launch_worktree = launch_entry("Worktree", "Search worktrees…");
     let launch_worktree_choices = gtk::StringList::new(&[]);
     let launch_worktree_dropdown = searchable_path_dropdown(&launch_worktree_choices);
+    launch_worktree_dropdown.set_visible(false);
     launch_worktree.0.append(&launch_worktree_dropdown);
+    let launch_worktree_completion =
+        gtk::ListStore::new(&[String::static_type(), String::static_type()]);
+    let launch_worktree_completion_items = Rc::new(RefCell::new(Vec::new()));
+    install_choice_completion(
+        &launch_worktree.1,
+        &launch_worktree_completion,
+        launch_worktree_completion_items.clone(),
+        true,
+    );
     let launch_name = launch_entry("Name", "session name (optional)");
     let launch_args = launch_entry(
         "Arguments",
         "JSON array, for example [\"--model\",\"opus\"]",
     );
     let launch_prompt = launch_entry("Initial input", "initial prompt (optional)");
-    let launch_branch = launch_entry("Branch name", "generated when empty");
+    let launch_branch = launch_entry_with_hint(
+        "Branch name (optional)",
+        "generated branch",
+        "Worktree name will be based on the branch name.",
+    );
     let launch_base_branch = launch_entry("Base branch", "main");
     let launch_base_branch_choices = gtk::StringList::new(&[]);
     let launch_base_branch_dropdown = searchable_path_dropdown(&launch_base_branch_choices);
+    launch_base_branch_dropdown.set_visible(false);
     launch_base_branch.0.append(&launch_base_branch_dropdown);
+    let launch_base_branch_completion =
+        gtk::ListStore::new(&[String::static_type(), String::static_type()]);
+    let launch_base_branch_completion_items = Rc::new(RefCell::new(Vec::new()));
+    install_choice_completion(
+        &launch_base_branch.1,
+        &launch_base_branch_completion,
+        launch_base_branch_completion_items.clone(),
+        false,
+    );
     launch_branch.0.set_visible(false);
     launch_base_branch.0.set_visible(false);
     for row in [
-        &launch_cwd.0,
         &launch_project.0,
         &launch_worktree.0,
         &launch_branch.0,
         &launch_base_branch.0,
-        &launch_name.0,
-        &launch_args.0,
-        &launch_prompt.0,
     ] {
         launch_form.append(row);
     }
     let launch_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let launch_cancel = gtk::Button::with_label("Cancel");
+    launch_cancel.add_css_class("tui-button");
+    launch_actions.append(&launch_cancel);
     let launch_submit = gtk::Button::with_label("Launch");
     launch_submit.add_css_class("suggested-action");
     launch_actions.append(&launch_submit);
-    let launch_shell = gtk::Button::with_label("Shell");
-    let launch_codex = gtk::Button::with_label("Codex");
-    let launch_claude = gtk::Button::with_label("Claude");
-    for button in [&launch_shell, &launch_codex, &launch_claude] {
-        button.add_css_class("tui-button");
-        launch_actions.append(button);
-    }
     launch_form.append(&launch_actions);
     let launch_popover = gtk::Popover::builder().child(&launch_form).build();
     launch_popover.add_css_class("tui-popover");
@@ -457,7 +517,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .sensitive(false)
         .build();
     launch_button.add_css_class("tui-button");
-    launch_button.set_tooltip_text(Some("Launch a shell, Codex, or Claude session"));
+    launch_button.set_tooltip_text(Some("Launch a shell, Codex, Claude, or Gemini session"));
     header.pack_end(&launch_button);
 
     let worktree_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -830,8 +890,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         updating_pr_toggle: Rc::new(Cell::new(false)),
         launch_button,
         launch_popover,
+        launch_cancel: launch_cancel.clone(),
+        launch_submit: launch_submit.clone(),
         launch_agent_dropdown,
         launch_agent_choices,
+        launch_agent_buttons: Rc::new(launch_agent_buttons),
         launch_agent_options,
         launch_claude_permission,
         launch_claude_danger,
@@ -845,9 +908,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_project: launch_project.1,
         launch_project_dropdown,
         launch_project_choices,
+        launch_project_completion,
+        launch_project_completion_items,
         launch_worktree: launch_worktree.1,
         launch_worktree_dropdown,
         launch_worktree_choices,
+        launch_worktree_completion,
+        launch_worktree_completion_items,
         launch_name: launch_name.1,
         launch_args: launch_args.1,
         launch_prompt: launch_prompt.1,
@@ -855,6 +922,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_base_branch: launch_base_branch.1,
         launch_base_branch_dropdown,
         launch_base_branch_choices,
+        launch_base_branch_completion,
+        launch_base_branch_completion_items,
         launch_worktree_values: Rc::new(RefCell::new(Vec::new())),
         launch_project_values: Rc::new(RefCell::new(Vec::new())),
         launch_project_custom: Rc::new(Cell::new(false)),
@@ -954,6 +1023,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_submit.connect_clicked(move |_| {
         launch_submit_workspace.launch_from_form(launch_submit_workspace.selected_launch_agent());
     });
+    let launch_cancel_workspace = workspace.clone();
+    launch_cancel.connect_clicked(move |_| launch_cancel_workspace.launch_popover.popdown());
+    for (kind, button) in workspace.launch_agent_buttons.iter() {
+        let launch_agent_workspace = workspace.clone();
+        let kind = *kind;
+        button.connect_clicked(move |_| launch_agent_workspace.set_launch_agent(kind));
+    }
     let launch_workspace = workspace.clone();
     workspace
         .launch_popover
@@ -1025,18 +1101,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     workspace
         .agent_popover
         .connect_show(move |_| agent_workspace.refresh_agent_panel());
-
-    for (kind, button) in [
-        (SessionKind::Shell, launch_shell),
-        (SessionKind::Codex, launch_codex),
-        (SessionKind::Claude, launch_claude),
-    ] {
-        let quick_launch_workspace = workspace.clone();
-        button.connect_clicked(move |_| {
-            quick_launch_workspace.set_launch_agent(kind);
-            quick_launch_workspace.launch_from_form(kind);
-        });
-    }
 
     let search_workspace = workspace.clone();
     search_next.connect_clicked(move |_| search_workspace.search_selected(true));
@@ -1331,25 +1395,73 @@ fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
     (row, entry)
 }
 
+fn launch_entry_with_hint(label: &str, placeholder: &str, hint: &str) -> (gtk::Box, gtk::Entry) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+    row.add_css_class("tui-setting-row");
+    let label = gtk::Label::new(Some(label));
+    label.set_xalign(0.0);
+    label.set_width_chars(18);
+    row.append(&label);
+    let controls = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    controls.set_hexpand(true);
+    let entry = gtk::Entry::builder()
+        .placeholder_text(placeholder)
+        .width_chars(42)
+        .hexpand(true)
+        .build();
+    entry.add_css_class("tui-setting-entry");
+    controls.append(&entry);
+    let hint_label = gtk::Label::new(Some(hint));
+    hint_label.set_xalign(0.0);
+    hint_label.add_css_class("tui-muted");
+    controls.append(&hint_label);
+    row.append(&controls);
+    (row, entry)
+}
+
 #[allow(deprecated)]
-fn install_path_completion(entry: &gtk::Entry) {
-    let model = gtk::ListStore::new(&[String::static_type()]);
+fn install_choice_completion(
+    entry: &gtk::Entry,
+    model: &gtk::ListStore,
+    items: Rc<RefCell<Vec<(String, String)>>>,
+    allow_paths: bool,
+) {
     let completion = gtk::EntryCompletion::builder()
-        .model(&model)
-        .minimum_key_length(1)
+        .model(model)
+        .minimum_key_length(0)
         .popup_completion(true)
         .inline_completion(false)
         .text_column(0)
         .build();
+    let selected_entry = entry.clone();
+    completion.connect_match_selected(move |_, model, iter| {
+        let Some(value) = model.get_value(iter, 1).get::<String>().ok() else {
+            return glib::Propagation::Proceed;
+        };
+        selected_entry.set_text(&value);
+        glib::Propagation::Stop
+    });
     entry.set_completion(Some(&completion));
+    let focus_completion = completion.clone();
+    entry.connect_has_focus_notify(move |entry| {
+        if entry.has_focus() {
+            focus_completion.complete();
+        }
+    });
     let completion_model = model.clone();
     entry.connect_changed(move |entry| {
         while let Some(row) = completion_model.iter_first() {
             completion_model.remove(&row);
         }
-        for completion in crate::launch_model::path_completions(entry.text().as_str()) {
+        for (label, value) in items.borrow().iter() {
             let row = completion_model.append();
-            completion_model.set(&row, &[(0, &completion)]);
+            completion_model.set(&row, &[(0, label), (1, value)]);
+        }
+        if allow_paths {
+            for completion in crate::launch_model::path_completions(entry.text().as_str()) {
+                let row = completion_model.append();
+                completion_model.set(&row, &[(0, &completion), (1, &completion)]);
+            }
         }
     });
 }

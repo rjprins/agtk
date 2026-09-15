@@ -298,12 +298,12 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         launch_child_ids,
         [
             "launch-project-input",
-            "launch-project-dropdown",
             "launch-worktree-input",
-            "launch-worktree-dropdown",
             "launch-agent",
             "launch-branch",
-            "launch-base-branch"
+            "launch-base-branch",
+            "launch-cancel",
+            "launch-submit"
         ]
     );
     thread::sleep(Duration::from_millis(50));

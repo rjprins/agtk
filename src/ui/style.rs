@@ -176,6 +176,20 @@ const TUI_CSS: &str = r#"
   box-shadow: none;
 }
 .tui-agent-row:hover { color: @background; background: @accent; }
+.tui-agent-buttons { border: 1px solid @line; }
+.tui-agent-button {
+  min-height: 25px;
+  min-width: 0;
+  padding: 2px 10px;
+  color: @text;
+  background: @background;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.tui-agent-button:hover { color: @background; background: @accent; }
+.tui-agent-button:checked { color: @background; background: @accent; }
+.tui-agent-button:focus-visible { outline: 1px solid @accent; outline-offset: -1px; }
 .tui-agent-message {
   padding: 5px 7px;
   border-bottom: 1px solid @line;

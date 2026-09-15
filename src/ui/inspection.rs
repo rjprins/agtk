@@ -158,22 +158,6 @@ impl Workspace {
                                             children: Vec::new(),
                                         },
                                         UiNode {
-                                            id: "launch-project-dropdown".to_owned(),
-                                            role: "combobox".to_owned(),
-                                            label: Some(format!(
-                                                "Known project directories ({})",
-                                                self.launch_project_choices.n_items()
-                                            )),
-                                            is_visible: self.launch_project_dropdown.is_visible(),
-                                            is_enabled: self.launch_project_dropdown.is_sensitive(),
-                                            is_selected: false,
-                                            bounds: widget_bounds(
-                                                &self.launch_project_dropdown,
-                                                &self.window,
-                                            ),
-                                            children: Vec::new(),
-                                        },
-                                        UiNode {
                                             id: "launch-worktree-input".to_owned(),
                                             role: "textbox".to_owned(),
                                             label: Some("Worktree".to_owned()),
@@ -189,40 +173,49 @@ impl Workspace {
                                             children: Vec::new(),
                                         },
                                         UiNode {
-                                            id: "launch-worktree-dropdown".to_owned(),
-                                            role: "combobox".to_owned(),
-                                            label: Some(format!(
-                                                "Known Git worktrees ({})",
-                                                self.launch_worktree_choices.n_items()
-                                            )),
-                                            is_visible: self.launch_worktree_dropdown.is_visible(),
-                                            is_enabled: self
-                                                .launch_worktree_dropdown
-                                                .is_sensitive(),
-                                            is_selected: false,
-                                            bounds: widget_bounds(
-                                                &self.launch_worktree_dropdown,
-                                                &self.window,
-                                            ),
-                                            children: Vec::new(),
-                                        },
-                                        UiNode {
                                             id: "launch-agent".to_owned(),
-                                            role: "combobox".to_owned(),
+                                            role: "group".to_owned(),
                                             label: Some("Agent provider".to_owned()),
-                                            is_visible: self.launch_agent_dropdown.is_visible(),
-                                            is_enabled: self.launch_agent_dropdown.is_sensitive(),
+                                            is_visible: self
+                                                .launch_agent_buttons
+                                                .first()
+                                                .is_some_and(|(_, button)| button.is_visible()),
+                                            is_enabled: self
+                                                .launch_agent_buttons
+                                                .first()
+                                                .is_some_and(|(_, button)| button.is_sensitive()),
                                             is_selected: false,
-                                            bounds: widget_bounds(
-                                                &self.launch_agent_dropdown,
-                                                &self.window,
-                                            ),
-                                            children: Vec::new(),
+                                            bounds: self
+                                                .launch_agent_buttons
+                                                .first()
+                                                .map(|(_, button)| {
+                                                    widget_bounds(button, &self.window)
+                                                })
+                                                .unwrap_or_default(),
+                                            children: self
+                                                .launch_agent_buttons
+                                                .iter()
+                                                .map(|(kind, button)| UiNode {
+                                                    id: format!(
+                                                        "launch-agent-{}",
+                                                        session_kind_name(*kind)
+                                                    ),
+                                                    role: "button".to_owned(),
+                                                    label: button
+                                                        .label()
+                                                        .map(|label| label.to_string()),
+                                                    is_visible: button.is_visible(),
+                                                    is_enabled: button.is_sensitive(),
+                                                    is_selected: button.is_active(),
+                                                    bounds: widget_bounds(button, &self.window),
+                                                    children: Vec::new(),
+                                                })
+                                                .collect(),
                                         },
                                         UiNode {
                                             id: "launch-branch".to_owned(),
                                             role: "textbox".to_owned(),
-                                            label: Some("New worktree branch".to_owned()),
+                                            label: Some("Branch name (optional)".to_owned()),
                                             is_visible: self
                                                 .launch_branch
                                                 .parent()
@@ -237,17 +230,42 @@ impl Workspace {
                                         },
                                         UiNode {
                                             id: "launch-base-branch".to_owned(),
-                                            role: "combobox".to_owned(),
+                                            role: "textbox".to_owned(),
                                             label: Some("Base branch".to_owned()),
                                             is_visible: self
-                                                .launch_base_branch_dropdown
-                                                .is_visible(),
-                                            is_enabled: self
-                                                .launch_base_branch_dropdown
-                                                .is_sensitive(),
+                                                .launch_base_branch
+                                                .parent()
+                                                .is_some_and(|row| row.is_visible()),
+                                            is_enabled: self.launch_base_branch.is_sensitive(),
+                                            is_selected: self.launch_base_branch.has_focus(),
+                                            bounds: widget_bounds(
+                                                &self.launch_base_branch,
+                                                &self.window,
+                                            ),
+                                            children: Vec::new(),
+                                        },
+                                        UiNode {
+                                            id: "launch-cancel".to_owned(),
+                                            role: "button".to_owned(),
+                                            label: Some("Cancel".to_owned()),
+                                            is_visible: self.launch_cancel.is_visible(),
+                                            is_enabled: self.launch_cancel.is_sensitive(),
                                             is_selected: false,
                                             bounds: widget_bounds(
-                                                &self.launch_base_branch_dropdown,
+                                                &self.launch_cancel,
+                                                &self.window,
+                                            ),
+                                            children: Vec::new(),
+                                        },
+                                        UiNode {
+                                            id: "launch-submit".to_owned(),
+                                            role: "button".to_owned(),
+                                            label: Some("Launch".to_owned()),
+                                            is_visible: self.launch_submit.is_visible(),
+                                            is_enabled: self.launch_submit.is_sensitive(),
+                                            is_selected: false,
+                                            bounds: widget_bounds(
+                                                &self.launch_submit,
                                                 &self.window,
                                             ),
                                             children: Vec::new(),

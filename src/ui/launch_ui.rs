@@ -1,11 +1,13 @@
+#![allow(deprecated)]
+
 use super::*;
 use crate::launch_model::{self, NEW_WORKTREE};
 use crate::worktrees::WorktreeManager;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-const PROJECT_PLACEHOLDER: &str = "Choose a project directory";
-const WORKTREE_PLACEHOLDER: &str = "Choose a worktree";
+const PROJECT_PLACEHOLDER: &str = "Search projects or type a path…";
+const WORKTREE_PLACEHOLDER: &str = "Search worktrees…";
 
 impl Workspace {
     pub(super) fn prepare_launch_panel(&self) {
@@ -83,7 +85,11 @@ impl Workspace {
             kind,
             args: raw_args,
             flags: self.all_launch_flags(),
-            cwd: optional_path(&self.launch_cwd),
+            cwd: if creating_worktree {
+                project_root.clone()
+            } else {
+                optional_path(&self.launch_worktree).or_else(|| optional_path(&self.launch_cwd))
+            },
             project_root: project_root.clone(),
             worktree_path: (!creating_worktree)
                 .then(|| optional_path(&self.launch_worktree))
@@ -199,9 +205,19 @@ impl Workspace {
             values.push(Some(root.clone()));
             labels.push(project_name(&root));
         }
+        let completion_items = values
+            .iter()
+            .zip(labels.iter())
+            .filter_map(|(value, label)| value.clone().map(|value| (label.clone(), value)))
+            .collect();
         *self.launch_project_values.borrow_mut() = values;
         self.updating_launch_choices.set(true);
         replace_string_list(&self.launch_project_choices, &labels);
+        replace_completion_items(
+            &self.launch_project_completion,
+            &self.launch_project_completion_items,
+            completion_items,
+        );
         self.set_dropdown_value(
             &self.launch_project_dropdown,
             &self.launch_project_values.borrow(),
@@ -219,6 +235,11 @@ impl Workspace {
             let labels = vec![WORKTREE_PLACEHOLDER.to_owned()];
             *self.launch_worktree_values.borrow_mut() = vec![None];
             replace_string_list(&self.launch_worktree_choices, &labels);
+            replace_completion_items(
+                &self.launch_worktree_completion,
+                &self.launch_worktree_completion_items,
+                Vec::new(),
+            );
             self.set_dropdown_value(
                 &self.launch_worktree_dropdown,
                 &self.launch_worktree_values.borrow(),
@@ -253,6 +274,14 @@ impl Workspace {
                 .iter()
                 .map(|choice| choice.label.clone())
                 .collect::<Vec<_>>(),
+        );
+        replace_completion_items(
+            &self.launch_worktree_completion,
+            &self.launch_worktree_completion_items,
+            initial
+                .iter()
+                .map(|choice| (choice.label.clone(), choice.value.clone()))
+                .collect(),
         );
         self.set_dropdown_value(
             &self.launch_worktree_dropdown,
@@ -296,6 +325,14 @@ impl Workspace {
                     .map(|choice| Some(choice.value.clone()))
                     .collect();
                 replace_string_list(&workspace.launch_worktree_choices, &labels);
+                replace_completion_items(
+                    &workspace.launch_worktree_completion,
+                    &workspace.launch_worktree_completion_items,
+                    choices
+                        .iter()
+                        .map(|choice| (choice.label.clone(), choice.value.clone()))
+                        .collect(),
+                );
                 let selected = workspace.launch_worktree.text().trim().to_owned();
                 workspace.set_dropdown_value(
                     &workspace.launch_worktree_dropdown,
@@ -375,6 +412,49 @@ impl Workspace {
                 }
             });
 
+        let worktree_entry_workspace = self.clone();
+        self.launch_worktree.connect_changed(move |entry| {
+            if worktree_entry_workspace.updating_launch_choices.get() {
+                return;
+            }
+            let value = entry.text().trim().to_owned();
+            if value == NEW_WORKTREE {
+                entry.set_text("");
+            }
+            let creating = value.is_empty() || value == NEW_WORKTREE;
+            if creating {
+                worktree_entry_workspace
+                    .launch_cwd
+                    .set_text(worktree_entry_workspace.launch_project.text().trim());
+                if worktree_entry_workspace
+                    .launch_branch
+                    .text()
+                    .trim()
+                    .is_empty()
+                {
+                    worktree_entry_workspace
+                        .launch_branch
+                        .set_text(&generated_branch_name());
+                }
+                if worktree_entry_workspace
+                    .launch_base_branch
+                    .text()
+                    .trim()
+                    .is_empty()
+                {
+                    worktree_entry_workspace.launch_base_branch.set_text("main");
+                }
+            } else {
+                worktree_entry_workspace.launch_cwd.set_text(&value);
+            }
+            if let Some(row) = worktree_entry_workspace.launch_branch.parent() {
+                row.set_visible(creating);
+            }
+            if let Some(row) = worktree_entry_workspace.launch_base_branch.parent() {
+                row.set_visible(creating);
+            }
+        });
+
         let project_workspace = self.clone();
         self.launch_project.connect_activate(move |_| {
             project_workspace.launch_project_custom.set(true);
@@ -387,6 +467,40 @@ impl Workspace {
             if let Some(row) = project_workspace.launch_base_branch.parent() {
                 row.set_visible(false);
             }
+        });
+
+        let project_completion_workspace = self.clone();
+        self.launch_project.connect_changed(move |entry| {
+            if project_completion_workspace.updating_launch_choices.get()
+                || !entry.has_focus()
+                || !project_completion_workspace
+                    .launch_project_values
+                    .borrow()
+                    .iter()
+                    .any(|value| value.as_deref() == Some(entry.text().trim()))
+            {
+                return;
+            }
+            let root = entry.text().trim().to_owned();
+            project_completion_workspace
+                .launch_project_custom
+                .set(false);
+            project_completion_workspace.launch_cwd.set_text(&root);
+            project_completion_workspace.launch_worktree.set_text("");
+            project_completion_workspace
+                .launch_branch
+                .set_text(&generated_branch_name());
+            project_completion_workspace
+                .launch_base_branch
+                .set_text("main");
+            if let Some(row) = project_completion_workspace.launch_branch.parent() {
+                row.set_visible(true);
+            }
+            if let Some(row) = project_completion_workspace.launch_base_branch.parent() {
+                row.set_visible(true);
+            }
+            project_completion_workspace.refresh_launch_worktree_choices();
+            project_completion_workspace.refresh_launch_base_branches();
         });
 
         let base_workspace = self.clone();
@@ -409,6 +523,12 @@ impl Workspace {
         let root = self.launch_project.text().trim().to_owned();
         if root.is_empty() {
             replace_string_list(&self.launch_base_branch_choices, &[]);
+            self.launch_base_branch.set_placeholder_text(Some("main"));
+            replace_completion_items(
+                &self.launch_base_branch_completion,
+                &self.launch_base_branch_completion_items,
+                Vec::new(),
+            );
             return;
         }
         let manager = WorktreeManager::new(self.paths.attic_dir());
@@ -419,6 +539,21 @@ impl Workspace {
                     return;
                 };
                 replace_string_list(&workspace.launch_base_branch_choices, &branches);
+                workspace
+                    .launch_base_branch
+                    .set_placeholder_text(Some(if branches.is_empty() {
+                        "main"
+                    } else {
+                        "Search branches…"
+                    }));
+                replace_completion_items(
+                    &workspace.launch_base_branch_completion,
+                    &workspace.launch_base_branch_completion_items,
+                    branches
+                        .iter()
+                        .map(|branch| (branch.clone(), branch.clone()))
+                        .collect(),
+                );
                 if let Some(branch) = branches.first() {
                     if workspace.launch_base_branch.text().trim().is_empty()
                         || workspace.launch_base_branch.text() == "main"
@@ -470,6 +605,9 @@ impl Workspace {
             })
             .unwrap_or(0);
         self.launch_agent_dropdown.set_selected(selected);
+        for (button_kind, button) in self.launch_agent_buttons.iter() {
+            button.set_active(*button_kind == kind);
+        }
         self.launch_agent_options.set_visible_child_name(name);
     }
 
@@ -579,6 +717,21 @@ impl Workspace {
 fn replace_string_list(model: &gtk::StringList, values: &[String]) {
     let values = values.iter().map(String::as_str).collect::<Vec<_>>();
     model.splice(0, model.n_items(), &values);
+}
+
+fn replace_completion_items(
+    model: &gtk::ListStore,
+    items: &Rc<RefCell<Vec<(String, String)>>>,
+    values: Vec<(String, String)>,
+) {
+    *items.borrow_mut() = values.clone();
+    while let Some(row) = model.iter_first() {
+        model.remove(&row);
+    }
+    for (label, value) in values {
+        let row = model.append();
+        model.set(&row, &[(0, &label), (1, &value)]);
+    }
 }
 
 fn optional_path(entry: &gtk::Entry) -> Option<PathBuf> {
