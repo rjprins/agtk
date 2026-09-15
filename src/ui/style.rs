@@ -20,16 +20,16 @@ impl ChromeStyle {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
         let style = Self { provider };
-        style.apply(palette);
+        style.apply(palette, 13);
         style
     }
 
-    pub(super) fn apply(&self, palette: ChromePalette) {
-        self.provider.load_from_string(&tui_css(palette));
+    pub(super) fn apply(&self, palette: ChromePalette, font_size: u8) {
+        self.provider.load_from_string(&tui_css(palette, font_size));
     }
 }
 
-fn tui_css(palette: ChromePalette) -> String {
+fn tui_css(palette: ChromePalette, font_size: u8) -> String {
     TUI_CSS
         .replace("@background", palette.background)
         .replace("@panel", palette.panel)
@@ -40,6 +40,11 @@ fn tui_css(palette: ChromePalette) -> String {
         .replace("@line", palette.line)
         .replace("@hover", palette.hover)
         .replace("@ready", palette.ready)
+        .replace("@font-size", &format!("{font_size}px"))
+        .replace(
+            "@small-font-size",
+            &format!("{}px", font_size.saturating_sub(2).max(9)),
+        )
 }
 
 const TUI_CSS: &str = r#"
@@ -47,7 +52,7 @@ const TUI_CSS: &str = r#"
   background: @background;
   color: @text;
   font-family: monospace;
-  font-size: 13px;
+  font-size: @font-size;
 }
 
 .tui-topbar {
@@ -119,7 +124,7 @@ const TUI_CSS: &str = r#"
 .tui-session-content { padding: 4px 7px; min-height: 27px; }
 .tui-state { color: @ready; font-weight: bold; }
 .tui-state-exited { color: @danger; }
-.tui-kind { color: @muted; font-size: 11px; }
+.tui-kind { color: @muted; font-size: @small-font-size; }
 
 .tui-group-row { background: @panel; border-top: 1px solid @line; }
 .tui-group-button {
@@ -137,7 +142,7 @@ const TUI_CSS: &str = r#"
   padding: 3px 8px;
   color: @muted;
   background: @background;
-  font-size: 11px;
+  font-size: @small-font-size;
   border-bottom: 1px solid @line;
 }
 .tui-worktree-row {
@@ -188,7 +193,7 @@ const TUI_CSS: &str = r#"
   background: @panel;
   border: 1px solid @line;
   font-family: monospace;
-  font-size: 13px;
+  font-size: @font-size;
 }
 
 .tui-setting-row { padding: 2px 7px; }
@@ -199,6 +204,28 @@ const TUI_CSS: &str = r#"
   border: 1px solid @line;
   border-radius: 0;
   box-shadow: none;
+}
+.tui-path-dropdown {
+  min-height: 25px;
+  min-width: 220px;
+  color: @text;
+  background: @background;
+  border: 1px solid @line;
+  border-radius: 0;
+}
+.tui-path-dropdown button {
+  min-height: 25px;
+  min-width: 0;
+  padding: 2px 7px;
+  color: @text;
+  background: @background;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.tui-path-dropdown button:hover {
+  color: @background;
+  background: @accent;
 }
 
 .tui-root scrollbar { background: @panel; }

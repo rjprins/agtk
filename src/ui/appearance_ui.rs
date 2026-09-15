@@ -1,5 +1,7 @@
 use super::*;
-use crate::appearance::{resolve_system_theme, theme};
+use crate::appearance::{
+    MAX_UI_FONT_SIZE, MIN_UI_FONT_SIZE, clamp_ui_font_size, resolve_system_theme, theme,
+};
 
 impl Workspace {
     pub(super) fn load_appearance(&self, preferences: AppearancePreferences) {
@@ -32,6 +34,18 @@ impl Workspace {
             );
             return;
         }
+        if update
+            .ui_font_size
+            .is_some_and(|size| !(MIN_UI_FONT_SIZE..=MAX_UI_FONT_SIZE).contains(&size))
+        {
+            self.report_failure(
+                pending,
+                ErrorCode::InvalidParams,
+                "UI font size is invalid",
+                "use a UI font size between 9 and 24".to_owned(),
+            );
+            return;
+        }
 
         let mut preferences = self.appearance.borrow().clone();
         if let Some(theme) = update.theme {
@@ -42,6 +56,9 @@ impl Workspace {
         }
         if let Some(font) = update.font {
             preferences.font = font;
+        }
+        if let Some(ui_font_size) = update.ui_font_size {
+            preferences.ui_font_size = clamp_ui_font_size(ui_font_size);
         }
         let value = match serde_json::to_value(&preferences) {
             Ok(value) => value,
@@ -91,6 +108,7 @@ impl Workspace {
             effective_theme: self.effective_terminal_theme(),
             follow_system: preferences.follow_system,
             font: preferences.font.clone(),
+            ui_font_size: preferences.ui_font_size,
             available_themes: ThemeKey::ALL.to_vec(),
         }
     }
@@ -101,12 +119,12 @@ impl Workspace {
         } else {
             ThemeKey::NeutralLight
         };
-        self.chrome_style.apply(theme(chrome_key).chrome);
-
         let preferences = self.appearance.borrow().clone();
+        self.chrome_style
+            .apply(theme(chrome_key).chrome, preferences.ui_font_size);
         let effective = self.effective_terminal_theme();
         self.theme_button
-            .set_label(&format!("[theme: {}]", effective.as_str()));
+            .set_label(&format!("[{}]", effective.as_str()));
         if self.follow_system_toggle.is_active() != preferences.follow_system {
             self.follow_system_toggle
                 .set_active(preferences.follow_system);
@@ -128,6 +146,26 @@ impl Workspace {
     pub(super) fn apply_current_terminal_appearance(&self, terminal: &vte::Terminal) {
         let preferences = self.appearance.borrow();
         apply_terminal_appearance(terminal, self.effective_terminal_theme(), &preferences.font);
+    }
+
+    pub(super) fn adjust_font_size(&self, delta: i8) {
+        let preferences = self.appearance.borrow().clone();
+        let current = i16::from(preferences.ui_font_size);
+        let next = (current + i16::from(delta))
+            .clamp(i16::from(MIN_UI_FONT_SIZE), i16::from(MAX_UI_FONT_SIZE))
+            as u8;
+        if next == preferences.ui_font_size {
+            return;
+        }
+        self.set_appearance(
+            AppearanceSetParams {
+                theme: None,
+                follow_system: None,
+                font: Some(adjust_terminal_font_size(&preferences.font, delta)),
+                ui_font_size: Some(next),
+            },
+            None,
+        );
     }
 
     fn effective_terminal_theme(&self) -> ThemeKey {
@@ -157,6 +195,19 @@ fn apply_terminal_appearance(terminal: &vte::Terminal, key: ThemeKey, font: &str
     terminal.set_color_highlight(Some(&selection));
     terminal.set_color_highlight_foreground(Some(&foreground));
     terminal.set_font(Some(&FontDescription::from_string(font)));
+}
+
+fn adjust_terminal_font_size(font: &str, delta: i8) -> String {
+    let mut description = FontDescription::from_string(font);
+    let current = description.size();
+    let current_points = if current > 0 {
+        (current as f64 / gtk::pango::SCALE as f64).round() as i16
+    } else {
+        11
+    };
+    let next_points = (current_points + i16::from(delta)).clamp(6, 32);
+    description.set_size(i32::from(next_points) * gtk::pango::SCALE);
+    description.to_string()
 }
 
 fn parse_color(value: &str) -> gtk::gdk::RGBA {

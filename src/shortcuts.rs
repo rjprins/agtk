@@ -13,10 +13,12 @@ pub enum ShortcutAction {
     NextReadySession,
     ReopenPrList,
     ClaudeModelPreset,
+    IncreaseFontSize,
+    DecreaseFontSize,
 }
 
 impl ShortcutAction {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 10] = [
         Self::NewShell,
         Self::CloseSession,
         Self::ToggleSidebar,
@@ -25,6 +27,8 @@ impl ShortcutAction {
         Self::NextReadySession,
         Self::ReopenPrList,
         Self::ClaudeModelPreset,
+        Self::IncreaseFontSize,
+        Self::DecreaseFontSize,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -37,6 +41,8 @@ impl ShortcutAction {
             Self::NextReadySession => "next-ready-session",
             Self::ReopenPrList => "reopen-pr-list",
             Self::ClaudeModelPreset => "claude-model-preset",
+            Self::IncreaseFontSize => "increase-font-size",
+            Self::DecreaseFontSize => "decrease-font-size",
         }
     }
 
@@ -50,6 +56,8 @@ impl ShortcutAction {
             Self::NextReadySession => "Next ready session",
             Self::ReopenPrList => "Reopen PR list",
             Self::ClaudeModelPreset => "Switch Claude model",
+            Self::IncreaseFontSize => "Increase UI and terminal font size",
+            Self::DecreaseFontSize => "Decrease UI and terminal font size",
         }
     }
 
@@ -63,6 +71,8 @@ impl ShortcutAction {
             Self::NextReadySession => "<Control><Shift>space",
             Self::ReopenPrList => "<Alt><Shift>p",
             Self::ClaudeModelPreset => "<Control><Shift>m",
+            Self::IncreaseFontSize => "<Control>plus",
+            Self::DecreaseFontSize => "<Control>minus",
         }
     }
 
@@ -76,6 +86,9 @@ impl ShortcutAction {
                 | Self::PreviousSession
                 | Self::NextReadySession
                 | Self::ReopenPrList
+                | Self::ClaudeModelPreset
+                | Self::IncreaseFontSize
+                | Self::DecreaseFontSize
         )
     }
 }

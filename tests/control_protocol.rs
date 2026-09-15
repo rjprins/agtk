@@ -139,6 +139,17 @@ fn every_core_method_decodes_to_a_typed_command() {
             r#"{"projectRoot":"/work/agmux","pullRequestId":42}"#,
             "PrLaunchReview",
         ),
+        (
+            "claude.presets_set",
+            r#"{"presets":[{"id":"opus-high","name":"Opus / high","model":"opus","effort":"high"}]}"#,
+            "ClaudePresetsSet",
+        ),
+        ("claude.presets_get", r#"{}"#, "ClaudePresetsGet"),
+        (
+            "claude.preset_apply",
+            r#"{"sessionId":"claude-1","presetId":"opus-high"}"#,
+            "ClaudePresetApply",
+        ),
         ("agent.list", "{}", "AgentList"),
         (
             "agent.preview",
@@ -371,7 +382,7 @@ fn shortcut_updates_decode_to_typed_commands() {
 
 #[test]
 fn appearance_updates_decode_to_a_typed_additive_command() {
-    let request = decode_request(br#"{"version":1,"id":"theme","method":"appearance.set","params":{"theme":"tokyo-night","followSystem":true,"font":"Iosevka 12"}}"#)
+    let request = decode_request(br#"{"version":1,"id":"theme","method":"appearance.set","params":{"theme":"tokyo-night","followSystem":true,"font":"Iosevka 12","uiFontSize":15}}"#)
         .expect("decode appearance update");
     assert_eq!(
         request.command,
@@ -379,6 +390,7 @@ fn appearance_updates_decode_to_a_typed_additive_command() {
             theme: Some(ThemeKey::TokyoNight),
             follow_system: Some(true),
             font: Some("Iosevka 12".to_owned()),
+            ui_font_size: Some(15),
         })
     );
 
@@ -387,6 +399,8 @@ fn appearance_updates_decode_to_a_typed_additive_command() {
         br#"{"version":1,"id":"theme","method":"appearance.set","params":{"theme":"missing"}}"#
             .as_slice(),
         br#"{"version":1,"id":"theme","method":"appearance.set","params":{"font":""}}"#.as_slice(),
+        br#"{"version":1,"id":"theme","method":"appearance.set","params":{"uiFontSize":25}}"#
+            .as_slice(),
     ] {
         assert_eq!(
             decode_request(invalid).unwrap_err().code,

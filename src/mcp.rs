@@ -250,6 +250,12 @@ impl<B: ControlBackend> McpServer<B> {
             "acknowledge_pull_request" => ControlCommand::PrAcknowledge(parse_args(arguments)?),
             "set_auto_review" => ControlCommand::PrSetAutoReview(parse_args(arguments)?),
             "launch_pr_review" => ControlCommand::PrLaunchReview(parse_args(arguments)?),
+            "set_claude_presets" => ControlCommand::ClaudePresetsSet(parse_args(arguments)?),
+            "list_claude_presets" => {
+                require_empty(arguments)?;
+                ControlCommand::ClaudePresetsGet
+            }
+            "apply_claude_preset" => ControlCommand::ClaudePresetApply(parse_args(arguments)?),
             "inspect_ui" => ControlCommand::UiInspect,
             "capture_ui" => {
                 require_empty(arguments)?;
@@ -690,6 +696,47 @@ fn tool_definitions() -> Vec<Value> {
                     ("pullRequestId", integer(1, u32::MAX)),
                 ],
                 &["projectRoot", "pullRequestId"],
+            ),
+        ),
+        tool(
+            "list_claude_presets",
+            "List Claude presets",
+            "List the validated named Claude model and effort presets.",
+            empty_schema(),
+        ),
+        tool(
+            "set_claude_presets",
+            "Set Claude presets",
+            "Replace the bounded persisted list of named Claude model and effort presets.",
+            schema(
+                &[(
+                    "presets",
+                    json!({
+                        "type":"array",
+                        "maxItems":50,
+                        "items":{
+                            "type":"object",
+                            "properties":{
+                                "id":string(),
+                                "name":string(),
+                                "model":string(),
+                                "effort":enum_values(&["auto","low","medium","high","xhigh","max","ultracode"])
+                            },
+                            "required":["id","name","model","effort"],
+                            "additionalProperties":false
+                        }
+                    }),
+                )],
+                &["presets"],
+            ),
+        ),
+        tool(
+            "apply_claude_preset",
+            "Apply Claude preset",
+            "Send exact /model and /effort commands to one live Claude session.",
+            schema(
+                &[("sessionId", string()), ("presetId", string())],
+                &["sessionId", "presetId"],
             ),
         ),
         tool(

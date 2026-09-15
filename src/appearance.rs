@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_UI_FONT_SIZE: u8 = 13;
+pub const MIN_UI_FONT_SIZE: u8 = 9;
+pub const MAX_UI_FONT_SIZE: u8 = 24;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeKey {
@@ -42,6 +46,8 @@ pub struct AppearancePreferences {
     pub theme: ThemeKey,
     pub follow_system: bool,
     pub font: String,
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: u8,
 }
 
 impl Default for AppearancePreferences {
@@ -50,7 +56,22 @@ impl Default for AppearancePreferences {
             theme: ThemeKey::Neutral,
             follow_system: false,
             font: "Monospace 11".to_owned(),
+            ui_font_size: DEFAULT_UI_FONT_SIZE,
         }
+    }
+}
+
+const fn default_ui_font_size() -> u8 {
+    DEFAULT_UI_FONT_SIZE
+}
+
+pub const fn clamp_ui_font_size(size: u8) -> u8 {
+    if size < MIN_UI_FONT_SIZE {
+        MIN_UI_FONT_SIZE
+    } else if size > MAX_UI_FONT_SIZE {
+        MAX_UI_FONT_SIZE
+    } else {
+        size
     }
 }
 

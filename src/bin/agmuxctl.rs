@@ -5,14 +5,16 @@ use std::time::{Duration, Instant};
 
 use agmux_native::appearance::ThemeKey;
 use agmux_native::azure::PrAttention;
+use agmux_native::claude_presets::ClaudeModelPreset;
 use agmux_native::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
-    ClientError, CloseSessionParams, ControlClient, ControlCommand, ControlRequest,
-    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, PrAcknowledgeParams,
-    PrLaunchReviewParams, PrListParams, PrSetAutoReviewParams, ProjectSetParams,
-    RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind,
-    SessionSetStateParams, SessionState, ShortcutSetParams, UiShowParams, UiSurface, WaitCondition,
-    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
+    ClaudePresetApplyParams, ClaudePresetsSetParams, ClientError, CloseSessionParams,
+    ControlClient, ControlCommand, ControlRequest, CreateSessionParams, ErrorCode, GetTextParams,
+    PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
+    PrSetAutoReviewParams, ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams,
+    SessionIdParams, SessionKind, SessionSetStateParams, SessionState, ShortcutSetParams,
+    UiShowParams, UiSurface, WaitCondition, WorktreeCreateParams, WorktreeListParams,
+    WorktreeReapParams,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
 use agmux_native::providers::AgentProvider;
@@ -85,6 +87,7 @@ fn run() -> Result<(), Failure> {
         }
         [group, action, rest @ ..] if group == "worktree" => parse_worktree_command(action, rest)?,
         [group, action, rest @ ..] if group == "pr" => parse_pr_command(action, rest)?,
+        [group, action, rest @ ..] if group == "claude" => parse_claude_command(action, rest)?,
         [group, action, rest @ ..] if group == "agent" => parse_agent_command(action, rest)?,
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
@@ -270,6 +273,7 @@ fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
         "worktrees" => Ok(UiSurface::Worktrees),
         "agents" => Ok(UiSurface::Agents),
         "pull-requests" | "prs" => Ok(UiSurface::PullRequests),
+        "claude-models" => Ok(UiSurface::ClaudeModels),
         _ => Err(Failure::Usage(format!("unknown UI surface: {value}"))),
     }
 }
@@ -476,6 +480,7 @@ fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure>
     let mut theme = None;
     let mut follow_system = None;
     let mut font = None;
+    let mut ui_font_size = None;
     let mut index = 0;
     while index < arguments.len() {
         let option = arguments[index].as_str();
@@ -497,6 +502,11 @@ fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure>
                 });
             }
             "--font" => font = Some(value),
+            "--ui-font-size" => {
+                ui_font_size = Some(value.parse::<u8>().map_err(|_| {
+                    Failure::Usage("--ui-font-size must be an integer between 9 and 24".to_owned())
+                })?);
+            }
             _ => {
                 return Err(Failure::Usage(format!(
                     "unknown appearance set option: {option}"
@@ -505,7 +515,7 @@ fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure>
         }
         index += 2;
     }
-    if theme.is_none() && follow_system.is_none() && font.is_none() {
+    if theme.is_none() && follow_system.is_none() && font.is_none() && ui_font_size.is_none() {
         return Err(Failure::Usage(
             "appearance set requires at least one option".to_owned(),
         ));
@@ -514,6 +524,7 @@ fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure>
         theme,
         follow_system,
         font,
+        ui_font_size,
     }))
 }
 
@@ -762,6 +773,26 @@ fn parse_pr_id(value: &str) -> Result<u64, Failure> {
         .ok_or_else(|| Failure::Usage("pull request ID must be a positive integer".to_owned()))
 }
 
+fn parse_claude_command(action: &str, arguments: &[String]) -> Result<ControlCommand, Failure> {
+    match (action, arguments) {
+        ("presets", []) => Ok(ControlCommand::ClaudePresetsGet),
+        ("presets", [flag, value]) if flag == "--json" => {
+            let presets = serde_json::from_str::<Vec<ClaudeModelPreset>>(value)
+                .map_err(|error| Failure::Usage(format!("invalid preset JSON: {error}")))?;
+            Ok(ControlCommand::ClaudePresetsSet(ClaudePresetsSetParams {
+                presets,
+            }))
+        }
+        ("apply", [session_id, preset_id]) => {
+            Ok(ControlCommand::ClaudePresetApply(ClaudePresetApplyParams {
+                session_id: session_id.clone(),
+                preset_id: preset_id.clone(),
+            }))
+        }
+        _ => Err(usage_failure()),
+    }
+}
+
 fn parse_agent_list(arguments: &[String]) -> Result<ControlCommand, Failure> {
     let mut limit = 100;
     let mut max_age_days = 90;
@@ -886,7 +917,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session state ID STATE|session magit ID|session review ID|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session state ID STATE|session magit ID|session review ID|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

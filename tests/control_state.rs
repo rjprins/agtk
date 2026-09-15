@@ -16,6 +16,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
             effective_theme: ThemeKey::Neutral,
             follow_system: false,
             font: "Monospace 11".to_owned(),
+            ui_font_size: 13,
             available_themes: ThemeKey::ALL.to_vec(),
         },
         shortcuts: vec![ShortcutSummary {
@@ -68,6 +69,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 "effectiveTheme": "neutral",
                 "followSystem": false,
                 "font": "Monospace 11",
+                "uiFontSize": 13,
                 "availableThemes": [
                     "neutral", "neutral-light", "dracula", "tokyo-night",
                     "solarized-dark", "solarized-light", "light"

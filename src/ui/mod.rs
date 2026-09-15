@@ -17,6 +17,7 @@ use vte::prelude::*;
 
 use crate::appearance::{AppearancePreferences, ThemeKey, theme};
 use crate::azure::PrPreferences;
+use crate::claude_presets::ClaudePresetPreferences;
 use crate::control::{
     AppState, AppearanceSetParams, AppearanceSummary, AttentionSummary, Bounds, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, ErrorCode, PROTOCOL_VERSION,
@@ -38,6 +39,7 @@ mod agents_ui;
 mod appearance_ui;
 mod azure_ui;
 mod capture;
+mod claude_ui;
 mod controls;
 mod emacs_ui;
 mod history_ui;
@@ -64,6 +66,11 @@ struct Workspace {
     overlay: adw::ToastOverlay,
     new_shell_button: gtk::Button,
     git_button: gtk::MenuButton,
+    claude_model_button: gtk::MenuButton,
+    claude_model_popover: gtk::Popover,
+    claude_model_list: gtk::Box,
+    selected_claude_preset: Rc<Cell<i32>>,
+    claude_presets_entry: gtk::Entry,
     pr_button: gtk::MenuButton,
     pr_popover: gtk::Popover,
     pr_root: gtk::Entry,
@@ -74,7 +81,11 @@ struct Workspace {
     launch_popover: gtk::Popover,
     launch_cwd: gtk::Entry,
     launch_project: gtk::Entry,
+    launch_project_dropdown: gtk::DropDown,
+    launch_project_choices: gtk::StringList,
     launch_worktree: gtk::Entry,
+    launch_worktree_dropdown: gtk::DropDown,
+    launch_worktree_choices: gtk::StringList,
     launch_name: gtk::Entry,
     launch_args: gtk::Entry,
     launch_prompt: gtk::Entry,
@@ -126,6 +137,9 @@ struct Workspace {
     projects: Rc<RefCell<ProjectPreferences>>,
     quick_launch: Rc<RefCell<QuickLaunchPreferences>>,
     pr_preferences: Rc<RefCell<PrPreferences>>,
+    claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
+    launch_choice_sequence: Rc<Cell<u64>>,
+    updating_launch_choices: Rc<Cell<bool>>,
 }
 
 struct SessionView {
@@ -231,6 +245,20 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     git_button.set_tooltip_text(Some("Open the selected worktree in Emacs"));
     sidebar_actions.append(&git_button);
 
+    let claude_model_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    claude_model_list.add_css_class("tui-surface");
+    let claude_model_popover = gtk::Popover::builder().child(&claude_model_list).build();
+    claude_model_popover.add_css_class("tui-popover");
+    let claude_model_button = gtk::MenuButton::builder()
+        .label("[model]")
+        .popover(&claude_model_popover)
+        .sensitive(false)
+        .build();
+    claude_model_button.add_css_class("tui-button");
+    claude_model_button.set_visible(false);
+    claude_model_button.set_tooltip_text(Some("Choose a Claude model and effort preset"));
+    header.pack_end(&claude_model_button);
+
     let pr_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
     pr_surface.add_css_class("tui-surface");
     pr_surface.set_margin_top(6);
@@ -290,7 +318,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_form.append(&launch_heading);
     let launch_cwd = launch_entry("Working directory", "cwd");
     let launch_project = launch_entry("Project root", "project root (optional)");
+    let launch_project_choices = gtk::StringList::new(&[]);
+    let launch_project_dropdown = searchable_path_dropdown(&launch_project_choices);
+    launch_project.0.append(&launch_project_dropdown);
     let launch_worktree = launch_entry("Worktree", "worktree path (optional)");
+    let launch_worktree_choices = gtk::StringList::new(&[]);
+    let launch_worktree_dropdown = searchable_path_dropdown(&launch_worktree_choices);
+    launch_worktree.0.append(&launch_worktree_dropdown);
     let launch_name = launch_entry("Name", "session name (optional)");
     let launch_args = launch_entry(
         "Arguments",
@@ -363,7 +397,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let worktree_popover = gtk::Popover::builder().child(&worktree_surface).build();
     worktree_popover.add_css_class("tui-popover");
     let worktree_button = gtk::MenuButton::builder()
-        .label("[worktrees]")
+        .label("[wt]")
         .popover(&worktree_popover)
         .sensitive(false)
         .build();
@@ -446,7 +480,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     let history_popover = gtk::Popover::builder().child(&history_scroller).build();
     let history_button = gtk::MenuButton::builder()
-        .label("[history]")
+        .label("[hist]")
         .popover(&history_popover)
         .sensitive(false)
         .build();
@@ -524,7 +558,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let theme_popover = gtk::Popover::builder().child(&theme_list).build();
     theme_popover.add_css_class("tui-popover");
     let theme_button = gtk::MenuButton::builder()
-        .label("[theme: neutral]")
+        .label("[neutral]")
         .popover(&theme_popover)
         .sensitive(false)
         .build();
@@ -569,6 +603,23 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         shortcut_entries.push((action, entry.clone()));
         shortcut_controls.push((action, entry, set, reset));
     }
+    let claude_presets_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    claude_presets_row.add_css_class("tui-setting-row");
+    let claude_presets_label = gtk::Label::new(Some("Claude presets JSON"));
+    claude_presets_label.set_xalign(0.0);
+    claude_presets_label.set_width_chars(24);
+    claude_presets_row.append(&claude_presets_label);
+    let claude_presets_entry = gtk::Entry::builder()
+        .placeholder_text("JSON array of named model and effort presets")
+        .width_chars(48)
+        .hexpand(true)
+        .build();
+    claude_presets_entry.add_css_class("tui-setting-entry");
+    claude_presets_row.append(&claude_presets_entry);
+    let apply_claude_presets = gtk::Button::with_label("[apply]");
+    apply_claude_presets.add_css_class("tui-button");
+    claude_presets_row.append(&apply_claude_presets);
+    shortcut_list.append(&claude_presets_row);
     let shortcut_popover = gtk::Popover::builder().child(&shortcut_list).build();
     shortcut_popover.add_css_class("tui-popover");
     let shortcut_button = gtk::MenuButton::builder()
@@ -615,6 +666,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         overlay,
         new_shell_button: new_shell.clone(),
         git_button: git_button.clone(),
+        claude_model_button,
+        claude_model_popover,
+        claude_model_list,
+        selected_claude_preset: Rc::new(Cell::new(0)),
+        claude_presets_entry: claude_presets_entry.clone(),
         pr_button,
         pr_popover,
         pr_root: pr_root.1,
@@ -625,7 +681,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_popover,
         launch_cwd: launch_cwd.1,
         launch_project: launch_project.1,
+        launch_project_dropdown,
+        launch_project_choices,
         launch_worktree: launch_worktree.1,
+        launch_worktree_dropdown,
+        launch_worktree_choices,
         launch_name: launch_name.1,
         launch_args: launch_args.1,
         launch_prompt: launch_prompt.1,
@@ -677,6 +737,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         projects: Rc::new(RefCell::new(ProjectPreferences::default())),
         quick_launch: Rc::new(RefCell::new(QuickLaunchPreferences::default())),
         pr_preferences: Rc::new(RefCell::new(PrPreferences::default())),
+        claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
+        launch_choice_sequence: Rc::new(Cell::new(0)),
+        updating_launch_choices: Rc::new(Cell::new(false)),
     };
 
     let selected_workspace = workspace.clone();
@@ -695,7 +758,14 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         selected_workspace.search_button.set_sensitive(true);
         selected_workspace.save_preference("selectedSessionId", serde_json::json!(id.as_str()));
         selected_workspace.update_emacs_actions();
+        selected_workspace.update_claude_actions();
     });
+
+    workspace.connect_launch_path_controls();
+    let launch_workspace = workspace.clone();
+    workspace
+        .launch_popover
+        .connect_show(move |_| launch_workspace.prepare_launch_panel());
 
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
@@ -716,6 +786,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             );
         }
     });
+    let preset_workspace = workspace.clone();
+    apply_claude_presets
+        .connect_clicked(move |_| preset_workspace.apply_claude_presets_from_entry());
+    let preset_workspace = workspace.clone();
+    claude_presets_entry
+        .connect_activate(move |_| preset_workspace.apply_claude_presets_from_entry());
 
     let worktree_workspace = workspace.clone();
     worktree_refresh.connect_clicked(move |_| worktree_workspace.refresh_worktree_panel());
@@ -782,6 +858,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
                     theme: Some(key),
                     follow_system: None,
                     font: None,
+                    ui_font_size: None,
                 },
                 None,
             );
@@ -795,6 +872,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
                 theme: None,
                 follow_system: Some(toggle.is_active()),
                 font: None,
+                ui_font_size: None,
             },
             None,
         );
@@ -807,6 +885,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
                 theme: None,
                 follow_system: None,
                 font: Some(font_workspace.font_entry.text().to_string()),
+                ui_font_size: None,
             },
             None,
         );
@@ -818,6 +897,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
                 theme: None,
                 follow_system: None,
                 font: Some(font_workspace.font_entry.text().to_string()),
+                ui_font_size: None,
             },
             None,
         );
@@ -884,6 +964,7 @@ impl Workspace {
                 self.render_history(None);
                 self.search_button.set_sensitive(false);
                 self.update_emacs_actions();
+                self.update_claude_actions();
                 self.save_preference("selectedSessionId", serde_json::Value::Null);
             }
         }
@@ -1061,6 +1142,16 @@ fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
     entry.add_css_class("tui-setting-entry");
     row.append(&entry);
     (row, entry)
+}
+
+fn searchable_path_dropdown(model: &gtk::StringList) -> gtk::DropDown {
+    let dropdown = gtk::DropDown::new(Some(model.clone()), None::<&gtk::Expression>);
+    dropdown.set_enable_search(true);
+    dropdown.set_show_arrow(true);
+    dropdown.set_tooltip_text(Some("Search known paths or choose one"));
+    dropdown.set_size_request(220, -1);
+    dropdown.add_css_class("tui-path-dropdown");
+    dropdown
 }
 
 fn display_name(id: &str) -> String {

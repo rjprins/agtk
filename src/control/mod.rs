@@ -7,13 +7,13 @@ mod wait;
 pub use client::{ClientError, ControlClient};
 pub use protocol::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
-    CloseSessionParams, ControlCommand, ControlError, ControlRequest, ControlResponse,
-    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, PrAcknowledgeParams,
-    PrLaunchReviewParams, PrListParams, PrSetAutoReviewParams, ProjectSetParams,
-    RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind,
-    SessionSetStateParams, ShortcutSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
-    WorktreeListParams, WorktreeReapParams, decode_request, decode_response, encode_request,
-    encode_response,
+    ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
+    ControlError, ControlRequest, ControlResponse, CreateSessionParams, ErrorCode, GetTextParams,
+    PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
+    PrSetAutoReviewParams, ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams,
+    SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams, UiShowParams,
+    UiSurface, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams, decode_request,
+    decode_response, encode_request, encode_response,
 };
 pub use server::{ControlServer, PendingRequest};
 pub use state::{

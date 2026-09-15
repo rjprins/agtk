@@ -103,6 +103,10 @@ impl Workspace {
                     .map(serde_json::from_value::<crate::azure::PrPreferences>)
                     .transpose()?
                     .unwrap_or_default();
+                let claude_presets = store
+                    .preference("claudeModelPresets")?
+                    .map(crate::claude_presets::ClaudePresetPreferences::from_value_lossy)
+                    .unwrap_or_default();
                 let mut records = store.sessions()?;
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
@@ -149,6 +153,7 @@ impl Workspace {
                     projects,
                     quick_launch,
                     pr_preferences,
+                    claude_presets,
                     recovered,
                 ))
             },
@@ -161,6 +166,7 @@ impl Workspace {
                     projects,
                     quick_launch,
                     pr_preferences,
+                    claude_presets,
                     recovered,
                 )) => {
                     *workspace.store.borrow_mut() = Some(store);
@@ -170,6 +176,7 @@ impl Workspace {
                     workspace.load_quick_launch(quick_launch);
                     *workspace.pr_preferences.borrow_mut() = pr_preferences;
                     workspace.update_pr_indicator();
+                    workspace.load_claude_presets(claude_presets);
                     for (record, connected) in recovered {
                         let (control, attachment) =
                             connected.map_or((None, None), |(c, a)| (Some(c), Some(a)));

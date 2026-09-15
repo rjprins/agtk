@@ -60,6 +60,13 @@ impl Workspace {
         }
         if matches!(
             &pending.request.command,
+            ControlCommand::ClaudePresetsSet(_) | ControlCommand::ClaudePresetApply(_)
+        ) {
+            self.handle_claude_control(pending);
+            return;
+        }
+        if matches!(
+            &pending.request.command,
             ControlCommand::PrList(_)
                 | ControlCommand::PrAcknowledge(_)
                 | ControlCommand::PrSetAutoReview(_)
@@ -141,6 +148,7 @@ impl Workspace {
                 let shown = match params.surface {
                     UiSurface::Launch => {
                         self.launch_popover.set_autohide(false);
+                        self.prepare_launch_panel();
                         self.launch_popover.popup();
                         true
                     }
@@ -191,6 +199,12 @@ impl Workspace {
                             false
                         }
                     }
+                    UiSurface::ClaudeModels if self.claude_model_button.is_sensitive() => {
+                        self.claude_model_popover.set_autohide(false);
+                        self.claude_model_button.popup();
+                        true
+                    }
+                    UiSurface::ClaudeModels => false,
                 };
                 ControlResponse::success(
                     id,
@@ -295,6 +309,10 @@ impl Workspace {
                     None => session_not_found(id, &params.session_id),
                 }
             }
+            ControlCommand::ClaudePresetsGet => ControlResponse::success(
+                id,
+                serde_json::json!({ "presets": self.claude_presets.borrow().presets }),
+            ),
             ControlCommand::SessionCreate(_)
             | ControlCommand::AppearanceSet(_)
             | ControlCommand::ShortcutSet(_)
@@ -306,6 +324,8 @@ impl Workspace {
             | ControlCommand::PrAcknowledge(_)
             | ControlCommand::PrSetAutoReview(_)
             | ControlCommand::PrLaunchReview(_)
+            | ControlCommand::ClaudePresetsSet(_)
+            | ControlCommand::ClaudePresetApply(_)
             | ControlCommand::AgentList(_)
             | ControlCommand::AgentPreview(_)
             | ControlCommand::AgentRestore(_)

@@ -30,7 +30,15 @@ impl Workspace {
                 workspace.show_error("No project is available for pull requests");
             }
         });
-        self.add_action("claude-model-preset", false, |_| {});
+        self.add_action("claude-model-preset", true, |workspace| {
+            workspace.open_or_cycle_claude_presets();
+        });
+        self.add_action("increase-font-size", true, |workspace| {
+            workspace.adjust_font_size(1);
+        });
+        self.add_action("decrease-font-size", true, |workspace| {
+            workspace.adjust_font_size(-1);
+        });
 
         self.add_action("copy", true, |workspace| {
             if let Some(terminal) = workspace.selected_terminal() {

@@ -140,7 +140,76 @@ impl Workspace {
                                 is_enabled: self.launch_button.is_sensitive(),
                                 is_selected: self.launch_popover.is_mapped(),
                                 bounds: widget_bounds(&self.launch_button, &self.window),
-                                children: Vec::new(),
+                                children: if self.launch_popover.is_mapped() {
+                                    vec![
+                                        UiNode {
+                                            id: "launch-project-input".to_owned(),
+                                            role: "textbox".to_owned(),
+                                            label: Some("Project directory".to_owned()),
+                                            is_visible: gtk::prelude::WidgetExt::is_visible(
+                                                &self.launch_project,
+                                            ),
+                                            is_enabled: self.launch_project.is_sensitive(),
+                                            is_selected: self.launch_project.has_focus(),
+                                            bounds: widget_bounds(
+                                                &self.launch_project,
+                                                &self.window,
+                                            ),
+                                            children: Vec::new(),
+                                        },
+                                        UiNode {
+                                            id: "launch-project-dropdown".to_owned(),
+                                            role: "combobox".to_owned(),
+                                            label: Some(format!(
+                                                "Known project directories ({})",
+                                                self.launch_project_choices.n_items()
+                                            )),
+                                            is_visible: self.launch_project_dropdown.is_visible(),
+                                            is_enabled: self.launch_project_dropdown.is_sensitive(),
+                                            is_selected: false,
+                                            bounds: widget_bounds(
+                                                &self.launch_project_dropdown,
+                                                &self.window,
+                                            ),
+                                            children: Vec::new(),
+                                        },
+                                        UiNode {
+                                            id: "launch-worktree-input".to_owned(),
+                                            role: "textbox".to_owned(),
+                                            label: Some("Worktree".to_owned()),
+                                            is_visible: gtk::prelude::WidgetExt::is_visible(
+                                                &self.launch_worktree,
+                                            ),
+                                            is_enabled: self.launch_worktree.is_sensitive(),
+                                            is_selected: self.launch_worktree.has_focus(),
+                                            bounds: widget_bounds(
+                                                &self.launch_worktree,
+                                                &self.window,
+                                            ),
+                                            children: Vec::new(),
+                                        },
+                                        UiNode {
+                                            id: "launch-worktree-dropdown".to_owned(),
+                                            role: "combobox".to_owned(),
+                                            label: Some(format!(
+                                                "Known Git worktrees ({})",
+                                                self.launch_worktree_choices.n_items()
+                                            )),
+                                            is_visible: self.launch_worktree_dropdown.is_visible(),
+                                            is_enabled: self
+                                                .launch_worktree_dropdown
+                                                .is_sensitive(),
+                                            is_selected: false,
+                                            bounds: widget_bounds(
+                                                &self.launch_worktree_dropdown,
+                                                &self.window,
+                                            ),
+                                            children: Vec::new(),
+                                        },
+                                    ]
+                                } else {
+                                    Vec::new()
+                                },
                             },
                             UiNode {
                                 id: "worktrees".to_owned(),
@@ -170,6 +239,16 @@ impl Workspace {
                                 is_enabled: self.pr_button.is_sensitive(),
                                 is_selected: self.pr_popover.is_mapped(),
                                 bounds: widget_bounds(&self.pr_button, &self.window),
+                                children: Vec::new(),
+                            },
+                            UiNode {
+                                id: "claude-model".to_owned(),
+                                role: "button".to_owned(),
+                                label: Some("Claude model presets".to_owned()),
+                                is_visible: self.claude_model_button.is_visible(),
+                                is_enabled: self.claude_model_button.is_sensitive(),
+                                is_selected: self.claude_model_popover.is_mapped(),
+                                bounds: widget_bounds(&self.claude_model_button, &self.window),
                                 children: Vec::new(),
                             },
                             UiNode {

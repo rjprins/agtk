@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::appearance::ThemeKey;
 use crate::azure::PrAttention;
+use crate::claude_presets::{ClaudeModelPreset, ClaudePresetPreferences};
 use crate::providers::AgentProvider;
 use crate::shortcuts::ShortcutAction;
 use crate::worktrees::DeleteBranch;
@@ -38,6 +39,9 @@ pub enum ControlCommand {
     PrAcknowledge(PrAcknowledgeParams),
     PrSetAutoReview(PrSetAutoReviewParams),
     PrLaunchReview(PrLaunchReviewParams),
+    ClaudePresetsSet(ClaudePresetsSetParams),
+    ClaudePresetsGet,
+    ClaudePresetApply(ClaudePresetApplyParams),
     AgentList(AgentListParams),
     AgentPreview(AgentPreviewParams),
     AgentRestore(AgentRestoreParams),
@@ -120,6 +124,7 @@ pub struct AppearanceSetParams {
     pub theme: Option<ThemeKey>,
     pub follow_system: Option<bool>,
     pub font: Option<String>,
+    pub ui_font_size: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +198,19 @@ pub struct PrLaunchReviewParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClaudePresetsSetParams {
+    pub presets: Vec<ClaudeModelPreset>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClaudePresetApplyParams {
+    pub session_id: String,
+    pub preset_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentListParams {
     #[serde(default = "default_agent_limit")]
     pub limit: u32,
@@ -246,6 +264,7 @@ pub enum UiSurface {
     Worktrees,
     Agents,
     PullRequests,
+    ClaudeModels,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -426,6 +445,22 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             validate_pr_id(params.pull_request_id)?;
             ControlCommand::PrLaunchReview(params)
         }
+        "claude.presets_set" => {
+            let params: ClaudePresetsSetParams = decode_params(wire.params)?;
+            ClaudePresetPreferences::new(params.presets.clone())
+                .map_err(|error| invalid_params(&error.to_string()))?;
+            ControlCommand::ClaudePresetsSet(params)
+        }
+        "claude.presets_get" => {
+            decode_empty_params(wire.params)?;
+            ControlCommand::ClaudePresetsGet
+        }
+        "claude.preset_apply" => {
+            let params: ClaudePresetApplyParams = decode_params(wire.params)?;
+            validate_session_id(&params.session_id)?;
+            validate_preset_id(&params.preset_id)?;
+            ControlCommand::ClaudePresetApply(params)
+        }
         "agent.list" => {
             let params: AgentListParams = decode_params(wire.params)?;
             validate_agent_list(&params)?;
@@ -588,6 +623,9 @@ impl ControlCommand {
             Self::PrAcknowledge(_) => "pr.acknowledge",
             Self::PrSetAutoReview(_) => "pr.set_auto_review",
             Self::PrLaunchReview(_) => "pr.launch_review",
+            Self::ClaudePresetsSet(_) => "claude.presets_set",
+            Self::ClaudePresetsGet => "claude.presets_get",
+            Self::ClaudePresetApply(_) => "claude.preset_apply",
             Self::AgentList(_) => "agent.list",
             Self::AgentPreview(_) => "agent.preview",
             Self::AgentRestore(_) => "agent.restore",
@@ -622,6 +660,13 @@ impl ControlCommand {
                 Ok(("pr.set_auto_review", serde_json::to_value(params)?))
             }
             Self::PrLaunchReview(params) => Ok(("pr.launch_review", serde_json::to_value(params)?)),
+            Self::ClaudePresetsSet(params) => {
+                Ok(("claude.presets_set", serde_json::to_value(params)?))
+            }
+            Self::ClaudePresetsGet => Ok(("claude.presets_get", empty_params())),
+            Self::ClaudePresetApply(params) => {
+                Ok(("claude.preset_apply", serde_json::to_value(params)?))
+            }
             Self::AgentList(params) => Ok(("agent.list", serde_json::to_value(params)?)),
             Self::AgentPreview(params) => Ok(("agent.preview", serde_json::to_value(params)?)),
             Self::AgentRestore(params) => Ok(("agent.restore", serde_json::to_value(params)?)),
@@ -756,7 +801,11 @@ fn validate_name(name: &str) -> Result<(), ControlError> {
 }
 
 fn validate_appearance(params: &AppearanceSetParams) -> Result<(), ControlError> {
-    if params.theme.is_none() && params.follow_system.is_none() && params.font.is_none() {
+    if params.theme.is_none()
+        && params.follow_system.is_none()
+        && params.font.is_none()
+        && params.ui_font_size.is_none()
+    {
         return Err(invalid_params(
             "at least one appearance setting is required",
         ));
@@ -768,6 +817,12 @@ fn validate_appearance(params: &AppearanceSetParams) -> Result<(), ControlError>
                 "font must be trimmed and contain between 1 and 120 characters",
             ));
         }
+    }
+    if let Some(size) = params.ui_font_size
+        && !(crate::appearance::MIN_UI_FONT_SIZE..=crate::appearance::MAX_UI_FONT_SIZE)
+            .contains(&size)
+    {
+        return Err(invalid_params("ui font size must be between 9 and 24"));
     }
     Ok(())
 }
@@ -841,6 +896,17 @@ fn validate_pr_project(project_root: &std::path::Path) -> Result<(), ControlErro
 fn validate_pr_id(pull_request_id: u64) -> Result<(), ControlError> {
     if pull_request_id == 0 {
         return Err(invalid_params("pullRequestId must be greater than zero"));
+    }
+    Ok(())
+}
+
+fn validate_preset_id(value: &str) -> Result<(), ControlError> {
+    let valid = (1..=80).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte));
+    if !valid {
+        return Err(invalid_params("presetId contains unsupported characters"));
     }
     Ok(())
 }

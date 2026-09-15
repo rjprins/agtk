@@ -207,6 +207,7 @@ impl Workspace {
         {
             self.list.select_row(Some(&row));
         }
+        self.refresh_launch_project_choices();
     }
 
     fn project_header(&self, root: &str, name: &str, settings: ProjectSettings) -> gtk::ListBoxRow {

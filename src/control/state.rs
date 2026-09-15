@@ -38,6 +38,7 @@ pub struct AppearanceSummary {
     pub effective_theme: ThemeKey,
     pub follow_system: bool,
     pub font: String,
+    pub ui_font_size: u8,
     pub available_themes: Vec<ThemeKey>,
 }
 

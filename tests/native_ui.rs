@@ -9,7 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agmux_native::control::{ControlClient, ResponseBody, decode_request};
+use agmux_native::control::{ControlClient, ErrorCode, ResponseBody, decode_request};
 use agmux_native::instance::{InstanceName, InstancePaths};
 use serde_json::{Value, json};
 
@@ -32,7 +32,7 @@ impl App {
         let fake_agent = directory.path().join("fake-agent");
         std::fs::write(
             &fake_agent,
-            "#!/bin/sh\nprintf '__RESTORE_ARGS_%s_%s__\\n' \"$1\" \"$2\"\nexec sleep 30\n",
+            "#!/bin/sh\nprintf '__RESTORE_ARGS_%s_%s__\\n' \"$1\" \"$2\"\nwhile IFS= read -r line; do printf '__INPUT_%s__\\n' \"$line\"; done\n",
         )
         .unwrap();
         std::fs::set_permissions(&fake_agent, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -265,6 +265,7 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
             "worktrees",
             "agents",
             "pull-requests",
+            "claude-model",
             "shortcuts",
             "appearance",
             "search",
@@ -275,10 +276,109 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         app.request("ui.show", json!({"surface":"launch"}))["shown"],
         true
     );
+    let inspection = app.request("ui.inspect", json!({}));
+    let launch = inspection["root"]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "top-bar")
+        .unwrap()["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "launch")
+        .unwrap();
+    let launch_child_ids = launch["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        launch_child_ids,
+        [
+            "launch-project-input",
+            "launch-project-dropdown",
+            "launch-worktree-input",
+            "launch-worktree-dropdown"
+        ]
+    );
     thread::sleep(Duration::from_millis(50));
     let transient = app.request("ui.capture", json!({}));
     assert!(transient["width"].as_i64().unwrap() < 1280);
     assert!(transient["height"].as_i64().unwrap() < 800);
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn launch_surface_populates_project_and_git_worktree_choices() {
+    let app = App::new();
+    let project = app.directory.path().join("launch-project");
+    std::fs::create_dir(&project).unwrap();
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(&project)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git command failed: {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "agmux test"]);
+    git(&["config", "user.email", "agmux@example.test"]);
+    std::fs::write(project.join("README"), "launch probe\n").unwrap();
+    git(&["add", "README"]);
+    git(&["commit", "-qm", "initial"]);
+
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"shell",
+            "cwd":project,
+            "projectRoot":project,
+            "name":"launch choices"
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"launch"}))["shown"],
+        true
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        let inspection = app.request("ui.inspect", json!({}));
+        let launch = inspection["root"]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == "top-bar")
+            .unwrap()["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == "launch")
+            .unwrap()
+            .clone();
+        let labels = launch["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|node| node["label"].as_str())
+            .collect::<Vec<_>>();
+        if labels
+            .iter()
+            .any(|label| label.starts_with("Known project directories (1)"))
+            && labels
+                .iter()
+                .any(|label| label.starts_with("Known Git worktrees (2)"))
+        {
+            app.request("session.close", json!({"sessionId":id}));
+            return;
+        }
+        thread::sleep(Duration::from_millis(30));
+    }
+    panic!("launch choices were not populated");
 }
 
 #[test]
@@ -301,11 +401,12 @@ fn terminal_appearance_updates_live_and_survives_ui_restart() {
 
     let appearance = app.request(
         "appearance.set",
-        json!({"theme":"tokyo-night","followSystem":false,"font":"Monospace 13"}),
+        json!({"theme":"tokyo-night","followSystem":false,"font":"Monospace 13","uiFontSize":15}),
     );
     assert_eq!(appearance["theme"], "tokyo-night");
     assert_eq!(appearance["effectiveTheme"], "tokyo-night");
     assert_eq!(appearance["font"], "Monospace 13");
+    assert_eq!(appearance["uiFontSize"], 15);
     let after = app.request("ui.capture", json!({}));
     assert_ne!(before["sha256"], after["sha256"]);
 
@@ -316,6 +417,7 @@ fn terminal_appearance_updates_live_and_survives_ui_restart() {
     assert_eq!(state["appearance"]["effectiveTheme"], "tokyo-night");
     assert_eq!(state["appearance"]["followSystem"], false);
     assert_eq!(state["appearance"]["font"], "Monospace 13");
+    assert_eq!(state["appearance"]["uiFontSize"], 15);
     app.request("session.close", json!({"sessionId":id}));
 }
 
@@ -385,6 +487,85 @@ fn emacs_actions_use_the_selected_sessions_repository_context() {
     assert_eq!(review["action"], "branch-review");
     let args = std::fs::read_to_string(app.directory.path().join("emacs-args")).unwrap();
     assert!(args.contains("branch-review"));
+    app.request("session.close", json!({"sessionId":id}));
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn claude_model_presets_are_exact_provider_only_and_durable() {
+    let mut app = App::new();
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"claude",
+            "cwd":app.directory.path(),
+            "name":"claude preset probe"
+        }),
+    );
+    let id = session["id"].as_str().unwrap().to_owned();
+    app.wait_text(&id, "__RESTORE_ARGS___");
+
+    let inspection = app.request("ui.inspect", json!({}));
+    let claude_model = inspection["root"]["children"][0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "claude-model")
+        .unwrap();
+    assert_eq!(claude_model["isVisible"], true);
+    assert_eq!(claude_model["isEnabled"], true);
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"claude-models"}))["shown"],
+        true
+    );
+    let capture = app.request("ui.capture", json!({}));
+    assert!(capture["width"].as_i64().unwrap() < 1280);
+
+    let applied = app.request(
+        "claude.preset_apply",
+        json!({"sessionId":id,"presetId":"opus-high"}),
+    );
+    assert_eq!(applied["commandsSent"], 2);
+    app.wait_text(&id, "__INPUT_/model opus__");
+    app.wait_text(&id, "__INPUT_/effort high__");
+
+    app.request(
+        "claude.presets_set",
+        json!({"presets":[{
+            "id":"focused",
+            "name":"Focused",
+            "model":"sonnet",
+            "effort":"xhigh"
+        }]}),
+    );
+    app.stop();
+    app.start();
+    app.request(
+        "claude.preset_apply",
+        json!({"sessionId":id,"presetId":"focused"}),
+    );
+    app.wait_text(&id, "__INPUT_/model sonnet__");
+    app.wait_text(&id, "__INPUT_/effort xhigh__");
+
+    let shell = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c","exec sleep 30"],
+            "cwd":app.directory.path(),
+            "name":"not claude"
+        }),
+    );
+    let shell_id = shell["id"].as_str().unwrap();
+    match app.request_body(
+        "claude.preset_apply",
+        json!({"sessionId":shell_id,"presetId":"focused"}),
+    ) {
+        ResponseBody::Failure(error) => assert_eq!(error.code, ErrorCode::OperationRefused),
+        response => panic!("preset unexpectedly reached a non-Claude session: {response:?}"),
+    }
+    app.request("session.close", json!({"sessionId":shell_id}));
     app.request("session.close", json!({"sessionId":id}));
 }
 

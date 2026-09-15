@@ -2,7 +2,9 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
-use agmux_native::control::{ControlCommand, PrListParams, SendInputParams};
+use agmux_native::control::{
+    ClaudePresetApplyParams, ControlCommand, PrListParams, SendInputParams,
+};
 use agmux_native::mcp::{ControlBackend, McpServer};
 use serde_json::{Value, json};
 
@@ -74,6 +76,9 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "acknowledge_pull_request",
             "set_auto_review",
             "launch_pr_review",
+            "list_claude_presets",
+            "set_claude_presets",
+            "apply_claude_preset",
             "inspect_ui",
             "capture_ui",
             "set_session_state",
@@ -155,6 +160,41 @@ fn pull_request_listing_maps_to_the_typed_local_control_protocol() {
         &[ControlCommand::PrList(PrListParams {
             project_root: "/work/agmux".into(),
         })]
+    );
+}
+
+#[test]
+fn claude_preset_tools_map_to_the_typed_local_control_protocol() {
+    let mut server = McpServer::new(MockBackend::default());
+    let listed = server
+        .handle(request(
+            13,
+            "tools/call",
+            json!({"name":"list_claude_presets","arguments":{}}),
+        ))
+        .unwrap();
+    assert_eq!(listed["result"]["isError"], false);
+
+    let applied = server
+        .handle(request(
+            14,
+            "tools/call",
+            json!({
+                "name":"apply_claude_preset",
+                "arguments":{"sessionId":"claude-1","presetId":"opus-high"}
+            }),
+        ))
+        .unwrap();
+    assert_eq!(applied["result"]["isError"], false);
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        &[
+            ControlCommand::ClaudePresetsGet,
+            ControlCommand::ClaudePresetApply(ClaudePresetApplyParams {
+                session_id: "claude-1".to_owned(),
+                preset_id: "opus-high".to_owned(),
+            }),
+        ]
     );
 }
 

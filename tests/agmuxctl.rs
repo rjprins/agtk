@@ -4,12 +4,14 @@ use std::thread;
 
 use agmux_native::appearance::ThemeKey;
 use agmux_native::azure::PrAttention;
+use agmux_native::claude_presets::{ClaudeEffort, ClaudeModelPreset};
 use agmux_native::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
-    CloseSessionParams, ControlCommand, ControlResponse, ControlServer, CreateSessionParams,
-    GetTextParams, PrAcknowledgeParams, ProjectSetParams, RenameSessionParams, SendInputParams,
-    SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams, UiShowParams,
-    UiSurface, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
+    ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
+    ControlResponse, ControlServer, CreateSessionParams, GetTextParams, PrAcknowledgeParams,
+    ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams, SessionKind,
+    SessionSetStateParams, ShortcutSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
+    WorktreeListParams, WorktreeReapParams,
 };
 use agmux_native::providers::AgentProvider;
 use agmux_native::shortcuts::ShortcutAction;
@@ -138,6 +140,34 @@ fn pr_acknowledge_command_preserves_the_exact_attention_marker() {
             project_root: "/work/agmux".into(),
             pull_request_id: 42,
             marker: PrAttention::Review,
+        }),
+    );
+}
+
+#[test]
+fn claude_presets_command_has_a_typed_protocol_mapping() {
+    assert_fixture_command(&["claude", "presets"], ControlCommand::ClaudePresetsGet);
+    assert_fixture_command(
+        &[
+            "claude",
+            "presets",
+            "--json",
+            r#"[{"id":"focused","name":"Focused","model":"opus","effort":"high"}]"#,
+        ],
+        ControlCommand::ClaudePresetsSet(ClaudePresetsSetParams {
+            presets: vec![ClaudeModelPreset {
+                id: "focused".to_owned(),
+                name: "Focused".to_owned(),
+                model: "opus".to_owned(),
+                effort: ClaudeEffort::High,
+            }],
+        }),
+    );
+    assert_fixture_command(
+        &["claude", "apply", "claude-1", "focused"],
+        ControlCommand::ClaudePresetApply(ClaudePresetApplyParams {
+            session_id: "claude-1".to_owned(),
+            preset_id: "focused".to_owned(),
         }),
     );
 }
@@ -308,11 +338,14 @@ fn appearance_set_command_has_a_typed_protocol_mapping() {
             "true",
             "--font",
             "Iosevka 12",
+            "--ui-font-size",
+            "15",
         ],
         ControlCommand::AppearanceSet(AppearanceSetParams {
             theme: Some(ThemeKey::SolarizedDark),
             follow_system: Some(true),
             font: Some("Iosevka 12".to_owned()),
+            ui_font_size: Some(15),
         }),
     );
 }

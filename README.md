@@ -18,8 +18,10 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Shell, Codex, Claude, and custom launches with exact working-directory and worktree context
 - Independent PTY hosts with bounded detached replay and explicit process-group shutdown
 - Persisted session metadata, ordering, project pins, collapsed groups, launch preferences, terminal themes, fonts, and keyboard overrides
+- Ctrl-plus and Ctrl-minus font scaling for the TUI chrome and every embedded terminal, persisted with appearance settings
 - Safe purpose-aware worktree creation and guarded reap with salvage and attic tags
 - Recent Codex and Claude conversation discovery, preview, direct restore, and explicit busy, ready, and waiting callbacks
+- Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
 - Emacs Magit and branch-review integration for the selected session
 - Azure DevOps PR attention, exact acknowledgement, source-worktree matching, manual review launch, and per-project opt-in auto-review
 - App-only PNG capture and structural UI inspection for isolated agent-driven testing
@@ -58,7 +60,13 @@ Set an absolute `PREFIX` to choose another location. The staged smoke test build
 ./scripts/smoke-install.sh
 ```
 
-After installation, launch “agmux native” from the GNOME overview or run `~/.local/bin/agmux-native`.
+Rerun the installer to upgrade the four binaries, desktop entry, and app icon in place. Remove only those installed files with:
+
+```sh
+./scripts/uninstall-local.sh
+```
+
+Uninstalling preserves runtime and saved workspace data. After installation, launch “agmux native” from the GNOME overview or run `~/.local/bin/agmux-native`. Startup diagnostics written to stdout or stderr by a desktop launch are available in the user journal.
 
 ## Keyboard contract
 
@@ -72,10 +80,16 @@ These shortcuts work while VTE has focus and can be changed through `[keys]`:
 | Next or previous session | `Ctrl+Shift+]` or `Ctrl+Shift+[` |
 | Next ready session | `Ctrl+Shift+Space` |
 | Reopen PR list | `Alt+Shift+P` |
+| Switch Claude model preset | `Ctrl+Shift+M` |
 | Copy or paste | `Ctrl+Shift+C` or `Ctrl+Shift+V` |
 | Search terminal | `Ctrl+Shift+F` |
+| Increase or decrease font size | `Ctrl++` or `Ctrl+-` |
 
 Selecting terminal text also copies a whitespace-cleaned version to the regular clipboard. Prompt history is retained only while the current GTK process is running.
+
+The launch surface keeps the project and worktree fields editable, and adds searchable dropdowns populated from known project roots and the selected repository's Git worktrees. Press Enter after typing a custom project directory to refresh its worktree choices.
+
+The Claude preset shortcut opens the chooser for a selected live Claude session. Repeating the shortcut cycles its focused preset, Enter applies it, and Escape cancels. Presets are editable as a validated JSON array in `[keys]`. Applying one assumes Claude is at an empty prompt.
 
 ## Local control
 
@@ -90,6 +104,8 @@ agmuxctl ui capture
 agmuxctl ui show pull-requests
 agmuxctl pr list /absolute/project
 agmuxctl pr review /absolute/project 1234
+agmuxctl claude presets
+agmuxctl claude apply SESSION_ID opus-high
 ```
 
 Hosted agent processes receive `AGMUX_INSTANCE`, `AGMUX_SESSION_ID`, and `AGMUX_CONTROL_SOCKET`. A provider hook can report explicit readiness with:
@@ -116,7 +132,7 @@ An MCP client can start the adapter as a local stdio server:
 }
 ```
 
-The tools cover sessions, terminal input and snapshots, worktrees, recent provider sessions, Emacs actions, PR workflows, readiness callbacks, UI structure, and app-only PNG capture. The adapter never captures the desktop.
+The tools cover sessions, terminal input and snapshots, worktrees, recent provider sessions, Claude presets, Emacs actions, PR workflows, readiness callbacks, UI structure, and app-only PNG capture. The adapter never captures the desktop.
 
 ## Verification
 
