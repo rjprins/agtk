@@ -561,22 +561,66 @@ impl Workspace {
         });
         content.append(&state_label);
         let label = gtk::EditableLabel::builder()
-            .xalign(0.0)
-            .hexpand(true)
+            .editable(false)
+            .focus_on_click(false)
             .build();
         label.set_text(&name);
-        label.set_tooltip_text(Some("Double-click to rename this session"));
+        label.set_tooltip_text(Some("Select session"));
         let rename_workspace = self.clone();
         let rename_id = id.clone();
+        let rename_label = label.clone();
         label.connect_editing_notify(move |label| {
             if !label.is_editing() {
+                rename_label.set_editable(false);
                 rename_workspace.rename_session(&rename_id, label.text().trim().to_owned(), None);
             }
         });
-        content.append(&label);
-        let kind = gtk::Label::new(Some(session_kind_short(record.kind)));
-        kind.add_css_class("tui-kind");
+        let details = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        details.set_hexpand(true);
+        details.append(&label);
+        if let Some(worktree) = record.worktree_path.as_ref() {
+            let worktree_name = worktree
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| worktree.to_string_lossy().into_owned());
+            let worktree_label = gtk::Label::new(Some(&format!("in {worktree_name}")));
+            worktree_label.set_xalign(0.0);
+            worktree_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            worktree_label.set_tooltip_text(Some(&worktree.to_string_lossy()));
+            worktree_label.add_css_class("tui-session-worktree");
+            details.append(&worktree_label);
+        }
+        content.append(&details);
+        let kind = provider_icons::session_icon(record.kind, &record.program);
         content.append(&kind);
+        let edit = gtk::Button::builder()
+            .icon_name("document-edit-symbolic")
+            .build();
+        edit.add_css_class("tui-button");
+        edit.set_tooltip_text(Some("Rename session"));
+        let edit_label = label.clone();
+        edit.connect_clicked(move |_| {
+            edit_label.set_editable(true);
+            edit_label.start_editing();
+        });
+        content.append(&edit);
+        if let (Some(project_root), Some(worktree)) = (
+            record.project_root.clone(),
+            record.worktree_path.clone().or_else(|| record.cwd.clone()),
+        ) {
+            let launch = gtk::Button::builder()
+                .icon_name("list-add-symbolic")
+                .build();
+            launch.add_css_class("tui-button");
+            launch.set_tooltip_text(Some("Launch in this worktree"));
+            let launch_workspace = self.clone();
+            launch.connect_clicked(move |_| {
+                launch_workspace.open_launch_for_worktree(&project_root, &worktree)
+            });
+            content.append(&launch);
+        }
         let close = gtk::Button::builder()
             .icon_name("window-close-symbolic")
             .build();

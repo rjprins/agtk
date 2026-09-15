@@ -16,6 +16,15 @@ struct LoadedPrContext {
 }
 
 impl Workspace {
+    pub(super) fn open_pr_for_project(&self, root: &str) {
+        self.pr_root.set_text(root);
+        if self.pr_popover.is_mapped() {
+            self.refresh_pr_panel(None);
+        } else {
+            self.pr_popover.popup();
+        }
+    }
+
     pub(super) fn prepare_pr_panel(&self) {
         if self.pr_root.text().trim().is_empty()
             && let Some(root) = self.preferred_project_root()

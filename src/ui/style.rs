@@ -132,6 +132,7 @@ const TUI_CSS: &str = r#"
 .tui-state { color: @ready; font-weight: bold; }
 .tui-state-exited { color: @danger; }
 .tui-kind { color: @muted; font-size: @small-font-size; }
+.tui-provider-icon { min-width: 16px; min-height: 16px; }
 
 .tui-group-row { background: @panel; border-top: 1px solid @line; }
 .tui-group-button {
@@ -152,6 +153,11 @@ const TUI_CSS: &str = r#"
   background: @background;
   font-size: @small-font-size;
   border-bottom: 1px solid @line;
+}
+.tui-worktree-name { color: @text; font-weight: bold; }
+.tui-worktree-path, .tui-session-worktree {
+  color: @muted;
+  font-size: @small-font-size;
 }
 .tui-worktree-row {
   padding: 5px 7px;

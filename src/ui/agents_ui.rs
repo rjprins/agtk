@@ -12,6 +12,15 @@ use crate::providers::{
 };
 
 impl Workspace {
+    pub(super) fn open_agent_for_project(&self, root: &str) {
+        self.agent_restore_project.set_text(root);
+        if !self.agent_popover.is_mapped() {
+            self.agent_popover.popup();
+        } else {
+            self.refresh_agent_panel();
+        }
+    }
+
     pub(super) fn refresh_agent_panel(&self) {
         self.render_agent_list_message("SCANNING LOCAL PROVIDER LOGS...");
         self.render_agent_preview_message("Select a Codex or Claude session");
@@ -244,13 +253,12 @@ impl Workspace {
             let button = gtk::Button::new();
             button.add_css_class("tui-agent-row");
             let content = gtk::Box::new(gtk::Orientation::Vertical, 1);
-            let title = gtk::Label::new(Some(&format!(
-                "[{}] {}",
-                provider_short(session.provider),
-                session.name
-            )));
+            let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+            title_row.append(&provider_icons::agent_icon(session.provider));
+            let title = gtk::Label::new(Some(&session.name));
             title.set_xalign(0.0);
-            content.append(&title);
+            title_row.append(&title);
+            content.append(&title_row);
             let details = gtk::Label::new(Some(&format!(
                 "{}  {}",
                 session.provider_session_id,
@@ -285,7 +293,6 @@ impl Workspace {
                 .as_deref()
                 .unwrap_or(""),
         );
-        self.agent_restore_project.set_text("");
         self.agent_restore_worktree.set_text("");
         self.agent_restore_button.set_sensitive(false);
         self.selected_agent.borrow_mut().replace(session.clone());
@@ -399,13 +406,6 @@ fn entry_path(entry: &gtk::Entry) -> Option<PathBuf> {
     let text = entry.text();
     let text = text.trim();
     (!text.is_empty()).then(|| PathBuf::from(text))
-}
-
-const fn provider_short(provider: AgentProvider) -> &'static str {
-    match provider {
-        AgentProvider::Codex => "CX",
-        AgentProvider::Claude => "CL",
-    }
 }
 
 pub(super) const fn session_state_indicator(state: SessionState) -> &'static str {

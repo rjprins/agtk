@@ -14,6 +14,8 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 ## Current features
 
 - One compact native window with project and worktree grouped sessions in the sidebar
+- Project headers with launch, pin, resume, worktree, and pull-request actions
+- Selectable session rows with explicit rename and same-worktree launch buttons
 - Embedded VTE terminals with true color, selection-to-clipboard, normal copy and paste, search, and live prompt history navigation
 - Shell, Codex, Claude, Gemini, and custom launches with exact working-directory and worktree context
 - Independent PTY hosts with bounded detached replay and explicit process-group shutdown
@@ -94,7 +96,7 @@ These shortcuts work while VTE has focus and can be changed through `[keys]`:
 
 Selecting terminal text also copies a whitespace-cleaned version to the regular clipboard. Prompt history is retained only while the current GTK process is running.
 
-The launch surface follows the original agmux launch behavior. It keeps project and worktree fields editable, completes filesystem paths, remembers provider options per project, offers Claude, Codex, Gemini, and shell choices, and presents `+ New worktree`, `Current (...)`, and sorted Git worktree choices. New worktrees expose generated branch and base-branch fields before the session launches. Action controls use compact symbolic icons instead of bracket glyphs.
+The launch surface follows the original agmux launch behavior. It keeps project and worktree fields editable, completes filesystem paths, remembers provider options per project, offers Claude, Codex, Gemini, and shell choices, and presents `+ New worktree`, `Current (...)`, and sorted Git worktree choices. New worktrees expose generated branch and base-branch fields before the session launches. Action controls use compact symbolic icons instead of bracket glyphs. Session rows use embedded provider icons for zsh, Claude, Codex, Gemini, Grok, and custom terminals.
 
 The Claude preset shortcut opens the chooser for a selected live Claude session. Repeating the shortcut cycles its focused preset, Enter applies it, and Escape cancels. Presets are editable as a validated JSON array in `[keys]`. Applying one assumes Claude is at an empty prompt.
 

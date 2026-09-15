@@ -46,6 +46,7 @@ mod history_ui;
 mod inspection;
 mod launch_ui;
 mod projects_ui;
+mod provider_icons;
 mod search_ui;
 mod sessions;
 mod shortcuts_ui;
@@ -1273,16 +1274,6 @@ const fn session_kind_name(kind: SessionKind) -> &'static str {
         SessionKind::Claude => "claude",
         SessionKind::Gemini => "gemini",
         SessionKind::Custom => "custom",
-    }
-}
-
-const fn session_kind_short(kind: SessionKind) -> &'static str {
-    match kind {
-        SessionKind::Shell => "SH",
-        SessionKind::Codex => "CX",
-        SessionKind::Claude => "CL",
-        SessionKind::Gemini => "GM",
-        SessionKind::Custom => "EX",
     }
 }
 
