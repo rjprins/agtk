@@ -4,6 +4,7 @@ use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -12,21 +13,27 @@ use agmux_native::instance::{InstanceName, InstancePaths};
 use serde_json::{Value, json};
 
 struct App {
+    _display_guard: MutexGuard<'static, ()>,
     directory: tempfile::TempDir,
     paths: InstancePaths,
     child: Option<Child>,
 }
 
 static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static PRIVATE_DISPLAY_LOCK: Mutex<()> = Mutex::new(());
 
 impl App {
     fn new() -> Self {
+        let display_guard = PRIVATE_DISPLAY_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let directory = tempfile::tempdir().unwrap();
         let sequence = TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let name =
             InstanceName::parse(&format!("ui-test-{}-{sequence}", std::process::id())).unwrap();
         let paths = InstancePaths::new(name, directory.path(), directory.path());
         let mut app = Self {
+            _display_guard: display_guard,
             directory,
             paths,
             child: None,
@@ -205,6 +212,7 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         [
             "new-shell",
             "launch",
+            "worktrees",
             "shortcuts",
             "appearance",
             "search",
@@ -364,4 +372,92 @@ fn sessions_group_by_project_and_worktree_with_durable_project_state() {
         "session.close",
         json!({"sessionId":feature["id"].as_str().unwrap()}),
     );
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn control_api_completes_disposable_worktree_lifecycle() {
+    let app = App::new();
+    let repo = app.directory.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    for arguments in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.name", "Agmux Test"],
+        vec!["config", "user.email", "agmux@example.invalid"],
+    ] {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+    std::fs::write(repo.join("README.md"), "fixture\n").unwrap();
+    for arguments in [vec!["add", "README.md"], vec!["commit", "-m", "fixture"]] {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+
+    let initial = app.request("worktree.list", json!({"projectRoot":repo}));
+    assert_eq!(initial["worktrees"].as_array().unwrap().len(), 1);
+    app.request("project.set", json!({"root":repo,"isPinned":true}));
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"worktrees"}))["shown"],
+        true
+    );
+    thread::sleep(Duration::from_millis(50));
+    let worktree_surface = app.request("ui.capture", json!({}));
+    assert!(worktree_surface["width"].as_i64().unwrap() < 1280);
+    assert!(worktree_surface["height"].as_i64().unwrap() < 800);
+    let created = app.request(
+        "worktree.create",
+        json!({
+            "projectRoot":repo,
+            "branch":"native-control",
+            "baseBranch":"main",
+            "purpose":"exercise isolated native control"
+        }),
+    );
+    let created_path = created["path"].as_str().unwrap();
+    assert!(std::path::Path::new(created_path).exists());
+    for arguments in [
+        vec!["config", "branch.native-control.remote", "origin"],
+        vec![
+            "config",
+            "branch.native-control.merge",
+            "refs/heads/native-control",
+        ],
+    ] {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+
+    let inventory = app.request("worktree.list", json!({"projectRoot":repo}));
+    let preview = inventory["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|worktree| worktree["path"] == created_path)
+        .unwrap();
+    let result = app.request(
+        "worktree.reap",
+        json!({
+            "path":created_path,
+            "expectedHead":preview["head"],
+            "expectedStatusHash":preview["statusHash"],
+            "deleteBranch":"force"
+        }),
+    );
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["branchDeleted"], true);
+    assert!(!std::path::Path::new(created_path).exists());
+    assert!(result["atticTag"].as_str().unwrap().starts_with("attic/"));
 }

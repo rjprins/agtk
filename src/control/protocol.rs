@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::appearance::ThemeKey;
 use crate::shortcuts::ShortcutAction;
+use crate::worktrees::DeleteBranch;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub(crate) const MAX_REQUEST_BYTES: usize = 1024 * 1024;
@@ -28,6 +29,9 @@ pub enum ControlCommand {
     AppearanceSet(AppearanceSetParams),
     ShortcutSet(ShortcutSetParams),
     ProjectSet(ProjectSetParams),
+    WorktreeList(WorktreeListParams),
+    WorktreeCreate(WorktreeCreateParams),
+    WorktreeReap(WorktreeReapParams),
     SessionCreate(CreateSessionParams),
     SessionSelect(SessionIdParams),
     SessionSendInput(SendInputParams),
@@ -123,6 +127,30 @@ pub struct ProjectSetParams {
     pub is_collapsed: Option<bool>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorktreeListParams {
+    pub project_root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorktreeCreateParams {
+    pub project_root: PathBuf,
+    pub branch: String,
+    pub base_branch: Option<String>,
+    pub purpose: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorktreeReapParams {
+    pub path: PathBuf,
+    pub expected_head: String,
+    pub expected_status_hash: String,
+    pub delete_branch: DeleteBranch,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UiSurface {
@@ -131,6 +159,7 @@ pub enum UiSurface {
     Shortcuts,
     History,
     Search,
+    Worktrees,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +178,7 @@ pub enum ErrorCode {
     InvalidParams,
     RequestTooLarge,
     SessionNotFound,
+    OperationRefused,
     InternalError,
 }
 
@@ -272,6 +302,21 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             let params: ProjectSetParams = decode_params(wire.params)?;
             validate_project(&params)?;
             ControlCommand::ProjectSet(params)
+        }
+        "worktree.list" => {
+            let params: WorktreeListParams = decode_params(wire.params)?;
+            validate_absolute_path(&params.project_root, "project root")?;
+            ControlCommand::WorktreeList(params)
+        }
+        "worktree.create" => {
+            let params: WorktreeCreateParams = decode_params(wire.params)?;
+            validate_worktree_create(&params)?;
+            ControlCommand::WorktreeCreate(params)
+        }
+        "worktree.reap" => {
+            let params: WorktreeReapParams = decode_params(wire.params)?;
+            validate_worktree_reap(&params)?;
+            ControlCommand::WorktreeReap(params)
         }
         "session.create" => {
             let params: CreateSessionParams = decode_params(wire.params)?;
@@ -402,6 +447,9 @@ impl ControlCommand {
             Self::AppearanceSet(_) => "appearance.set",
             Self::ShortcutSet(_) => "shortcut.set",
             Self::ProjectSet(_) => "project.set",
+            Self::WorktreeList(_) => "worktree.list",
+            Self::WorktreeCreate(_) => "worktree.create",
+            Self::WorktreeReap(_) => "worktree.reap",
             Self::SessionCreate(_) => "session.create",
             Self::SessionSelect(_) => "session.select",
             Self::SessionSendInput(_) => "session.send_input",
@@ -421,6 +469,9 @@ impl ControlCommand {
             Self::AppearanceSet(params) => Ok(("appearance.set", serde_json::to_value(params)?)),
             Self::ShortcutSet(params) => Ok(("shortcut.set", serde_json::to_value(params)?)),
             Self::ProjectSet(params) => Ok(("project.set", serde_json::to_value(params)?)),
+            Self::WorktreeList(params) => Ok(("worktree.list", serde_json::to_value(params)?)),
+            Self::WorktreeCreate(params) => Ok(("worktree.create", serde_json::to_value(params)?)),
+            Self::WorktreeReap(params) => Ok(("worktree.reap", serde_json::to_value(params)?)),
             Self::SessionCreate(params) => Ok(("session.create", serde_json::to_value(params)?)),
             Self::SessionSelect(params) => Ok(("session.select", serde_json::to_value(params)?)),
             Self::SessionSendInput(params) => {
@@ -578,11 +629,62 @@ fn validate_shortcut(params: &ShortcutSetParams) -> Result<(), ControlError> {
 }
 
 fn validate_project(params: &ProjectSetParams) -> Result<(), ControlError> {
-    if !params.root.is_absolute() {
-        return Err(invalid_params("project root must be an absolute path"));
-    }
+    validate_absolute_path(&params.root, "project root")?;
     if params.is_pinned.is_none() && params.is_collapsed.is_none() {
         return Err(invalid_params("at least one project setting is required"));
+    }
+    Ok(())
+}
+
+fn validate_worktree_create(params: &WorktreeCreateParams) -> Result<(), ControlError> {
+    validate_absolute_path(&params.project_root, "project root")?;
+    let valid_branch = (1..=120).contains(&params.branch.len())
+        && params.branch.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || (byte == b'-' && index > 0)
+        })
+        && !params.branch.ends_with('-')
+        && !params.branch.contains("--");
+    if !valid_branch {
+        return Err(invalid_params(
+            "branch must be a concise lowercase kebab-case slug",
+        ));
+    }
+    if let Some(base) = &params.base_branch
+        && (base.trim() != base || base.is_empty() || base.len() > 240 || base.contains('\0'))
+    {
+        return Err(invalid_params("base branch is invalid"));
+    }
+    if params.purpose.trim() != params.purpose
+        || !(1..=240).contains(&params.purpose.chars().count())
+        || params.purpose.contains('\0')
+    {
+        return Err(invalid_params(
+            "purpose must be trimmed and contain between 1 and 240 characters",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_worktree_reap(params: &WorktreeReapParams) -> Result<(), ControlError> {
+    validate_absolute_path(&params.path, "worktree path")?;
+    validate_guard_token("expectedHead", &params.expected_head)?;
+    validate_guard_token("expectedStatusHash", &params.expected_status_hash)?;
+    Ok(())
+}
+
+fn validate_absolute_path(path: &std::path::Path, label: &str) -> Result<(), ControlError> {
+    if !path.is_absolute() {
+        return Err(invalid_params(&format!("{label} must be an absolute path")));
+    }
+    Ok(())
+}
+
+fn validate_guard_token(field: &str, value: &str) -> Result<(), ControlError> {
+    if value.is_empty() || value.len() > 128 || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(invalid_params(&format!(
+            "{field} must be a hexadecimal token"
+        )));
     }
     Ok(())
 }

@@ -104,4 +104,8 @@ impl InstancePaths {
     pub fn database(&self) -> PathBuf {
         self.state_dir.join("agmux.db")
     }
+
+    pub fn attic_dir(&self) -> PathBuf {
+        self.state_dir.join("attic")
+    }
 }

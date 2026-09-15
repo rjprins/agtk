@@ -1,12 +1,43 @@
 use std::error::Error;
+use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::gdk::prelude::TextureExt;
 
 use crate::capture::store_png_capture;
-use crate::control::CaptureResult;
+use crate::control::{CaptureResult, ControlResponse, ErrorCode, PendingRequest};
 
 use super::Workspace;
+
+pub(super) fn capture_controlled(workspace: Workspace, pending: PendingRequest) {
+    // Let presentation and popover mapping reach the next frame before taking a
+    // widget-only snapshot. This remains asynchronous, so GTK can render it.
+    schedule_capture(workspace, pending, 0);
+}
+
+fn schedule_capture(workspace: Workspace, pending: PendingRequest, attempt: u8) {
+    glib::timeout_add_local_once(Duration::from_millis(32), move || {
+        let result = capture_workspace(&workspace)
+            .and_then(|capture| serde_json::to_value(capture).map_err(Into::into));
+        match result {
+            Ok(capture) => {
+                let request_id = pending.request.id.clone();
+                let _ = pending.respond(ControlResponse::success(request_id, capture));
+            }
+            Err(_) if attempt < 5 => schedule_capture(workspace, pending, attempt + 1),
+            Err(error) => {
+                let request_id = pending.request.id.clone();
+                let response = ControlResponse::failure(
+                    request_id,
+                    ErrorCode::InternalError,
+                    "Could not capture application content",
+                    Some(serde_json::json!({ "reason": error.to_string() })),
+                );
+                let _ = pending.respond(response);
+            }
+        }
+    });
+}
 
 pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, Box<dyn Error>> {
     let target = active_surface(workspace);
@@ -55,6 +86,7 @@ fn active_surface(workspace: &Workspace) -> gtk::Widget {
         &workspace.theme_popover,
         &workspace.history_popover,
         &workspace.search_popover,
+        &workspace.worktree_popover,
     ] {
         if popover.is_mapped() {
             return popover

@@ -2,9 +2,11 @@ use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AppearanceSetParams, ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION,
     ProjectSetParams, ResponseBody, SessionIdParams, SessionKind, ShortcutSetParams,
-    decode_request, decode_response, encode_request, encode_response,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams, decode_request, decode_response,
+    encode_request, encode_response,
 };
 use agmux_native::shortcuts::ShortcutAction;
+use agmux_native::worktrees::DeleteBranch;
 use serde_json::json;
 
 #[test]
@@ -105,6 +107,21 @@ fn every_core_method_decodes_to_a_typed_command() {
             "ProjectSet",
         ),
         (
+            "worktree.list",
+            r#"{"projectRoot":"/work/agmux"}"#,
+            "WorktreeList",
+        ),
+        (
+            "worktree.create",
+            r#"{"projectRoot":"/work/agmux","branch":"native-ui","purpose":"Build native UI"}"#,
+            "WorktreeCreate",
+        ),
+        (
+            "worktree.reap",
+            r#"{"path":"/work/agmux-native-ui","expectedHead":"0123456789abcdef","expectedStatusHash":"abcdef","deleteBranch":"auto"}"#,
+            "WorktreeReap",
+        ),
+        (
             "session.create",
             r#"{"kind":"custom","command":"printf","args":["hello"],"cwd":"/tmp","name":"Probe"}"#,
             "SessionCreate",
@@ -141,6 +158,54 @@ fn every_core_method_decodes_to_a_typed_command() {
         let wire = format!(r#"{{"version":1,"id":"req","method":"{method}","params":{params}}}"#);
         let request = decode_request(wire.as_bytes()).expect(method);
         assert_eq!(request.command.method(), method, "{expected_variant}");
+    }
+}
+
+#[test]
+fn worktree_operations_have_typed_guarded_parameters() {
+    let list = decode_request(br#"{"version":1,"id":"wt","method":"worktree.list","params":{"projectRoot":"/work/agmux"}}"#)
+        .expect("decode list");
+    assert_eq!(
+        list.command,
+        ControlCommand::WorktreeList(WorktreeListParams {
+            project_root: "/work/agmux".into(),
+        })
+    );
+
+    let create = decode_request(br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agmux","branch":"native-ui","baseBranch":"main","purpose":"Build native UI"}}"#)
+        .expect("decode create");
+    assert_eq!(
+        create.command,
+        ControlCommand::WorktreeCreate(WorktreeCreateParams {
+            project_root: "/work/agmux".into(),
+            branch: "native-ui".to_owned(),
+            base_branch: Some("main".to_owned()),
+            purpose: "Build native UI".to_owned(),
+        })
+    );
+
+    let reap = decode_request(br#"{"version":1,"id":"wt","method":"worktree.reap","params":{"path":"/work/agmux-native-ui","expectedHead":"0123456789abcdef","expectedStatusHash":"abcdef","deleteBranch":"force"}}"#)
+        .expect("decode reap");
+    assert_eq!(
+        reap.command,
+        ControlCommand::WorktreeReap(WorktreeReapParams {
+            path: "/work/agmux-native-ui".into(),
+            expected_head: "0123456789abcdef".to_owned(),
+            expected_status_hash: "abcdef".to_owned(),
+            delete_branch: DeleteBranch::Force,
+        })
+    );
+
+    for invalid in [
+        br#"{"version":1,"id":"wt","method":"worktree.list","params":{"projectRoot":"relative"}}"#.as_slice(),
+        br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agmux","branch":"Bad_Branch","purpose":"work"}}"#.as_slice(),
+        br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agmux","branch":"good-branch","purpose":""}}"#.as_slice(),
+        br#"{"version":1,"id":"wt","method":"worktree.reap","params":{"path":"relative","expectedHead":"abc","expectedStatusHash":"def","deleteBranch":"auto"}}"#.as_slice(),
+    ] {
+        assert_eq!(
+            decode_request(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams
+        );
     }
 }
 

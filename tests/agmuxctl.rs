@@ -6,9 +6,11 @@ use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AppearanceSetParams, CloseSessionParams, ControlCommand, ControlResponse, ControlServer,
     CreateSessionParams, GetTextParams, ProjectSetParams, RenameSessionParams, SendInputParams,
-    SessionIdParams, SessionKind, ShortcutSetParams, UiShowParams, UiSurface,
+    SessionIdParams, SessionKind, ShortcutSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
+    WorktreeListParams, WorktreeReapParams,
 };
 use agmux_native::shortcuts::ShortcutAction;
+use agmux_native::worktrees::DeleteBranch;
 use serde_json::json;
 
 #[test]
@@ -331,6 +333,54 @@ fn project_set_command_has_a_typed_protocol_mapping() {
             root: "/work/agmux".into(),
             is_pinned: Some(true),
             is_collapsed: Some(false),
+        }),
+    );
+}
+
+#[test]
+fn worktree_commands_have_typed_protocol_mappings() {
+    assert_fixture_command(
+        &["worktree", "list", "/work/agmux"],
+        ControlCommand::WorktreeList(WorktreeListParams {
+            project_root: "/work/agmux".into(),
+        }),
+    );
+    assert_fixture_command(
+        &[
+            "worktree",
+            "create",
+            "/work/agmux",
+            "--branch",
+            "native-ui",
+            "--base",
+            "main",
+            "--purpose",
+            "Build native UI",
+        ],
+        ControlCommand::WorktreeCreate(WorktreeCreateParams {
+            project_root: "/work/agmux".into(),
+            branch: "native-ui".to_owned(),
+            base_branch: Some("main".to_owned()),
+            purpose: "Build native UI".to_owned(),
+        }),
+    );
+    assert_fixture_command(
+        &[
+            "worktree",
+            "reap",
+            "/work/agmux-native-ui",
+            "--expected-head",
+            "0123456789abcdef",
+            "--expected-status-hash",
+            "abcdef",
+            "--delete-branch",
+            "force",
+        ],
+        ControlCommand::WorktreeReap(WorktreeReapParams {
+            path: "/work/agmux-native-ui".into(),
+            expected_head: "0123456789abcdef".to_owned(),
+            expected_status_hash: "abcdef".to_owned(),
+            delete_branch: DeleteBranch::Force,
         }),
     );
 }

@@ -9,9 +9,11 @@ use agmux_native::control::{
     ControlRequest, CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION,
     ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams,
     SessionKind, SessionState, ShortcutSetParams, UiShowParams, UiSurface, WaitCondition,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
 use agmux_native::shortcuts::ShortcutAction;
+use agmux_native::worktrees::DeleteBranch;
 
 const EXIT_USAGE_OR_PROTOCOL: u8 = 2;
 const EXIT_CONNECTION: u8 = 3;
@@ -77,6 +79,7 @@ fn run() -> Result<(), Failure> {
         [group, action, rest @ ..] if group == "project" && action == "set" => {
             parse_project_set(rest)?
         }
+        [group, action, rest @ ..] if group == "worktree" => parse_worktree_command(action, rest)?,
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
             return Err(Failure::Usage(usage().to_owned()));
@@ -258,6 +261,7 @@ fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
         "shortcuts" => Ok(UiSurface::Shortcuts),
         "history" => Ok(UiSurface::History),
         "search" => Ok(UiSurface::Search),
+        "worktrees" => Ok(UiSurface::Worktrees),
         _ => Err(Failure::Usage(format!("unknown UI surface: {value}"))),
     }
 }
@@ -569,6 +573,106 @@ fn parse_project_set(arguments: &[String]) -> Result<ControlCommand, Failure> {
     }))
 }
 
+fn parse_worktree_command(action: &str, arguments: &[String]) -> Result<ControlCommand, Failure> {
+    match action {
+        "list" => match arguments {
+            [project_root] => Ok(ControlCommand::WorktreeList(WorktreeListParams {
+                project_root: project_root.into(),
+            })),
+            _ => Err(usage_failure()),
+        },
+        "create" => parse_worktree_create(arguments),
+        "reap" => parse_worktree_reap(arguments),
+        _ => Err(usage_failure()),
+    }
+}
+
+fn parse_worktree_create(arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let Some(project_root) = arguments.first() else {
+        return Err(Failure::Usage(
+            "worktree create requires a project root".to_owned(),
+        ));
+    };
+    let mut branch = None;
+    let mut base_branch = None;
+    let mut purpose = None;
+    let mut index = 1;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?
+            .clone();
+        match option {
+            "--branch" => branch = Some(value),
+            "--base" => base_branch = Some(value),
+            "--purpose" => purpose = Some(value),
+            _ => {
+                return Err(Failure::Usage(format!(
+                    "unknown worktree create option: {option}"
+                )));
+            }
+        }
+        index += 2;
+    }
+    Ok(ControlCommand::WorktreeCreate(WorktreeCreateParams {
+        project_root: project_root.into(),
+        branch: branch
+            .ok_or_else(|| Failure::Usage("worktree create requires --branch".to_owned()))?,
+        base_branch,
+        purpose: purpose
+            .ok_or_else(|| Failure::Usage("worktree create requires --purpose".to_owned()))?,
+    }))
+}
+
+fn parse_worktree_reap(arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let Some(path) = arguments.first() else {
+        return Err(Failure::Usage("worktree reap requires a path".to_owned()));
+    };
+    let mut expected_head = None;
+    let mut expected_status_hash = None;
+    let mut delete_branch = DeleteBranch::Auto;
+    let mut index = 1;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?
+            .clone();
+        match option {
+            "--expected-head" => expected_head = Some(value),
+            "--expected-status-hash" => expected_status_hash = Some(value),
+            "--delete-branch" => {
+                delete_branch = match value.as_str() {
+                    "auto" => DeleteBranch::Auto,
+                    "never" => DeleteBranch::Never,
+                    "force" => DeleteBranch::Force,
+                    _ => {
+                        return Err(Failure::Usage(
+                            "--delete-branch requires auto, never, or force".to_owned(),
+                        ));
+                    }
+                };
+            }
+            _ => {
+                return Err(Failure::Usage(format!(
+                    "unknown worktree reap option: {option}"
+                )));
+            }
+        }
+        index += 2;
+    }
+    Ok(ControlCommand::WorktreeReap(WorktreeReapParams {
+        path: path.into(),
+        expected_head: expected_head
+            .ok_or_else(|| Failure::Usage("worktree reap requires --expected-head".to_owned()))?,
+        expected_status_hash: expected_status_hash.ok_or_else(|| {
+            Failure::Usage("worktree reap requires --expected-status-hash".to_owned())
+        })?,
+        delete_branch,
+    }))
+}
+
 fn parse_bool(option: &str, value: &str) -> Result<bool, Failure> {
     match value {
         "true" => Ok(true),
@@ -582,7 +686,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

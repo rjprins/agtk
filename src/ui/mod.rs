@@ -43,6 +43,7 @@ mod search_ui;
 mod sessions;
 mod shortcuts_ui;
 mod style;
+mod worktrees_ui;
 
 const EMPTY_PAGE: &str = "empty";
 const MAX_INSPECTED_SESSIONS: usize = 500;
@@ -65,6 +66,13 @@ struct Workspace {
     launch_name: gtk::Entry,
     launch_args: gtk::Entry,
     launch_prompt: gtk::Entry,
+    worktree_button: gtk::MenuButton,
+    worktree_popover: gtk::Popover,
+    worktree_root: gtk::Entry,
+    worktree_branch: gtk::Entry,
+    worktree_base: gtk::Entry,
+    worktree_purpose: gtk::Entry,
+    worktree_list: gtk::Box,
     history_button: gtk::MenuButton,
     history_list: gtk::Box,
     history_popover: gtk::Popover,
@@ -220,6 +228,50 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_button.add_css_class("tui-button");
     launch_button.set_tooltip_text(Some("Launch a shell, Codex, or Claude session"));
     header.pack_end(&launch_button);
+
+    let worktree_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    worktree_surface.add_css_class("tui-surface");
+    worktree_surface.set_margin_top(6);
+    worktree_surface.set_margin_bottom(6);
+    worktree_surface.set_margin_start(6);
+    worktree_surface.set_margin_end(6);
+    let worktree_heading = gtk::Label::new(Some("WORKTREES"));
+    worktree_heading.set_xalign(0.0);
+    worktree_heading.add_css_class("tui-sidebar-heading");
+    worktree_surface.append(&worktree_heading);
+    let worktree_root = launch_entry("Project root", "absolute repository root");
+    let worktree_refresh = gtk::Button::with_label("[refresh]");
+    worktree_refresh.add_css_class("tui-button");
+    worktree_root.0.append(&worktree_refresh);
+    worktree_surface.append(&worktree_root.0);
+    let worktree_branch = launch_entry("New branch", "concise-kebab-case");
+    let worktree_base = launch_entry("Base", "default branch when empty");
+    let worktree_purpose = launch_entry("Purpose", "why this worktree exists");
+    worktree_surface.append(&worktree_branch.0);
+    worktree_surface.append(&worktree_base.0);
+    worktree_surface.append(&worktree_purpose.0);
+    let worktree_create = gtk::Button::with_label("[create worktree]");
+    worktree_create.add_css_class("tui-button");
+    worktree_surface.append(&worktree_create);
+    let worktree_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let worktree_scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .min_content_width(680)
+        .min_content_height(180)
+        .max_content_height(440)
+        .child(&worktree_list)
+        .build();
+    worktree_surface.append(&worktree_scroller);
+    let worktree_popover = gtk::Popover::builder().child(&worktree_surface).build();
+    worktree_popover.add_css_class("tui-popover");
+    let worktree_button = gtk::MenuButton::builder()
+        .label("[worktrees]")
+        .popover(&worktree_popover)
+        .sensitive(false)
+        .build();
+    worktree_button.add_css_class("tui-button");
+    worktree_button.set_tooltip_text(Some("Inspect, create, and safely reap worktrees"));
+    header.pack_end(&worktree_button);
 
     let history_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
     history_list.add_css_class("tui-surface");
@@ -411,6 +463,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_name: launch_name.1,
         launch_args: launch_args.1,
         launch_prompt: launch_prompt.1,
+        worktree_button,
+        worktree_popover,
+        worktree_root: worktree_root.1,
+        worktree_branch: worktree_branch.1,
+        worktree_base: worktree_base.1,
+        worktree_purpose: worktree_purpose.1,
+        worktree_list,
         history_button,
         history_list,
         history_popover,
@@ -462,6 +521,15 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
+
+    let worktree_workspace = workspace.clone();
+    worktree_refresh.connect_clicked(move |_| worktree_workspace.refresh_worktree_panel());
+    let worktree_workspace = workspace.clone();
+    worktree_create.connect_clicked(move |_| worktree_workspace.create_worktree_from_panel());
+    let worktree_workspace = workspace.clone();
+    workspace.worktree_popover.connect_show(move |_| {
+        worktree_workspace.prepare_worktree_panel();
+    });
 
     for (kind, button) in [
         (SessionKind::Shell, launch_shell),

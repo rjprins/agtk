@@ -145,6 +145,7 @@ impl Workspace {
         }
 
         let projects = self.project_summaries();
+        self.worktree_button.set_sensitive(!projects.is_empty());
         let sessions = self.sessions.borrow();
         for project in projects {
             self.list.append(&self.project_header(
@@ -252,6 +253,15 @@ impl Workspace {
             );
         });
         content.append(&pin);
+        let worktrees = gtk::Button::with_label("[wt]");
+        worktrees.add_css_class("tui-button");
+        worktrees.set_tooltip_text(Some("Manage project worktrees"));
+        let worktree_workspace = self.clone();
+        let worktree_root = root.to_owned();
+        worktrees.connect_clicked(move |_| {
+            worktree_workspace.open_worktrees_for_project(&worktree_root)
+        });
+        content.append(&worktrees);
         let launch = gtk::Button::with_label("[+]");
         launch.add_css_class("tui-button");
         launch.set_tooltip_text(Some("Launch in this project"));

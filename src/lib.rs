@@ -13,3 +13,4 @@ pub mod session;
 pub mod shortcuts;
 pub mod terminal_text;
 pub mod ui;
+pub mod worktrees;

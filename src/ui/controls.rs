@@ -28,6 +28,10 @@ impl Workspace {
             self.launch_controlled_session(params.clone(), pending);
             return;
         }
+        if matches!(&pending.request.command, ControlCommand::UiCapture) {
+            capture::capture_controlled(self.clone(), pending);
+            return;
+        }
         if let ControlCommand::AppearanceSet(params) = &pending.request.command {
             self.set_appearance(params.clone(), Some(pending));
             return;
@@ -43,6 +47,15 @@ impl Workspace {
                 params.is_collapsed,
                 Some(pending),
             );
+            return;
+        }
+        if matches!(
+            &pending.request.command,
+            ControlCommand::WorktreeList(_)
+                | ControlCommand::WorktreeCreate(_)
+                | ControlCommand::WorktreeReap(_)
+        ) {
+            self.handle_worktree_control(pending);
             return;
         }
         if let ControlCommand::SessionClose(params) = &pending.request.command
@@ -84,17 +97,7 @@ impl Workspace {
                     Some(serde_json::json!({ "reason": error.to_string() })),
                 ),
             },
-            ControlCommand::UiCapture => match capture::capture_workspace(self)
-                .and_then(|capture| serde_json::to_value(capture).map_err(Into::into))
-            {
-                Ok(capture) => ControlResponse::success(id, capture),
-                Err(error) => ControlResponse::failure(
-                    id,
-                    ErrorCode::InternalError,
-                    "Could not capture application content",
-                    Some(serde_json::json!({ "reason": error.to_string() })),
-                ),
-            },
+            ControlCommand::UiCapture => unreachable!("capture is frame-delayed above"),
             ControlCommand::UiShow(params) => {
                 let shown = match params.surface {
                     UiSurface::Launch => {
@@ -125,6 +128,15 @@ impl Workspace {
                         true
                     }
                     UiSurface::Search => false,
+                    UiSurface::Worktrees => {
+                        if let Some(root) = self.preferred_project_root() {
+                            self.worktree_popover.set_autohide(false);
+                            self.open_worktrees_for_project(&root);
+                            true
+                        } else {
+                            false
+                        }
+                    }
                 };
                 ControlResponse::success(
                     id,
@@ -229,7 +241,10 @@ impl Workspace {
             ControlCommand::SessionCreate(_)
             | ControlCommand::AppearanceSet(_)
             | ControlCommand::ShortcutSet(_)
-            | ControlCommand::ProjectSet(_) => {
+            | ControlCommand::ProjectSet(_)
+            | ControlCommand::WorktreeList(_)
+            | ControlCommand::WorktreeCreate(_)
+            | ControlCommand::WorktreeReap(_) => {
                 unreachable!("asynchronous command handled above")
             }
         };

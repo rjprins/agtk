@@ -61,6 +61,17 @@ impl Workspace {
         self.launch_worktree.set_text("");
         self.launch_popover.popup();
     }
+
+    pub(super) fn open_launch_for_worktree(&self, project_root: &Path, worktree: &Path) {
+        self.launch_project
+            .set_text(project_root.to_string_lossy().as_ref());
+        self.launch_worktree
+            .set_text(worktree.to_string_lossy().as_ref());
+        self.launch_cwd
+            .set_text(worktree.to_string_lossy().as_ref());
+        self.worktree_popover.popdown();
+        self.launch_popover.popup();
+    }
 }
 
 fn optional_path(entry: &gtk::Entry) -> Option<PathBuf> {

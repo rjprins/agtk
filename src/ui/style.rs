@@ -76,6 +76,17 @@ const TUI_CSS: &str = r#"
 .tui-button:hover { color: @background; background: @accent; }
 .tui-button:focus-visible { outline: 1px solid @accent; outline-offset: -1px; }
 .tui-button:disabled { color: @muted; }
+.tui-danger-button {
+  min-height: 24px;
+  min-width: 0;
+  padding: 2px 7px;
+  color: @danger;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.tui-danger-button:hover { color: @background; background: @danger; }
 
 .tui-sidebar {
   background: @panel;
@@ -123,6 +134,12 @@ const TUI_CSS: &str = r#"
   background: @background;
   font-size: 11px;
   border-bottom: 1px solid @line;
+}
+.tui-worktree-row {
+  padding: 5px 7px;
+  color: @text;
+  background: @background;
+  border-top: 1px solid @line;
 }
 
 .tui-main { background: @background; }

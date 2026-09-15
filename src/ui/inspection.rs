@@ -140,6 +140,16 @@ impl Workspace {
                                 children: Vec::new(),
                             },
                             UiNode {
+                                id: "worktrees".to_owned(),
+                                role: "button".to_owned(),
+                                label: Some("Worktrees".to_owned()),
+                                is_visible: self.worktree_button.is_visible(),
+                                is_enabled: self.worktree_button.is_sensitive(),
+                                is_selected: self.worktree_popover.is_mapped(),
+                                bounds: widget_bounds(&self.worktree_button, &self.window),
+                                children: Vec::new(),
+                            },
+                            UiNode {
                                 id: "shortcuts".to_owned(),
                                 role: "button".to_owned(),
                                 label: Some("Application shortcuts".to_owned()),
