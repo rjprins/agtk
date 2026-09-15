@@ -80,19 +80,22 @@ impl App {
     }
 
     fn request(&self, method: &str, params: Value) -> Value {
+        match self.request_body(method, params) {
+            ResponseBody::Success(result) => result,
+            body => panic!("{method}: {body:?}"),
+        }
+    }
+
+    fn request_body(&self, method: &str, params: Value) -> ResponseBody {
         let request = decode_request(
             &serde_json::to_vec(&json!({"version":1,"id":"test","method":method,"params":params}))
                 .unwrap(),
         )
         .unwrap();
-        match ControlClient::new(self.paths.control_socket())
+        ControlClient::new(self.paths.control_socket())
             .send(&request)
             .unwrap()
             .body
-        {
-            ResponseBody::Success(result) => result,
-            body => panic!("{method}: {body:?}"),
-        }
     }
 
     fn wait_text(&self, id: &str, needle: &str) -> String {
@@ -197,7 +200,10 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         .iter()
         .filter_map(|node| node["id"].as_str())
         .collect::<Vec<_>>();
-    assert_eq!(top_bar_ids, ["new-shell", "appearance", "history"]);
+    assert_eq!(
+        top_bar_ids,
+        ["new-shell", "shortcuts", "appearance", "history"]
+    );
 }
 
 #[test]
@@ -236,4 +242,53 @@ fn terminal_appearance_updates_live_and_survives_ui_restart() {
     assert_eq!(state["appearance"]["followSystem"], false);
     assert_eq!(state["appearance"]["font"], "Monospace 13");
     app.request("session.close", json!({"sessionId":id}));
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn shortcut_overrides_are_validated_and_survive_ui_restart() {
+    let mut app = App::new();
+    let result = app.request(
+        "shortcut.set",
+        json!({"action":"toggle-sidebar","accelerator":"<Alt>b"}),
+    );
+    let shortcut = result["shortcuts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shortcut| shortcut["action"] == "toggle-sidebar")
+        .unwrap();
+    assert_eq!(shortcut["accelerator"], "<Alt>b");
+
+    let duplicate = app.request_body(
+        "shortcut.set",
+        json!({"action":"new-shell","accelerator":"<Alt>b"}),
+    );
+    assert!(matches!(
+        duplicate,
+        ResponseBody::Failure(ref error) if error.code == agmux_native::control::ErrorCode::InvalidParams
+    ));
+    let unmodified = app.request_body(
+        "shortcut.set",
+        json!({"action":"new-shell","accelerator":"n"}),
+    );
+    assert!(matches!(
+        unmodified,
+        ResponseBody::Failure(ref error) if error.code == agmux_native::control::ErrorCode::InvalidParams
+    ));
+
+    app.stop();
+    app.start();
+    let state = app.request("app.get_state", json!({}));
+    let shortcut = state["shortcuts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|shortcut| shortcut["action"] == "toggle-sidebar")
+        .unwrap();
+    assert_eq!(shortcut["accelerator"], "<Alt>b");
+    app.request(
+        "shortcut.set",
+        json!({"action":"toggle-sidebar","reset":true}),
+    );
 }

@@ -8,9 +8,10 @@ use agmux_native::control::{
     AppearanceSetParams, ClientError, CloseSessionParams, ControlClient, ControlCommand,
     ControlRequest, CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION,
     RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionState,
-    WaitCondition,
+    ShortcutSetParams, WaitCondition,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
+use agmux_native::shortcuts::ShortcutAction;
 
 const EXIT_USAGE_OR_PROTOCOL: u8 = 2;
 const EXIT_CONNECTION: u8 = 3;
@@ -67,6 +68,7 @@ fn run() -> Result<(), Failure> {
         [group, action, rest @ ..] if group == "appearance" && action == "set" => {
             parse_appearance_set(rest)?
         }
+        [group, action, rest @ ..] if group == "shortcut" => parse_shortcut_command(action, rest)?,
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
             return Err(Failure::Usage(usage().to_owned()));
@@ -472,12 +474,57 @@ fn parse_theme(value: &str) -> Result<ThemeKey, Failure> {
         .ok_or_else(|| Failure::Usage(format!("unknown theme: {value}")))
 }
 
+fn parse_shortcut_command(action: &str, arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let mut shortcut_action = None;
+    let mut accelerator = None;
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?
+            .clone();
+        match option {
+            "--action" => shortcut_action = Some(parse_shortcut_action(&value)?),
+            "--accelerator" if action == "set" => accelerator = Some(value),
+            _ => return Err(Failure::Usage(format!("unknown shortcut option: {option}"))),
+        }
+        index += 2;
+    }
+    let shortcut_action =
+        shortcut_action.ok_or_else(|| Failure::Usage("shortcut requires --action".to_owned()))?;
+    match action {
+        "set" => {
+            Ok(ControlCommand::ShortcutSet(ShortcutSetParams {
+                action: shortcut_action,
+                accelerator: Some(accelerator.ok_or_else(|| {
+                    Failure::Usage("shortcut set requires --accelerator".to_owned())
+                })?),
+                reset: false,
+            }))
+        }
+        "reset" if accelerator.is_none() => Ok(ControlCommand::ShortcutSet(ShortcutSetParams {
+            action: shortcut_action,
+            accelerator: None,
+            reset: true,
+        })),
+        _ => Err(usage_failure()),
+    }
+}
+
+fn parse_shortcut_action(value: &str) -> Result<ShortcutAction, Failure> {
+    ShortcutAction::ALL
+        .into_iter()
+        .find(|action| action.as_str() == value)
+        .ok_or_else(|| Failure::Usage(format!("unknown shortcut action: {value}")))
+}
+
 fn usage_failure() -> Failure {
     Failure::Usage(usage().to_owned())
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|appearance set OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

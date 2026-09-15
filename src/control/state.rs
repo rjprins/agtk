@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::appearance::ThemeKey;
+use crate::shortcuts::ShortcutAction;
 
 use super::SessionKind;
 
@@ -12,11 +13,22 @@ pub struct AppState {
     pub protocol_version: u16,
     pub selected_session_id: Option<String>,
     pub appearance: AppearanceSummary,
+    pub shortcuts: Vec<ShortcutSummary>,
     pub window: WindowState,
     pub projects: Vec<ProjectSummary>,
     pub worktree_groups: Vec<WorktreeGroupSummary>,
     pub sessions: Vec<SessionSummary>,
     pub attention: AttentionSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutSummary {
+    pub action: ShortcutAction,
+    pub label: String,
+    pub accelerator: String,
+    pub default_accelerator: String,
+    pub is_active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

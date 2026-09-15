@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 
 use crate::appearance::ThemeKey;
+use crate::shortcuts::ShortcutAction;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub(crate) const MAX_REQUEST_BYTES: usize = 1024 * 1024;
@@ -24,6 +25,7 @@ pub enum ControlCommand {
     UiInspect,
     UiCapture,
     AppearanceSet(AppearanceSetParams),
+    ShortcutSet(ShortcutSetParams),
     SessionCreate(CreateSessionParams),
     SessionSelect(SessionIdParams),
     SessionSendInput(SendInputParams),
@@ -100,6 +102,15 @@ pub struct AppearanceSetParams {
     pub theme: Option<ThemeKey>,
     pub follow_system: Option<bool>,
     pub font: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShortcutSetParams {
+    pub action: ShortcutAction,
+    pub accelerator: Option<String>,
+    #[serde(default)]
+    pub reset: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +235,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             let params: AppearanceSetParams = decode_params(wire.params)?;
             validate_appearance(&params)?;
             ControlCommand::AppearanceSet(params)
+        }
+        "shortcut.set" => {
+            let params: ShortcutSetParams = decode_params(wire.params)?;
+            validate_shortcut(&params)?;
+            ControlCommand::ShortcutSet(params)
         }
         "session.create" => {
             let params: CreateSessionParams = decode_params(wire.params)?;
@@ -351,6 +367,7 @@ impl ControlCommand {
             Self::UiInspect => "ui.inspect",
             Self::UiCapture => "ui.capture",
             Self::AppearanceSet(_) => "appearance.set",
+            Self::ShortcutSet(_) => "shortcut.set",
             Self::SessionCreate(_) => "session.create",
             Self::SessionSelect(_) => "session.select",
             Self::SessionSendInput(_) => "session.send_input",
@@ -367,6 +384,7 @@ impl ControlCommand {
             Self::UiInspect => Ok(("ui.inspect", empty_params())),
             Self::UiCapture => Ok(("ui.capture", empty_params())),
             Self::AppearanceSet(params) => Ok(("appearance.set", serde_json::to_value(params)?)),
+            Self::ShortcutSet(params) => Ok(("shortcut.set", serde_json::to_value(params)?)),
             Self::SessionCreate(params) => Ok(("session.create", serde_json::to_value(params)?)),
             Self::SessionSelect(params) => Ok(("session.select", serde_json::to_value(params)?)),
             Self::SessionSendInput(params) => {
@@ -501,6 +519,24 @@ fn validate_appearance(params: &AppearanceSetParams) -> Result<(), ControlError>
                 "font must be trimmed and contain between 1 and 120 characters",
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_shortcut(params: &ShortcutSetParams) -> Result<(), ControlError> {
+    if params.reset == params.accelerator.is_some() {
+        return Err(invalid_params(
+            "provide exactly one of accelerator or reset=true",
+        ));
+    }
+    if let Some(accelerator) = &params.accelerator
+        && (accelerator.trim() != accelerator
+            || !(1..=120).contains(&accelerator.chars().count())
+            || accelerator.contains('\0'))
+    {
+        return Err(invalid_params(
+            "accelerator must be trimmed and contain between 1 and 120 characters",
+        ));
     }
     Ok(())
 }

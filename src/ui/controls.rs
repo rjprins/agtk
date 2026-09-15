@@ -32,6 +32,10 @@ impl Workspace {
             self.set_appearance(params.clone(), Some(pending));
             return;
         }
+        if let ControlCommand::ShortcutSet(params) = &pending.request.command {
+            self.set_shortcut(params.clone(), Some(pending));
+            return;
+        }
         if let ControlCommand::SessionClose(params) = &pending.request.command
             && self.sessions.borrow().contains_key(&params.session_id)
         {
@@ -210,7 +214,9 @@ impl Workspace {
                     None => session_not_found(id, &params.session_id),
                 }
             }
-            ControlCommand::SessionCreate(_) | ControlCommand::AppearanceSet(_) => {
+            ControlCommand::SessionCreate(_)
+            | ControlCommand::AppearanceSet(_)
+            | ControlCommand::ShortcutSet(_) => {
                 unreachable!("asynchronous command handled above")
             }
         };

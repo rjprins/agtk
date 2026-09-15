@@ -17,6 +17,11 @@ impl Workspace {
                     .map(serde_json::from_value::<AppearancePreferences>)
                     .transpose()?
                     .unwrap_or_default();
+                let shortcuts = store
+                    .preference("shortcuts")?
+                    .map(serde_json::from_value::<ShortcutPreferences>)
+                    .transpose()?
+                    .unwrap_or_default();
                 let mut records = store.sessions()?;
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
@@ -48,12 +53,13 @@ impl Workspace {
                     store.save_session(&record)?;
                     recovered.push((record, connected));
                 }
-                Ok((store, selected, appearance, recovered))
+                Ok((store, selected, appearance, shortcuts, recovered))
             },
             |workspace, result| match result {
-                Ok((store, selected, appearance, recovered)) => {
+                Ok((store, selected, appearance, shortcuts, recovered)) => {
                     *workspace.store.borrow_mut() = Some(store);
                     workspace.load_appearance(appearance);
+                    workspace.load_shortcuts(shortcuts);
                     for (record, connected) in recovered {
                         let (control, attachment) =
                             connected.map_or((None, None), |(c, a)| (Some(c), Some(a)));
@@ -73,6 +79,7 @@ impl Workspace {
                     }
                     workspace.new_shell_button.set_sensitive(true);
                     workspace.theme_button.set_sensitive(true);
+                    workspace.shortcut_button.set_sensitive(true);
                     workspace.start_control_server();
                     if workspace.sessions.borrow().is_empty()
                         && workspace.paths.name().as_str() == "default"

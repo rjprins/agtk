@@ -1,8 +1,9 @@
 use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AppState, AppearanceSummary, AttentionSummary, Bounds, CaptureResult, SessionKind,
-    SessionState, SessionSummary, TextSnapshot, UiInspection, UiNode, WindowState,
+    SessionState, SessionSummary, ShortcutSummary, TextSnapshot, UiInspection, UiNode, WindowState,
 };
+use agmux_native::shortcuts::ShortcutAction;
 
 #[test]
 fn application_state_has_a_stable_machine_readable_shape() {
@@ -17,6 +18,13 @@ fn application_state_has_a_stable_machine_readable_shape() {
             font: "Monospace 11".to_owned(),
             available_themes: ThemeKey::ALL.to_vec(),
         },
+        shortcuts: vec![ShortcutSummary {
+            action: ShortcutAction::NewShell,
+            label: "New shell".to_owned(),
+            accelerator: "<Control><Shift>grave".to_owned(),
+            default_accelerator: "<Control><Shift>grave".to_owned(),
+            is_active: true,
+        }],
         window: WindowState {
             width: 1200,
             height: 800,
@@ -55,6 +63,13 @@ fn application_state_has_a_stable_machine_readable_shape() {
                     "solarized-dark", "solarized-light", "light"
                 ]
             },
+            "shortcuts": [{
+                "action": "new-shell",
+                "label": "New shell",
+                "accelerator": "<Control><Shift>grave",
+                "defaultAccelerator": "<Control><Shift>grave",
+                "isActive": true
+            }],
             "window": { "width": 1200, "height": 800 },
             "projects": [],
             "worktreeGroups": [],

@@ -19,14 +19,15 @@ use crate::appearance::{AppearancePreferences, ThemeKey, theme};
 use crate::control::{
     AppState, AppearanceSetParams, AppearanceSummary, AttentionSummary, Bounds, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, ErrorCode, PROTOCOL_VERSION,
-    PendingRequest, SessionKind, SessionState, SessionSummary, TextSnapshot, UiInspection, UiNode,
-    WindowState,
+    PendingRequest, SessionKind, SessionState, SessionSummary, ShortcutSetParams, ShortcutSummary,
+    TextSnapshot, UiInspection, UiNode, WindowState,
 };
 use crate::history::{InputTracker, history_needle};
 use crate::instance::InstancePaths;
 use crate::io_worker::IoWorker;
 use crate::persist::{PersistResult, SessionRecord, Store};
 use crate::session::{SessionLaunchPlan, receive_attachment};
+use crate::shortcuts::{ShortcutAction, ShortcutPreferences};
 use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
 
 mod appearance_ui;
@@ -35,6 +36,7 @@ mod controls;
 mod history_ui;
 mod inspection;
 mod sessions;
+mod shortcuts_ui;
 mod style;
 
 const EMPTY_PAGE: &str = "empty";
@@ -44,6 +46,7 @@ const PCRE2_UTF: u32 = 0x0008_0000;
 
 #[derive(Clone)]
 struct Workspace {
+    application: adw::Application,
     window: adw::ApplicationWindow,
     list: gtk::ListBox,
     stack: gtk::Stack,
@@ -56,6 +59,9 @@ struct Workspace {
     theme_popover: gtk::Popover,
     follow_system_toggle: gtk::CheckButton,
     font_entry: gtk::Entry,
+    shortcut_button: gtk::MenuButton,
+    shortcut_popover: gtk::Popover,
+    shortcut_entries: Rc<Vec<(ShortcutAction, gtk::Entry)>>,
     top_bar: adw::HeaderBar,
     sidebar_panel: gtk::Box,
     status_bar: gtk::Box,
@@ -69,6 +75,7 @@ struct Workspace {
     appearance: Rc<RefCell<AppearancePreferences>>,
     chrome_style: style::ChromeStyle,
     style_manager: adw::StyleManager,
+    shortcuts: Rc<RefCell<ShortcutPreferences>>,
 }
 
 struct SessionView {
@@ -215,6 +222,53 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     theme_button.set_tooltip_text(Some("Choose terminal colors and font"));
     header.pack_end(&theme_button);
 
+    let shortcut_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    shortcut_list.set_margin_top(5);
+    shortcut_list.set_margin_bottom(5);
+    shortcut_list.set_margin_start(5);
+    shortcut_list.set_margin_end(5);
+    let shortcut_heading = gtk::Label::new(Some("APPLICATION SHORTCUTS"));
+    shortcut_heading.set_xalign(0.0);
+    shortcut_heading.add_css_class("tui-sidebar-heading");
+    shortcut_list.append(&shortcut_heading);
+    let mut shortcut_entries = Vec::new();
+    let mut shortcut_controls = Vec::new();
+    for action in ShortcutAction::ALL {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        row.add_css_class("tui-setting-row");
+        let label = gtk::Label::new(Some(action.label()));
+        label.set_xalign(0.0);
+        label.set_width_chars(24);
+        row.append(&label);
+        let entry = gtk::Entry::builder()
+            .text(action.default_accelerator())
+            .width_chars(25)
+            .build();
+        entry.add_css_class("tui-setting-entry");
+        row.append(&entry);
+        let set = gtk::Button::with_label("[set]");
+        set.add_css_class("tui-button");
+        set.set_tooltip_text(Some(&format!("Set shortcut for {}", action.label())));
+        row.append(&set);
+        let reset = gtk::Button::with_label("[reset]");
+        reset.add_css_class("tui-button");
+        reset.set_tooltip_text(Some(&format!("Reset shortcut for {}", action.label())));
+        row.append(&reset);
+        shortcut_list.append(&row);
+        shortcut_entries.push((action, entry.clone()));
+        shortcut_controls.push((action, entry, set, reset));
+    }
+    let shortcut_popover = gtk::Popover::builder().child(&shortcut_list).build();
+    shortcut_popover.add_css_class("tui-popover");
+    let shortcut_button = gtk::MenuButton::builder()
+        .label("[keys]")
+        .popover(&shortcut_popover)
+        .sensitive(false)
+        .build();
+    shortcut_button.add_css_class("tui-button");
+    shortcut_button.set_tooltip_text(Some("Configure application shortcuts"));
+    header.pack_end(&shortcut_button);
+
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&split));
@@ -243,6 +297,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
 
     let workspace = Workspace {
+        application: app.clone(),
         window: window.clone(),
         list: list.clone(),
         stack: stack.clone(),
@@ -255,6 +310,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         theme_popover,
         follow_system_toggle: follow_system_toggle.clone(),
         font_entry: font_entry.clone(),
+        shortcut_button,
+        shortcut_popover,
+        shortcut_entries: Rc::new(shortcut_entries),
         top_bar: header,
         sidebar_panel: sidebar_panel.clone(),
         status_bar: status_bar.clone(),
@@ -268,6 +326,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         appearance: Rc::new(RefCell::new(AppearancePreferences::default())),
         chrome_style,
         style_manager: style_manager.clone(),
+        shortcuts: Rc::new(RefCell::new(ShortcutPreferences::default())),
     };
 
     let selected_workspace = workspace.clone();
@@ -337,6 +396,33 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let system_style_workspace = workspace.clone();
     style_manager.connect_dark_notify(move |_| system_style_workspace.apply_appearance());
 
+    for (action, entry, set, reset) in shortcut_controls {
+        let shortcut_workspace = workspace.clone();
+        let shortcut_entry = entry.clone();
+        set.connect_clicked(move |_| {
+            shortcut_workspace.set_shortcut(
+                ShortcutSetParams {
+                    action,
+                    accelerator: Some(shortcut_entry.text().to_string()),
+                    reset: false,
+                },
+                None,
+            );
+        });
+        let shortcut_workspace = workspace.clone();
+        reset.connect_clicked(move |_| {
+            shortcut_workspace.set_shortcut(
+                ShortcutSetParams {
+                    action,
+                    accelerator: None,
+                    reset: true,
+                },
+                None,
+            );
+        });
+    }
+
+    workspace.install_shortcut_actions();
     workspace.discover_sessions();
 
     window.present();

@@ -8,5 +8,6 @@ pub mod instance;
 pub mod io_worker;
 pub mod persist;
 pub mod session;
+pub mod shortcuts;
 pub mod terminal_text;
 pub mod ui;

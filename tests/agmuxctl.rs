@@ -6,8 +6,9 @@ use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AppearanceSetParams, CloseSessionParams, ControlCommand, ControlResponse, ControlServer,
     CreateSessionParams, GetTextParams, RenameSessionParams, SendInputParams, SessionIdParams,
-    SessionKind,
+    SessionKind, ShortcutSetParams,
 };
+use agmux_native::shortcuts::ShortcutAction;
 use serde_json::json;
 
 #[test]
@@ -273,6 +274,33 @@ fn appearance_set_command_has_a_typed_protocol_mapping() {
             theme: Some(ThemeKey::SolarizedDark),
             follow_system: Some(true),
             font: Some("Iosevka 12".to_owned()),
+        }),
+    );
+}
+
+#[test]
+fn shortcut_commands_have_typed_protocol_mappings() {
+    assert_fixture_command(
+        &[
+            "shortcut",
+            "set",
+            "--action",
+            "toggle-sidebar",
+            "--accelerator",
+            "<Alt>b",
+        ],
+        ControlCommand::ShortcutSet(ShortcutSetParams {
+            action: ShortcutAction::ToggleSidebar,
+            accelerator: Some("<Alt>b".to_owned()),
+            reset: false,
+        }),
+    );
+    assert_fixture_command(
+        &["shortcut", "reset", "--action", "toggle-sidebar"],
+        ControlCommand::ShortcutSet(ShortcutSetParams {
+            action: ShortcutAction::ToggleSidebar,
+            accelerator: None,
+            reset: true,
         }),
     );
 }

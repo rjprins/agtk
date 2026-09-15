@@ -28,6 +28,7 @@ impl Workspace {
             protocol_version: PROTOCOL_VERSION,
             selected_session_id,
             appearance: self.appearance_summary(),
+            shortcuts: self.shortcut_summaries(),
             window: WindowState {
                 width: self.window.width(),
                 height: self.window.height(),
@@ -126,6 +127,16 @@ impl Workspace {
                                 is_enabled: self.new_shell_button.is_sensitive(),
                                 is_selected: false,
                                 bounds: widget_bounds(&self.new_shell_button, &self.window),
+                                children: Vec::new(),
+                            },
+                            UiNode {
+                                id: "shortcuts".to_owned(),
+                                role: "button".to_owned(),
+                                label: Some("Application shortcuts".to_owned()),
+                                is_visible: self.shortcut_button.is_visible(),
+                                is_enabled: self.shortcut_button.is_sensitive(),
+                                is_selected: self.shortcut_popover.is_visible(),
+                                bounds: widget_bounds(&self.shortcut_button, &self.window),
                                 children: Vec::new(),
                             },
                             UiNode {

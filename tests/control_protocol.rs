@@ -1,9 +1,10 @@
 use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AppearanceSetParams, ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION,
-    ResponseBody, SessionIdParams, SessionKind, decode_request, decode_response, encode_request,
-    encode_response,
+    ResponseBody, SessionIdParams, SessionKind, ShortcutSetParams, decode_request, decode_response,
+    encode_request, encode_response,
 };
+use agmux_native::shortcuts::ShortcutAction;
 use serde_json::json;
 
 #[test]
@@ -93,6 +94,11 @@ fn every_core_method_decodes_to_a_typed_command() {
             "AppearanceSet",
         ),
         (
+            "shortcut.set",
+            r#"{"action":"new-shell","accelerator":"<Control><Shift>n"}"#,
+            "ShortcutSet",
+        ),
+        (
             "session.create",
             r#"{"kind":"custom","command":"printf","args":["hello"],"cwd":"/tmp","name":"Probe"}"#,
             "SessionCreate",
@@ -129,6 +135,41 @@ fn every_core_method_decodes_to_a_typed_command() {
         let wire = format!(r#"{{"version":1,"id":"req","method":"{method}","params":{params}}}"#);
         let request = decode_request(wire.as_bytes()).expect(method);
         assert_eq!(request.command.method(), method, "{expected_variant}");
+    }
+}
+
+#[test]
+fn shortcut_updates_decode_to_typed_commands() {
+    let request = decode_request(br#"{"version":1,"id":"key","method":"shortcut.set","params":{"action":"toggle-sidebar","accelerator":"<Alt>b"}}"#)
+        .expect("decode shortcut update");
+    assert_eq!(
+        request.command,
+        ControlCommand::ShortcutSet(ShortcutSetParams {
+            action: ShortcutAction::ToggleSidebar,
+            accelerator: Some("<Alt>b".to_owned()),
+            reset: false,
+        })
+    );
+    let reset = decode_request(br#"{"version":1,"id":"key","method":"shortcut.set","params":{"action":"toggle-sidebar","reset":true}}"#)
+        .expect("decode shortcut reset");
+    assert_eq!(
+        reset.command,
+        ControlCommand::ShortcutSet(ShortcutSetParams {
+            action: ShortcutAction::ToggleSidebar,
+            accelerator: None,
+            reset: true,
+        })
+    );
+
+    for invalid in [
+        br#"{"version":1,"id":"key","method":"shortcut.set","params":{"action":"toggle-sidebar"}}"#.as_slice(),
+        br#"{"version":1,"id":"key","method":"shortcut.set","params":{"action":"toggle-sidebar","accelerator":"x","reset":true}}"#.as_slice(),
+        br#"{"version":1,"id":"key","method":"shortcut.set","params":{"action":"missing","reset":true}}"#.as_slice(),
+    ] {
+        assert_eq!(
+            decode_request(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams
+        );
     }
 }
 
