@@ -98,6 +98,11 @@ impl Workspace {
                     .map(serde_json::from_value::<QuickLaunchPreferences>)
                     .transpose()?
                     .unwrap_or_default();
+                let pr_preferences = store
+                    .preference("pullRequests")?
+                    .map(serde_json::from_value::<crate::azure::PrPreferences>)
+                    .transpose()?
+                    .unwrap_or_default();
                 let mut records = store.sessions()?;
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
@@ -143,16 +148,28 @@ impl Workspace {
                     shortcuts,
                     projects,
                     quick_launch,
+                    pr_preferences,
                     recovered,
                 ))
             },
             |workspace, result| match result {
-                Ok((store, selected, appearance, shortcuts, projects, quick_launch, recovered)) => {
+                Ok((
+                    store,
+                    selected,
+                    appearance,
+                    shortcuts,
+                    projects,
+                    quick_launch,
+                    pr_preferences,
+                    recovered,
+                )) => {
                     *workspace.store.borrow_mut() = Some(store);
                     workspace.load_appearance(appearance);
                     workspace.load_shortcuts(shortcuts);
                     workspace.load_projects(projects);
                     workspace.load_quick_launch(quick_launch);
+                    *workspace.pr_preferences.borrow_mut() = pr_preferences;
+                    workspace.update_pr_indicator();
                     for (record, connected) in recovered {
                         let (control, attachment) =
                             connected.map_or((None, None), |(c, a)| (Some(c), Some(a)));
@@ -175,6 +192,7 @@ impl Workspace {
                     workspace.shortcut_button.set_sensitive(true);
                     workspace.launch_button.set_sensitive(true);
                     workspace.agent_button.set_sensitive(true);
+                    workspace.pr_button.set_sensitive(true);
                     workspace.start_control_server();
                     if workspace.sessions.borrow().is_empty()
                         && workspace.paths.name().as_str() == "default"

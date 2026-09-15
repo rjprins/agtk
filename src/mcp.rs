@@ -237,6 +237,8 @@ impl<B: ControlBackend> McpServer<B> {
                 })
             }
             "rename_session" => ControlCommand::SessionRename(parse_args(arguments)?),
+            "open_magit" => ControlCommand::SessionOpenMagit(parse_args(arguments)?),
+            "open_branch_review" => ControlCommand::SessionOpenBranchReview(parse_args(arguments)?),
             "list_agent_sessions" => ControlCommand::AgentList(parse_args(arguments)?),
             "preview_agent_session" => ControlCommand::AgentPreview(parse_args(arguments)?),
             "restore_agent_session" => ControlCommand::AgentRestore(parse_args(arguments)?),
@@ -244,6 +246,10 @@ impl<B: ControlBackend> McpServer<B> {
             "worktree_create" => ControlCommand::WorktreeCreate(parse_args(arguments)?),
             "worktree_reap" => ControlCommand::WorktreeReap(parse_args(arguments)?),
             "worktree_context" => return self.worktree_context(arguments),
+            "list_pull_requests" => ControlCommand::PrList(parse_args(arguments)?),
+            "acknowledge_pull_request" => ControlCommand::PrAcknowledge(parse_args(arguments)?),
+            "set_auto_review" => ControlCommand::PrSetAutoReview(parse_args(arguments)?),
+            "launch_pr_review" => ControlCommand::PrLaunchReview(parse_args(arguments)?),
             "inspect_ui" => ControlCommand::UiInspect,
             "capture_ui" => {
                 require_empty(arguments)?;
@@ -574,6 +580,18 @@ fn tool_definitions() -> Vec<Value> {
             ),
         ),
         tool(
+            "open_magit",
+            "Open Magit",
+            "Open one session's worktree in an existing or new graphical Emacs frame.",
+            schema(&[("sessionId", string())], &["sessionId"]),
+        ),
+        tool(
+            "open_branch_review",
+            "Open branch review",
+            "Open Emacs branch-review for one session's worktree and resolved base branch.",
+            schema(&[("sessionId", string())], &["sessionId"]),
+        ),
+        tool(
             "list_agent_sessions",
             "List recent agent sessions",
             "Discover bounded recent Codex and Claude conversations that are not live.",
@@ -623,7 +641,7 @@ fn tool_definitions() -> Vec<Value> {
                     ("path", string()),
                     ("expectedHead", string()),
                     ("expectedStatusHash", string()),
-                    ("deleteBranch", enum_values(&["never", "if-safe"])),
+                    ("deleteBranch", enum_values(&["auto", "never", "force"])),
                 ],
                 &["path", "expectedHead", "expectedStatusHash", "deleteBranch"],
             ),
@@ -633,6 +651,46 @@ fn tool_definitions() -> Vec<Value> {
             "Inspect worktree context",
             "Return project, grouped session, and optional lifecycle inventory context.",
             schema(&[("projectRoot", string())], &[]),
+        ),
+        tool(
+            "list_pull_requests",
+            "List pull requests",
+            "List active Azure DevOps pull requests, local worktree matches, and persisted attention.",
+            schema(&[("projectRoot", string())], &["projectRoot"]),
+        ),
+        tool(
+            "acknowledge_pull_request",
+            "Acknowledge PR attention",
+            "Clear one exact current PR attention marker without changing Azure DevOps state.",
+            schema(
+                &[
+                    ("projectRoot", string()),
+                    ("pullRequestId", integer(1, u32::MAX)),
+                    ("marker", enum_values(&["new", "published", "review"])),
+                ],
+                &["projectRoot", "pullRequestId", "marker"],
+            ),
+        ),
+        tool(
+            "set_auto_review",
+            "Set automatic PR review",
+            "Opt one project in or out of Codex launches for later PR attention changes.",
+            schema(
+                &[("projectRoot", string()), ("enabled", boolean())],
+                &["projectRoot", "enabled"],
+            ),
+        ),
+        tool(
+            "launch_pr_review",
+            "Launch PR review",
+            "Launch Codex with /review-pr for one active PR, reusing its source-branch worktree when available.",
+            schema(
+                &[
+                    ("projectRoot", string()),
+                    ("pullRequestId", integer(1, u32::MAX)),
+                ],
+                &["projectRoot", "pullRequestId"],
+            ),
         ),
         tool(
             "inspect_ui",

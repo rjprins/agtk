@@ -22,7 +22,14 @@ impl Workspace {
         self.add_action("next-ready-session", true, |workspace| {
             workspace.select_next_ready_session();
         });
-        self.add_action("reopen-pr-list", false, |_| {});
+        self.add_action("reopen-pr-list", true, |workspace| {
+            if let Some(root) = workspace.preferred_project_root() {
+                workspace.pr_root.set_text(&root);
+                workspace.pr_button.popup();
+            } else {
+                workspace.show_error("No project is available for pull requests");
+            }
+        });
         self.add_action("claude-model-preset", false, |_| {});
 
         self.add_action("copy", true, |workspace| {

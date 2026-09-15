@@ -16,6 +16,7 @@ use gtk::pango::FontDescription;
 use vte::prelude::*;
 
 use crate::appearance::{AppearancePreferences, ThemeKey, theme};
+use crate::azure::PrPreferences;
 use crate::control::{
     AppState, AppearanceSetParams, AppearanceSummary, AttentionSummary, Bounds, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, ErrorCode, PROTOCOL_VERSION,
@@ -35,8 +36,10 @@ use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
 
 mod agents_ui;
 mod appearance_ui;
+mod azure_ui;
 mod capture;
 mod controls;
+mod emacs_ui;
 mod history_ui;
 mod inspection;
 mod launch_ui;
@@ -60,6 +63,13 @@ struct Workspace {
     stack: gtk::Stack,
     overlay: adw::ToastOverlay,
     new_shell_button: gtk::Button,
+    git_button: gtk::MenuButton,
+    pr_button: gtk::MenuButton,
+    pr_popover: gtk::Popover,
+    pr_root: gtk::Entry,
+    pr_auto_toggle: gtk::CheckButton,
+    pr_list: gtk::Box,
+    updating_pr_toggle: Rc<Cell<bool>>,
     launch_button: gtk::MenuButton,
     launch_popover: gtk::Popover,
     launch_cwd: gtk::Entry,
@@ -115,6 +125,7 @@ struct Workspace {
     shortcuts: Rc<RefCell<ShortcutPreferences>>,
     projects: Rc<RefCell<ProjectPreferences>>,
     quick_launch: Rc<RefCell<QuickLaunchPreferences>>,
+    pr_preferences: Rc<RefCell<PrPreferences>>,
 }
 
 struct SessionView {
@@ -150,11 +161,17 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     let sidebar_heading = gtk::Label::new(Some("SESSIONS"));
     sidebar_heading.set_xalign(0.0);
-    sidebar_heading.add_css_class("tui-sidebar-heading");
+    sidebar_heading.set_hexpand(true);
+    let sidebar_header = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    sidebar_header.add_css_class("tui-sidebar-heading");
+    sidebar_header.append(&sidebar_heading);
+    let sidebar_actions = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    sidebar_actions.add_css_class("tui-sidebar-actions");
     let sidebar_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
     sidebar_panel.add_css_class("tui-sidebar");
     sidebar_panel.set_size_request(252, -1);
-    sidebar_panel.append(&sidebar_heading);
+    sidebar_panel.append(&sidebar_header);
+    sidebar_panel.append(&sidebar_actions);
     sidebar_panel.append(&sidebar);
 
     let stack = gtk::Stack::builder()
@@ -190,7 +207,75 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let new_shell = gtk::Button::with_label("[+ shell]");
     new_shell.add_css_class("tui-button");
     new_shell.set_tooltip_text(Some("Start a shell session"));
-    header.pack_end(&new_shell);
+    sidebar_actions.append(&new_shell);
+    let git_surface = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    git_surface.add_css_class("tui-surface");
+    let magit_button = gtk::Button::with_label("[magit]");
+    magit_button.add_css_class("tui-button");
+    magit_button.set_tooltip_text(Some("Open the selected session worktree in Emacs Magit"));
+    git_surface.append(&magit_button);
+    let branch_review_button = gtk::Button::with_label("[review]");
+    branch_review_button.add_css_class("tui-button");
+    branch_review_button.set_tooltip_text(Some(
+        "Open the selected session worktree in Emacs branch-review",
+    ));
+    git_surface.append(&branch_review_button);
+    let git_popover = gtk::Popover::builder().child(&git_surface).build();
+    git_popover.add_css_class("tui-popover");
+    let git_button = gtk::MenuButton::builder()
+        .label("[git]")
+        .popover(&git_popover)
+        .sensitive(false)
+        .build();
+    git_button.add_css_class("tui-button");
+    git_button.set_tooltip_text(Some("Open the selected worktree in Emacs"));
+    sidebar_actions.append(&git_button);
+
+    let pr_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    pr_surface.add_css_class("tui-surface");
+    pr_surface.set_margin_top(6);
+    pr_surface.set_margin_bottom(6);
+    pr_surface.set_margin_start(6);
+    pr_surface.set_margin_end(6);
+    let pr_heading_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let pr_heading = gtk::Label::new(Some("AZURE PULL REQUESTS"));
+    pr_heading.set_xalign(0.0);
+    pr_heading.set_hexpand(true);
+    pr_heading.add_css_class("tui-sidebar-heading");
+    pr_heading_row.append(&pr_heading);
+    let pr_refresh = gtk::Button::with_label("[refresh]");
+    pr_refresh.add_css_class("tui-button");
+    pr_heading_row.append(&pr_refresh);
+    pr_surface.append(&pr_heading_row);
+    let pr_root = launch_entry("Project root", "absolute Azure DevOps repository root");
+    pr_surface.append(&pr_root.0);
+    let pr_auto_toggle = gtk::CheckButton::with_label("[auto-review new attention]");
+    pr_auto_toggle.add_css_class("tui-setting-row");
+    pr_auto_toggle.set_tooltip_text(Some(
+        "Opt in to launching Codex review sessions for later PR attention changes",
+    ));
+    pr_surface.append(&pr_auto_toggle);
+    let pr_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let pr_scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .min_content_width(720)
+        .min_content_height(260)
+        .max_content_height(560)
+        .child(&pr_list)
+        .build();
+    pr_surface.append(&pr_scroller);
+    let pr_popover = gtk::Popover::builder().child(&pr_surface).build();
+    pr_popover.add_css_class("tui-popover");
+    let pr_button = gtk::MenuButton::builder()
+        .label("[prs]")
+        .popover(&pr_popover)
+        .sensitive(false)
+        .build();
+    pr_button.add_css_class("tui-button");
+    pr_button.set_tooltip_text(Some(
+        "Active Azure DevOps pull requests and review attention",
+    ));
+    header.pack_end(&pr_button);
 
     let launch_form = gtk::Box::new(gtk::Orientation::Vertical, 4);
     launch_form.add_css_class("tui-surface");
@@ -528,6 +613,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         stack: stack.clone(),
         overlay,
         new_shell_button: new_shell.clone(),
+        git_button: git_button.clone(),
+        pr_button,
+        pr_popover,
+        pr_root: pr_root.1,
+        pr_auto_toggle: pr_auto_toggle.clone(),
+        pr_list,
+        updating_pr_toggle: Rc::new(Cell::new(false)),
         launch_button,
         launch_popover,
         launch_cwd: launch_cwd.1,
@@ -583,6 +675,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         shortcuts: Rc::new(RefCell::new(ShortcutPreferences::default())),
         projects: Rc::new(RefCell::new(ProjectPreferences::default())),
         quick_launch: Rc::new(RefCell::new(QuickLaunchPreferences::default())),
+        pr_preferences: Rc::new(RefCell::new(PrPreferences::default())),
     };
 
     let selected_workspace = workspace.clone();
@@ -600,10 +693,28 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         selected_workspace.render_history(Some(id.as_str()));
         selected_workspace.search_button.set_sensitive(true);
         selected_workspace.save_preference("selectedSessionId", serde_json::json!(id.as_str()));
+        selected_workspace.update_emacs_actions();
     });
 
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
+
+    let magit_workspace = workspace.clone();
+    magit_button.connect_clicked(move |_| {
+        if let Some(id) = magit_workspace.selected_session_id() {
+            magit_workspace.open_session_in_emacs(&id, crate::emacs::EmacsAction::Magit, None);
+        }
+    });
+    let review_workspace = workspace.clone();
+    branch_review_button.connect_clicked(move |_| {
+        if let Some(id) = review_workspace.selected_session_id() {
+            review_workspace.open_session_in_emacs(
+                &id,
+                crate::emacs::EmacsAction::BranchReview,
+                None,
+            );
+        }
+    });
 
     let worktree_workspace = workspace.clone();
     worktree_refresh.connect_clicked(move |_| worktree_workspace.refresh_worktree_panel());
@@ -612,6 +723,30 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let worktree_workspace = workspace.clone();
     workspace.worktree_popover.connect_show(move |_| {
         worktree_workspace.prepare_worktree_panel();
+    });
+    let pr_workspace = workspace.clone();
+    pr_refresh.connect_clicked(move |_| pr_workspace.refresh_pr_panel(None));
+    let pr_workspace = workspace.clone();
+    workspace
+        .pr_popover
+        .connect_show(move |_| pr_workspace.prepare_pr_panel());
+    let pr_workspace = workspace.clone();
+    pr_auto_toggle.connect_toggled(move |toggle| {
+        if pr_workspace.updating_pr_toggle.get() {
+            return;
+        }
+        let root = pr_workspace.pr_root.text().trim().to_owned();
+        if root.is_empty() {
+            pr_workspace.show_error("Select a project before changing auto-review");
+            return;
+        }
+        pr_workspace.set_auto_review(
+            crate::control::PrSetAutoReviewParams {
+                project_root: PathBuf::from(root),
+                enabled: toggle.is_active(),
+            },
+            None,
+        );
     });
     let agent_workspace = workspace.clone();
     agent_refresh.connect_clicked(move |_| agent_workspace.refresh_agent_panel());
@@ -747,6 +882,7 @@ impl Workspace {
                 self.selected_session.borrow_mut().take();
                 self.render_history(None);
                 self.search_button.set_sensitive(false);
+                self.update_emacs_actions();
                 self.save_preference("selectedSessionId", serde_json::Value::Null);
             }
         }

@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 
 use crate::appearance::ThemeKey;
+use crate::azure::PrAttention;
 use crate::providers::AgentProvider;
 use crate::shortcuts::ShortcutAction;
 use crate::worktrees::DeleteBranch;
@@ -33,6 +34,10 @@ pub enum ControlCommand {
     WorktreeList(WorktreeListParams),
     WorktreeCreate(WorktreeCreateParams),
     WorktreeReap(WorktreeReapParams),
+    PrList(PrListParams),
+    PrAcknowledge(PrAcknowledgeParams),
+    PrSetAutoReview(PrSetAutoReviewParams),
+    PrLaunchReview(PrLaunchReviewParams),
     AgentList(AgentListParams),
     AgentPreview(AgentPreviewParams),
     AgentRestore(AgentRestoreParams),
@@ -43,6 +48,8 @@ pub enum ControlCommand {
     SessionRename(RenameSessionParams),
     SessionClose(CloseSessionParams),
     SessionSetState(SessionSetStateParams),
+    SessionOpenMagit(SessionIdParams),
+    SessionOpenBranchReview(SessionIdParams),
     HistoryList(SessionIdParams),
 }
 
@@ -158,6 +165,34 @@ pub struct WorktreeReapParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrListParams {
+    pub project_root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrAcknowledgeParams {
+    pub project_root: PathBuf,
+    pub pull_request_id: u64,
+    pub marker: PrAttention,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrSetAutoReviewParams {
+    pub project_root: PathBuf,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrLaunchReviewParams {
+    pub project_root: PathBuf,
+    pub pull_request_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentListParams {
     #[serde(default = "default_agent_limit")]
     pub limit: u32,
@@ -210,6 +245,7 @@ pub enum UiSurface {
     Search,
     Worktrees,
     Agents,
+    PullRequests,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -368,6 +404,28 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             validate_worktree_reap(&params)?;
             ControlCommand::WorktreeReap(params)
         }
+        "pr.list" => {
+            let params: PrListParams = decode_params(wire.params)?;
+            validate_pr_project(&params.project_root)?;
+            ControlCommand::PrList(params)
+        }
+        "pr.acknowledge" => {
+            let params: PrAcknowledgeParams = decode_params(wire.params)?;
+            validate_pr_project(&params.project_root)?;
+            validate_pr_id(params.pull_request_id)?;
+            ControlCommand::PrAcknowledge(params)
+        }
+        "pr.set_auto_review" => {
+            let params: PrSetAutoReviewParams = decode_params(wire.params)?;
+            validate_pr_project(&params.project_root)?;
+            ControlCommand::PrSetAutoReview(params)
+        }
+        "pr.launch_review" => {
+            let params: PrLaunchReviewParams = decode_params(wire.params)?;
+            validate_pr_project(&params.project_root)?;
+            validate_pr_id(params.pull_request_id)?;
+            ControlCommand::PrLaunchReview(params)
+        }
         "agent.list" => {
             let params: AgentListParams = decode_params(wire.params)?;
             validate_agent_list(&params)?;
@@ -420,6 +478,12 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             let params: SessionSetStateParams = decode_params(wire.params)?;
             validate_session_id(&params.session_id)?;
             ControlCommand::SessionSetState(params)
+        }
+        "session.open_magit" => {
+            ControlCommand::SessionOpenMagit(decode_session_params(wire.params)?)
+        }
+        "session.open_branch_review" => {
+            ControlCommand::SessionOpenBranchReview(decode_session_params(wire.params)?)
         }
         "history.list" => ControlCommand::HistoryList(decode_session_params(wire.params)?),
         _ => {
@@ -520,6 +584,10 @@ impl ControlCommand {
             Self::WorktreeList(_) => "worktree.list",
             Self::WorktreeCreate(_) => "worktree.create",
             Self::WorktreeReap(_) => "worktree.reap",
+            Self::PrList(_) => "pr.list",
+            Self::PrAcknowledge(_) => "pr.acknowledge",
+            Self::PrSetAutoReview(_) => "pr.set_auto_review",
+            Self::PrLaunchReview(_) => "pr.launch_review",
             Self::AgentList(_) => "agent.list",
             Self::AgentPreview(_) => "agent.preview",
             Self::AgentRestore(_) => "agent.restore",
@@ -530,6 +598,8 @@ impl ControlCommand {
             Self::SessionRename(_) => "session.rename",
             Self::SessionClose(_) => "session.close",
             Self::SessionSetState(_) => "session.set_state",
+            Self::SessionOpenMagit(_) => "session.open_magit",
+            Self::SessionOpenBranchReview(_) => "session.open_branch_review",
             Self::HistoryList(_) => "history.list",
         }
     }
@@ -546,6 +616,12 @@ impl ControlCommand {
             Self::WorktreeList(params) => Ok(("worktree.list", serde_json::to_value(params)?)),
             Self::WorktreeCreate(params) => Ok(("worktree.create", serde_json::to_value(params)?)),
             Self::WorktreeReap(params) => Ok(("worktree.reap", serde_json::to_value(params)?)),
+            Self::PrList(params) => Ok(("pr.list", serde_json::to_value(params)?)),
+            Self::PrAcknowledge(params) => Ok(("pr.acknowledge", serde_json::to_value(params)?)),
+            Self::PrSetAutoReview(params) => {
+                Ok(("pr.set_auto_review", serde_json::to_value(params)?))
+            }
+            Self::PrLaunchReview(params) => Ok(("pr.launch_review", serde_json::to_value(params)?)),
             Self::AgentList(params) => Ok(("agent.list", serde_json::to_value(params)?)),
             Self::AgentPreview(params) => Ok(("agent.preview", serde_json::to_value(params)?)),
             Self::AgentRestore(params) => Ok(("agent.restore", serde_json::to_value(params)?)),
@@ -559,6 +635,12 @@ impl ControlCommand {
             Self::SessionClose(params) => Ok(("session.close", serde_json::to_value(params)?)),
             Self::SessionSetState(params) => {
                 Ok(("session.set_state", serde_json::to_value(params)?))
+            }
+            Self::SessionOpenMagit(params) => {
+                Ok(("session.open_magit", serde_json::to_value(params)?))
+            }
+            Self::SessionOpenBranchReview(params) => {
+                Ok(("session.open_branch_review", serde_json::to_value(params)?))
             }
             Self::HistoryList(params) => Ok(("history.list", serde_json::to_value(params)?)),
         }
@@ -749,6 +831,17 @@ fn validate_worktree_reap(params: &WorktreeReapParams) -> Result<(), ControlErro
     validate_absolute_path(&params.path, "worktree path")?;
     validate_guard_token("expectedHead", &params.expected_head)?;
     validate_guard_token("expectedStatusHash", &params.expected_status_hash)?;
+    Ok(())
+}
+
+fn validate_pr_project(project_root: &std::path::Path) -> Result<(), ControlError> {
+    validate_absolute_path(project_root, "project root")
+}
+
+fn validate_pr_id(pull_request_id: u64) -> Result<(), ControlError> {
+    if pull_request_id == 0 {
+        return Err(invalid_params("pullRequestId must be greater than zero"));
+    }
     Ok(())
 }
 

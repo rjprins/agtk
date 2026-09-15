@@ -47,7 +47,8 @@ impl Workspace {
                             SessionState::Ready | SessionState::Waiting
                         )
                     })
-                    .count(),
+                    .count()
+                    + self.pr_attention_count(),
             },
         }
     }
@@ -132,16 +133,6 @@ impl Workspace {
                         bounds: widget_bounds(&self.top_bar, &self.window),
                         children: vec![
                             UiNode {
-                                id: "new-shell".to_owned(),
-                                role: "button".to_owned(),
-                                label: Some("New shell".to_owned()),
-                                is_visible: self.new_shell_button.is_visible(),
-                                is_enabled: self.new_shell_button.is_sensitive(),
-                                is_selected: false,
-                                bounds: widget_bounds(&self.new_shell_button, &self.window),
-                                children: Vec::new(),
-                            },
-                            UiNode {
                                 id: "launch".to_owned(),
                                 role: "button".to_owned(),
                                 label: Some("Quick launch".to_owned()),
@@ -169,6 +160,16 @@ impl Workspace {
                                 is_enabled: self.agent_button.is_sensitive(),
                                 is_selected: self.agent_popover.is_mapped(),
                                 bounds: widget_bounds(&self.agent_button, &self.window),
+                                children: Vec::new(),
+                            },
+                            UiNode {
+                                id: "pull-requests".to_owned(),
+                                role: "button".to_owned(),
+                                label: Some("Azure pull requests".to_owned()),
+                                is_visible: self.pr_button.is_visible(),
+                                is_enabled: self.pr_button.is_sensitive(),
+                                is_selected: self.pr_popover.is_mapped(),
+                                bounds: widget_bounds(&self.pr_button, &self.window),
                                 children: Vec::new(),
                             },
                             UiNode {
@@ -221,16 +222,38 @@ impl Workspace {
                         is_enabled: self.sidebar_panel.is_sensitive(),
                         is_selected: false,
                         bounds: widget_bounds(&self.sidebar_panel, &self.window),
-                        children: vec![UiNode {
-                            id: "sessions".to_owned(),
-                            role: "list".to_owned(),
-                            label: Some("Sessions".to_owned()),
-                            is_visible: self.list.is_visible(),
-                            is_enabled: self.list.is_sensitive(),
-                            is_selected: false,
-                            bounds: widget_bounds(&self.list, &self.window),
-                            children: session_nodes,
-                        }],
+                        children: vec![
+                            UiNode {
+                                id: "new-shell".to_owned(),
+                                role: "button".to_owned(),
+                                label: Some("New shell".to_owned()),
+                                is_visible: self.new_shell_button.is_visible(),
+                                is_enabled: self.new_shell_button.is_sensitive(),
+                                is_selected: false,
+                                bounds: widget_bounds(&self.new_shell_button, &self.window),
+                                children: Vec::new(),
+                            },
+                            UiNode {
+                                id: "git-actions".to_owned(),
+                                role: "button".to_owned(),
+                                label: Some("Emacs Git actions".to_owned()),
+                                is_visible: self.git_button.is_visible(),
+                                is_enabled: self.git_button.is_sensitive(),
+                                is_selected: false,
+                                bounds: widget_bounds(&self.git_button, &self.window),
+                                children: Vec::new(),
+                            },
+                            UiNode {
+                                id: "sessions".to_owned(),
+                                role: "list".to_owned(),
+                                label: Some("Sessions".to_owned()),
+                                is_visible: self.list.is_visible(),
+                                is_enabled: self.list.is_sensitive(),
+                                is_selected: false,
+                                bounds: widget_bounds(&self.list, &self.window),
+                                children: session_nodes,
+                            },
+                        ],
                     },
                     UiNode {
                         id: "terminal-pane".to_owned(),

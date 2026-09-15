@@ -8,7 +8,8 @@ pub use client::{ClientError, ControlClient};
 pub use protocol::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     CloseSessionParams, ControlCommand, ControlError, ControlRequest, ControlResponse,
-    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, ProjectSetParams,
+    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, PrAcknowledgeParams,
+    PrLaunchReviewParams, PrListParams, PrSetAutoReviewParams, ProjectSetParams,
     RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind,
     SessionSetStateParams, ShortcutSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
     WorktreeListParams, WorktreeReapParams, decode_request, decode_response, encode_request,

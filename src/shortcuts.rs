@@ -75,6 +75,7 @@ impl ShortcutAction {
                 | Self::NextSession
                 | Self::PreviousSession
                 | Self::NextReadySession
+                | Self::ReopenPrList
         )
     }
 }

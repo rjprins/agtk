@@ -99,6 +99,11 @@ const TUI_CSS: &str = r#"
   letter-spacing: 1px;
   border-bottom: 1px solid @line;
 }
+.tui-sidebar-actions {
+  min-height: 26px;
+  padding: 1px 4px;
+  border-bottom: 1px solid @line;
+}
 .tui-session-list, .tui-session-list > row { background: transparent; }
 .tui-session-row {
   padding: 0;

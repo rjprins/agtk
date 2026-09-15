@@ -123,6 +123,22 @@ fn every_core_method_decodes_to_a_typed_command() {
             r#"{"path":"/work/agmux-native-ui","expectedHead":"0123456789abcdef","expectedStatusHash":"abcdef","deleteBranch":"auto"}"#,
             "WorktreeReap",
         ),
+        ("pr.list", r#"{"projectRoot":"/work/agmux"}"#, "PrList"),
+        (
+            "pr.acknowledge",
+            r#"{"projectRoot":"/work/agmux","pullRequestId":42,"marker":"review"}"#,
+            "PrAcknowledge",
+        ),
+        (
+            "pr.set_auto_review",
+            r#"{"projectRoot":"/work/agmux","enabled":true}"#,
+            "PrSetAutoReview",
+        ),
+        (
+            "pr.launch_review",
+            r#"{"projectRoot":"/work/agmux","pullRequestId":42}"#,
+            "PrLaunchReview",
+        ),
         ("agent.list", "{}", "AgentList"),
         (
             "agent.preview",
@@ -168,6 +184,16 @@ fn every_core_method_decodes_to_a_typed_command() {
             "session.close",
             r#"{"sessionId":"shell-1","allowMissing":true}"#,
             "SessionClose",
+        ),
+        (
+            "session.open_magit",
+            r#"{"sessionId":"shell-1"}"#,
+            "SessionOpenMagit",
+        ),
+        (
+            "session.open_branch_review",
+            r#"{"sessionId":"shell-1"}"#,
+            "SessionOpenBranchReview",
         ),
         ("history.list", r#"{"sessionId":"shell-1"}"#, "HistoryList"),
     ];

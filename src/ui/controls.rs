@@ -60,6 +60,35 @@ impl Workspace {
         }
         if matches!(
             &pending.request.command,
+            ControlCommand::PrList(_)
+                | ControlCommand::PrAcknowledge(_)
+                | ControlCommand::PrSetAutoReview(_)
+                | ControlCommand::PrLaunchReview(_)
+        ) {
+            self.handle_pr_control(pending);
+            return;
+        }
+        let emacs_action = match &pending.request.command {
+            ControlCommand::SessionOpenMagit(params) => {
+                Some((params.session_id.clone(), crate::emacs::EmacsAction::Magit))
+            }
+            ControlCommand::SessionOpenBranchReview(params) => Some((
+                params.session_id.clone(),
+                crate::emacs::EmacsAction::BranchReview,
+            )),
+            _ => None,
+        };
+        if let Some((session_id, action)) = emacs_action {
+            if self.sessions.borrow().contains_key(&session_id) {
+                self.open_session_in_emacs(&session_id, action, Some(pending));
+            } else {
+                let id = pending.request.id.clone();
+                let _ = pending.respond(session_not_found(id, &session_id));
+            }
+            return;
+        }
+        if matches!(
+            &pending.request.command,
             ControlCommand::AgentList(_)
                 | ControlCommand::AgentPreview(_)
                 | ControlCommand::AgentRestore(_)
@@ -151,6 +180,16 @@ impl Workspace {
                         self.agent_popover.set_autohide(false);
                         self.agent_popover.popup();
                         true
+                    }
+                    UiSurface::PullRequests => {
+                        if let Some(root) = self.preferred_project_root() {
+                            self.pr_root.set_text(&root);
+                            self.pr_popover.set_autohide(false);
+                            self.pr_button.popup();
+                            true
+                        } else {
+                            false
+                        }
                     }
                 };
                 ControlResponse::success(
@@ -263,10 +302,16 @@ impl Workspace {
             | ControlCommand::WorktreeList(_)
             | ControlCommand::WorktreeCreate(_)
             | ControlCommand::WorktreeReap(_)
+            | ControlCommand::PrList(_)
+            | ControlCommand::PrAcknowledge(_)
+            | ControlCommand::PrSetAutoReview(_)
+            | ControlCommand::PrLaunchReview(_)
             | ControlCommand::AgentList(_)
             | ControlCommand::AgentPreview(_)
             | ControlCommand::AgentRestore(_)
-            | ControlCommand::SessionSetState(_) => {
+            | ControlCommand::SessionSetState(_)
+            | ControlCommand::SessionOpenMagit(_)
+            | ControlCommand::SessionOpenBranchReview(_) => {
                 unreachable!("asynchronous command handled above")
             }
         };

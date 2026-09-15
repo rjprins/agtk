@@ -3,12 +3,13 @@ use std::process::{Command, Output};
 use std::thread;
 
 use agmux_native::appearance::ThemeKey;
+use agmux_native::azure::PrAttention;
 use agmux_native::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     CloseSessionParams, ControlCommand, ControlResponse, ControlServer, CreateSessionParams,
-    GetTextParams, ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams,
-    SessionKind, SessionSetStateParams, ShortcutSetParams, UiShowParams, UiSurface,
-    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
+    GetTextParams, PrAcknowledgeParams, ProjectSetParams, RenameSessionParams, SendInputParams,
+    SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams, UiShowParams,
+    UiSurface, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agmux_native::providers::AgentProvider;
 use agmux_native::shortcuts::ShortcutAction;
@@ -125,6 +126,18 @@ fn ui_show_command_opens_a_named_transient_surface() {
         &["ui", "show", "launch"],
         ControlCommand::UiShow(UiShowParams {
             surface: UiSurface::Launch,
+        }),
+    );
+}
+
+#[test]
+fn pr_acknowledge_command_preserves_the_exact_attention_marker() {
+    assert_fixture_command(
+        &["pr", "acknowledge", "/work/agmux", "42", "review"],
+        ControlCommand::PrAcknowledge(PrAcknowledgeParams {
+            project_root: "/work/agmux".into(),
+            pull_request_id: 42,
+            marker: PrAttention::Review,
         }),
     );
 }
@@ -267,6 +280,18 @@ fn session_mutation_commands_have_typed_protocol_mappings() {
         ControlCommand::SessionClose(CloseSessionParams {
             session_id: "shell-42".to_owned(),
             allow_missing: true,
+        }),
+    );
+    assert_fixture_command(
+        &["session", "magit", "shell-42"],
+        ControlCommand::SessionOpenMagit(SessionIdParams {
+            session_id: "shell-42".to_owned(),
+        }),
+    );
+    assert_fixture_command(
+        &["session", "review", "shell-42"],
+        ControlCommand::SessionOpenBranchReview(SessionIdParams {
+            session_id: "shell-42".to_owned(),
         }),
     );
 }

@@ -156,7 +156,7 @@ impl Workspace {
         );
     }
 
-    fn live_worktree_paths(&self) -> Vec<PathBuf> {
+    pub(super) fn live_worktree_paths(&self) -> Vec<PathBuf> {
         self.sessions
             .borrow()
             .values()

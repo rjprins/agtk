@@ -4,10 +4,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use agmux_native::appearance::ThemeKey;
+use agmux_native::azure::PrAttention;
 use agmux_native::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ClientError, CloseSessionParams, ControlClient, ControlCommand, ControlRequest,
-    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, ProjectSetParams,
+    CreateSessionParams, ErrorCode, GetTextParams, PROTOCOL_VERSION, PrAcknowledgeParams,
+    PrLaunchReviewParams, PrListParams, PrSetAutoReviewParams, ProjectSetParams,
     RenameSessionParams, ResponseBody, SendInputParams, SessionIdParams, SessionKind,
     SessionSetStateParams, SessionState, ShortcutSetParams, UiShowParams, UiSurface, WaitCondition,
     WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
@@ -82,6 +84,7 @@ fn run() -> Result<(), Failure> {
             parse_project_set(rest)?
         }
         [group, action, rest @ ..] if group == "worktree" => parse_worktree_command(action, rest)?,
+        [group, action, rest @ ..] if group == "pr" => parse_pr_command(action, rest)?,
         [group, action, rest @ ..] if group == "agent" => parse_agent_command(action, rest)?,
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
@@ -266,6 +269,7 @@ fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
         "search" => Ok(UiSurface::Search),
         "worktrees" => Ok(UiSurface::Worktrees),
         "agents" => Ok(UiSurface::Agents),
+        "pull-requests" | "prs" => Ok(UiSurface::PullRequests),
         _ => Err(Failure::Usage(format!("unknown UI surface: {value}"))),
     }
 }
@@ -356,6 +360,18 @@ fn parse_session_command(action: &str, arguments: &[String]) -> Result<ControlCo
             [session_id, state] => Ok(ControlCommand::SessionSetState(SessionSetStateParams {
                 session_id: session_id.clone(),
                 state: parse_agent_signal_state(state)?,
+            })),
+            _ => Err(usage_failure()),
+        },
+        "magit" => match arguments {
+            [session_id] => Ok(ControlCommand::SessionOpenMagit(SessionIdParams {
+                session_id: session_id.clone(),
+            })),
+            _ => Err(usage_failure()),
+        },
+        "review" => match arguments {
+            [session_id] => Ok(ControlCommand::SessionOpenBranchReview(SessionIdParams {
+                session_id: session_id.clone(),
             })),
             _ => Err(usage_failure()),
         },
@@ -693,6 +709,59 @@ fn parse_agent_command(action: &str, arguments: &[String]) -> Result<ControlComm
     }
 }
 
+fn parse_pr_command(action: &str, arguments: &[String]) -> Result<ControlCommand, Failure> {
+    match (action, arguments) {
+        ("list", [project_root]) => Ok(ControlCommand::PrList(PrListParams {
+            project_root: project_root.into(),
+        })),
+        ("acknowledge", [project_root, pull_request_id, marker]) => {
+            Ok(ControlCommand::PrAcknowledge(PrAcknowledgeParams {
+                project_root: project_root.into(),
+                pull_request_id: parse_pr_id(pull_request_id)?,
+                marker: match marker.as_str() {
+                    "new" => PrAttention::New,
+                    "published" => PrAttention::Published,
+                    "review" => PrAttention::Review,
+                    _ => {
+                        return Err(Failure::Usage(
+                            "PR marker must be new, published, or review".to_owned(),
+                        ));
+                    }
+                },
+            }))
+        }
+        ("auto-review", [project_root, enabled]) => {
+            Ok(ControlCommand::PrSetAutoReview(PrSetAutoReviewParams {
+                project_root: project_root.into(),
+                enabled: match enabled.as_str() {
+                    "on" => true,
+                    "off" => false,
+                    _ => {
+                        return Err(Failure::Usage(
+                            "PR auto-review requires on or off".to_owned(),
+                        ));
+                    }
+                },
+            }))
+        }
+        ("review", [project_root, pull_request_id]) => {
+            Ok(ControlCommand::PrLaunchReview(PrLaunchReviewParams {
+                project_root: project_root.into(),
+                pull_request_id: parse_pr_id(pull_request_id)?,
+            }))
+        }
+        _ => Err(usage_failure()),
+    }
+}
+
+fn parse_pr_id(value: &str) -> Result<u64, Failure> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| Failure::Usage("pull request ID must be a positive integer".to_owned()))
+}
+
 fn parse_agent_list(arguments: &[String]) -> Result<ControlCommand, Failure> {
     let mut limit = 100;
     let mut max_age_days = 90;
@@ -817,7 +886,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session state ID STATE|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session state ID STATE|session magit ID|session review ID|wait OPTIONS>"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

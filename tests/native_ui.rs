@@ -36,6 +36,26 @@ impl App {
         )
         .unwrap();
         std::fs::set_permissions(&fake_agent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let fake_emacs = directory.path().join("fake-emacsclient");
+        std::fs::write(
+            &fake_emacs,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AGMUX_EMACS_ARGS_FILE\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_emacs, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let fake_az = directory.path().join("fake-az");
+        std::fs::write(
+            &fake_az,
+            "#!/bin/sh\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGMUX_AZURE_PRS_FILE\" ;;\n  'devops invoke --org') cat \"$AGMUX_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_az, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(directory.path().join("azure-prs.json"), "[]").unwrap();
+        std::fs::write(
+            directory.path().join("azure-threads.json"),
+            r#"{"value":[]}"#,
+        )
+        .unwrap();
         let sequence = TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let name =
             InstanceName::parse(&format!("ui-test-{}-{sequence}", std::process::id())).unwrap();
@@ -65,6 +85,23 @@ impl App {
                 .env("CODEX_HOME", self.directory.path().join("codex"))
                 .env("AGMUX_CODEX_BIN", self.directory.path().join("fake-agent"))
                 .env("AGMUX_CLAUDE_BIN", self.directory.path().join("fake-agent"))
+                .env(
+                    "AGMUX_EMACSCLIENT",
+                    self.directory.path().join("fake-emacsclient"),
+                )
+                .env(
+                    "AGMUX_EMACS_ARGS_FILE",
+                    self.directory.path().join("emacs-args"),
+                )
+                .env("AGMUX_AZURE_BIN", self.directory.path().join("fake-az"))
+                .env(
+                    "AGMUX_AZURE_PRS_FILE",
+                    self.directory.path().join("azure-prs.json"),
+                )
+                .env(
+                    "AGMUX_AZURE_THREADS_FILE",
+                    self.directory.path().join("azure-threads.json"),
+                )
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .spawn()
@@ -210,7 +247,9 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         .find(|node| node["id"] == "sidebar")
         .unwrap();
     assert_eq!(sidebar["role"], "complementary");
-    assert_eq!(sidebar["children"][0]["id"], "sessions");
+    assert_eq!(sidebar["children"][0]["id"], "new-shell");
+    assert_eq!(sidebar["children"][1]["id"], "git-actions");
+    assert_eq!(sidebar["children"][2]["id"], "sessions");
     assert_eq!(children[2]["role"], "main");
     assert!(children[3]["label"].as_str().unwrap().contains("new"));
     let top_bar_ids = children[0]["children"]
@@ -222,10 +261,10 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
     assert_eq!(
         top_bar_ids,
         [
-            "new-shell",
             "launch",
             "worktrees",
             "agents",
+            "pull-requests",
             "shortcuts",
             "appearance",
             "search",
@@ -278,6 +317,251 @@ fn terminal_appearance_updates_live_and_survives_ui_restart() {
     assert_eq!(state["appearance"]["followSystem"], false);
     assert_eq!(state["appearance"]["font"], "Monospace 13");
     app.request("session.close", json!({"sessionId":id}));
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn emacs_actions_use_the_selected_sessions_repository_context() {
+    let app = App::new();
+    let project = app.directory.path().join("emacs-project");
+    std::fs::create_dir(&project).unwrap();
+    for args in [
+        &["init", "-q"][..],
+        &["config", "user.name", "Test"][..],
+        &["config", "user.email", "test@example.com"][..],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(project.join("tracked"), "base").unwrap();
+    for args in [&["add", "tracked"][..], &["commit", "-qm", "base"][..]] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c","exec sleep 30"],
+            "cwd":project,
+            "projectRoot":project,
+            "worktreePath":project,
+            "name":"emacs probe"
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    let inspection = app.request("ui.inspect", json!({}));
+    let sidebar = &inspection["root"]["children"][1]["children"];
+    assert!(
+        sidebar
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == "git-actions")
+            .unwrap()["isEnabled"]
+            .as_bool()
+            .unwrap()
+    );
+
+    let magit = app.request("session.open_magit", json!({"sessionId":id}));
+    assert_eq!(magit["action"], "magit");
+    assert_eq!(magit["path"], project.to_str().unwrap());
+    let args = std::fs::read_to_string(app.directory.path().join("emacs-args")).unwrap();
+    assert!(args.contains("magit-status"));
+    let review = app.request("session.open_branch_review", json!({"sessionId":id}));
+    assert_eq!(review["action"], "branch-review");
+    let args = std::fs::read_to_string(app.directory.path().join("emacs-args")).unwrap();
+    assert!(args.contains("branch-review"));
+    app.request("session.close", json!({"sessionId":id}));
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn azure_pr_attention_and_review_launch_use_the_project_context() {
+    let app = App::new();
+    let project = app.directory.path().join("azure-project");
+    std::fs::create_dir(&project).unwrap();
+    for args in [
+        &["init", "-q"][..],
+        &["config", "user.name", "Test"][..],
+        &["config", "user.email", "test@example.com"][..],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(project.join("tracked"), "base").unwrap();
+    for args in [
+        &["add", "tracked"][..],
+        &["commit", "-qm", "base"][..],
+        &["branch", "-M", "feature"][..],
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://dev.azure.com/org/project/_git/repo",
+        ][..],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    let pr = |id: u64, branch: &str| {
+        json!({
+            "pullRequestId":id,
+            "title":format!("Review {branch}"),
+            "sourceRefName":format!("refs/heads/{branch}"),
+            "targetRefName":"refs/heads/main",
+            "creationDate":"2026-09-15T10:00:00Z",
+            "isDraft":false,
+            "createdBy":{"displayName":"Colleague","uniqueName":"colleague@example.com"},
+            "lastMergeSourceCommit":{"commitId":"0123456789abcdef"},
+            "mergeStatus":"succeeded",
+            "reviewers":[]
+        })
+    };
+    let pr_file = app.directory.path().join("azure-prs.json");
+    std::fs::write(
+        &pr_file,
+        serde_json::to_vec(&json!([pr(42, "feature")])).unwrap(),
+    )
+    .unwrap();
+
+    let baseline = app.request("pr.list", json!({"projectRoot":project}));
+    assert_eq!(baseline["pullRequests"][0]["attention"], Value::Null);
+    assert_eq!(
+        baseline["pullRequests"][0]["worktreePath"],
+        project.to_str().unwrap()
+    );
+
+    std::fs::write(
+        &pr_file,
+        serde_json::to_vec(&json!([pr(42, "feature"), pr(43, "review-me")])).unwrap(),
+    )
+    .unwrap();
+    let changed = app.request("pr.list", json!({"projectRoot":project}));
+    let added = changed["pullRequests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["pullRequest"]["id"] == 43)
+        .unwrap();
+    assert_eq!(added["attention"], "new");
+    assert_eq!(
+        app.request("app.get_state", json!({}))["attention"]["count"],
+        1
+    );
+    assert_eq!(
+        app.request(
+            "pr.acknowledge",
+            json!({"projectRoot":project,"pullRequestId":43,"marker":"published"})
+        )["acknowledged"],
+        false
+    );
+    assert_eq!(
+        app.request(
+            "pr.acknowledge",
+            json!({"projectRoot":project,"pullRequestId":43,"marker":"new"})
+        )["acknowledged"],
+        true
+    );
+    assert_eq!(
+        app.request("app.get_state", json!({}))["attention"]["count"],
+        0
+    );
+
+    let review = app.request(
+        "pr.launch_review",
+        json!({"projectRoot":project,"pullRequestId":42}),
+    );
+    assert_eq!(review["name"], "review: PR #42");
+    assert_eq!(review["cwd"], project.to_str().unwrap());
+    let review_id = review["id"].as_str().unwrap();
+
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"pull-requests"}))["shown"],
+        true
+    );
+    thread::sleep(Duration::from_millis(100));
+    let inspection = app.request("ui.inspect", json!({}));
+    let pr_node = inspection["root"]["children"][0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "pull-requests")
+        .unwrap();
+    assert_eq!(pr_node["isSelected"], true, "PR inspection node: {pr_node}");
+    let capture = app.request("ui.capture", json!({}));
+    assert!(
+        capture["width"].as_i64().unwrap() < 1280,
+        "unexpected capture: {capture}"
+    );
+    assert!(capture["height"].as_i64().unwrap() < 800);
+
+    assert_eq!(
+        app.request(
+            "pr.set_auto_review",
+            json!({"projectRoot":project,"enabled":true})
+        )["enabled"],
+        true
+    );
+    std::fs::write(
+        &pr_file,
+        serde_json::to_vec(&json!([
+            pr(42, "feature"),
+            pr(43, "review-me"),
+            pr(44, "later-attention")
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let auto_review_id = loop {
+        let state = app.request("app.get_state", json!({}));
+        if let Some(id) = state["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|session| {
+                (session["name"] == "review: PR #44")
+                    .then(|| session["id"].as_str().unwrap().to_owned())
+            })
+        {
+            break id;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "automatic PR review did not launch"
+        );
+        thread::sleep(Duration::from_millis(30));
+    };
+    app.request("session.close", json!({"sessionId":review_id}));
+    app.request("session.close", json!({"sessionId":auto_review_id}));
 }
 
 #[test]

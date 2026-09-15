@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
-use agmux_native::control::{ControlCommand, SendInputParams};
+use agmux_native::control::{ControlCommand, PrListParams, SendInputParams};
 use agmux_native::mcp::{ControlBackend, McpServer};
 use serde_json::{Value, json};
 
@@ -61,6 +61,8 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "select_session",
             "kill_session",
             "rename_session",
+            "open_magit",
+            "open_branch_review",
             "list_agent_sessions",
             "preview_agent_session",
             "restore_agent_session",
@@ -68,6 +70,10 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "worktree_create",
             "worktree_reap",
             "worktree_context",
+            "list_pull_requests",
+            "acknowledge_pull_request",
+            "set_auto_review",
+            "launch_pr_review",
             "inspect_ui",
             "capture_ui",
             "set_session_state",
@@ -126,6 +132,28 @@ fn send_input_maps_to_the_typed_local_control_protocol() {
             session_id: "session-1".to_owned(),
             text: "hello".to_owned(),
             append_enter: true,
+        })]
+    );
+}
+
+#[test]
+fn pull_request_listing_maps_to_the_typed_local_control_protocol() {
+    let mut server = McpServer::new(MockBackend::default());
+    let response = server
+        .handle(request(
+            12,
+            "tools/call",
+            json!({
+                "name":"list_pull_requests",
+                "arguments":{"projectRoot":"/work/agmux"}
+            }),
+        ))
+        .unwrap();
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        &[ControlCommand::PrList(PrListParams {
+            project_root: "/work/agmux".into(),
         })]
     );
 }
