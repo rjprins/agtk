@@ -205,6 +205,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     sidebar_panel.append(&sidebar_header);
     sidebar_panel.append(&sidebar_actions);
     sidebar_panel.append(&sidebar);
+    let sidebar_controls = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    sidebar_controls.add_css_class("tui-sidebar-controls");
+    sidebar_panel.append(&sidebar_controls);
 
     let stack = gtk::Stack::builder()
         .hexpand(true)
@@ -733,6 +736,50 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     shortcut_button.add_css_class("tui-button");
     shortcut_button.set_tooltip_text(Some("Configure application shortcuts"));
     header.pack_end(&shortcut_button);
+
+    sidebar_actions.remove(&new_shell);
+    sidebar_controls.append(&new_shell);
+    let sidebar_keys = gtk::Button::builder()
+        .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
+        .build();
+    sidebar_keys.add_css_class("tui-button");
+    sidebar_keys.set_tooltip_text(Some("Configure application shortcuts"));
+    sidebar_controls.append(&sidebar_keys);
+    let sidebar_settings = gtk::Button::builder()
+        .icon_name("preferences-desktop-theme-symbolic")
+        .build();
+    sidebar_settings.add_css_class("tui-button");
+    sidebar_settings.set_tooltip_text(Some("Choose terminal appearance"));
+    sidebar_controls.append(&sidebar_settings);
+    let sidebar_toggle = gtk::Button::builder()
+        .icon_name("sidebar-show-symbolic")
+        .build();
+    sidebar_toggle.add_css_class("tui-button");
+    sidebar_toggle.set_tooltip_text(Some("Collapse sidebar"));
+    sidebar_controls.append(&sidebar_toggle);
+
+    let sidebar_keys_shortcut = shortcut_popover.clone();
+    sidebar_keys.connect_clicked(move |_| sidebar_keys_shortcut.popup());
+    let sidebar_settings_theme = theme_popover.clone();
+    sidebar_settings.connect_clicked(move |_| sidebar_settings_theme.popup());
+    let sidebar_collapsed = Rc::new(Cell::new(false));
+    let sidebar_collapsed_state = sidebar_collapsed.clone();
+    let sidebar_split = split.clone();
+    sidebar_toggle.connect_clicked(move |button| {
+        let collapsed = !sidebar_collapsed_state.get();
+        sidebar_collapsed_state.set(collapsed);
+        sidebar_split.set_position(if collapsed { 0 } else { 260 });
+        button.set_icon_name(if collapsed {
+            "sidebar-show-symbolic"
+        } else {
+            "sidebar-hide-symbolic"
+        });
+        button.set_tooltip_text(Some(if collapsed {
+            "Expand sidebar"
+        } else {
+            "Collapse sidebar"
+        }));
+    });
 
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);

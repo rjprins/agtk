@@ -110,6 +110,12 @@ const TUI_CSS: &str = r#"
   padding: 1px 4px;
   border-bottom: 1px solid @line;
 }
+.tui-sidebar-controls {
+  min-height: 28px;
+  padding: 2px 4px;
+  border-top: 1px solid @line;
+  background: @panel;
+}
 .tui-session-list, .tui-session-list > row { background: transparent; }
 .tui-session-row {
   padding: 0;
