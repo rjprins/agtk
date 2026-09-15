@@ -35,7 +35,7 @@ use crate::projects::ProjectPreferences;
 use crate::providers::ProviderSession;
 use crate::session::{SessionLaunchPlan, receive_attachment};
 use crate::shortcuts::{ShortcutAction, ShortcutPreferences};
-use crate::terminal_text::{bounded_terminal_text, cleanup_copied_text};
+use crate::terminal_text::{bounded_terminal_text, copyable_selection};
 
 mod agents_ui;
 mod appearance_ui;
@@ -1502,9 +1502,9 @@ fn codex_launch_options() -> (
     gtk::CheckButton,
 ) {
     (
-        launch_dropdown(&["untrusted", "on-failure", "on-request", "never"]),
+        launch_dropdown(&["on-request", "never"]),
         launch_dropdown(&["read-only", "workspace-write", "danger-full-access"]),
-        gtk::CheckButton::with_label("--full-auto"),
+        gtk::CheckButton::with_label("Full auto (approve for me)"),
         gtk::CheckButton::with_label("--dangerously-bypass-approvals-and-sandbox"),
     )
 }

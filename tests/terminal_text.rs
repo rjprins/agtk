@@ -1,4 +1,13 @@
-use agmux_native::terminal_text::{bounded_terminal_text, cleanup_copied_text};
+use agmux_native::terminal_text::{bounded_terminal_text, cleanup_copied_text, copyable_selection};
+
+#[test]
+fn copyable_selection_returns_cleaned_text_only_for_nonempty_selections() {
+    assert_eq!(
+        copyable_selection("  first\u{00a0}line  \r\n  second\t\r\n"),
+        Some("first line\nsecond".to_owned())
+    );
+    assert_eq!(copyable_selection(" \t\r\n"), None);
+}
 
 #[test]
 fn copied_terminal_text_normalizes_layout_whitespace() {

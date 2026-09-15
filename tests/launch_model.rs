@@ -105,8 +105,24 @@ fn provider_args_translate_saved_options_without_affecting_shell() {
             "never",
             "--sandbox",
             "workspace-write",
-            "--full-auto"
+            "--approve-for-me"
         ]
     );
     assert!(provider_args(SessionKind::Shell, &flags).is_empty());
+}
+
+#[test]
+fn provider_args_migrate_legacy_codex_approval_values() {
+    let flags = [
+        ("--ask-for-approval".to_owned(), json!("untrusted")),
+        ("--sandbox".to_owned(), json!("read-only")),
+        ("--full-auto".to_owned(), json!(false)),
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(
+        provider_args(SessionKind::Codex, &flags),
+        ["--ask-for-approval", "on-request", "--sandbox", "read-only"]
+    );
 }

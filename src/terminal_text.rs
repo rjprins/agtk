@@ -8,6 +8,13 @@ pub fn cleanup_copied_text(text: &str) -> String {
         .to_owned()
 }
 
+/// Return the text to place in the clipboard when a terminal selection is made.
+/// Empty or whitespace-only selections are ignored by the UI callback.
+pub fn copyable_selection(text: &str) -> Option<String> {
+    let cleaned = cleanup_copied_text(text);
+    (!cleaned.is_empty()).then_some(cleaned)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundedTerminalText {
     pub text: String,

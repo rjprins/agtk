@@ -518,9 +518,11 @@ impl Workspace {
             let Some(selection) = terminal.text_selected(vte::Format::Text) else {
                 return;
             };
-            let cleaned = cleanup_copied_text(selection.as_str());
-            if !cleaned.is_empty() {
+            if let Some(cleaned) = copyable_selection(selection.as_str()) {
+                // Keep the normal clipboard for Ctrl+V and the primary
+                // selection for Linux middle-click paste in sync.
                 terminal.clipboard().set_text(&cleaned);
+                terminal.primary_clipboard().set_text(&cleaned);
             }
         });
 

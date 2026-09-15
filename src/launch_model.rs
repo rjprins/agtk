@@ -141,13 +141,22 @@ pub fn provider_args(
         }
         SessionKind::Codex => {
             if let Some(value) = value("--ask-for-approval") {
+                // Codex versions before 0.154 accepted `untrusted` and
+                // `on-failure`. Keep old saved preferences launchable by
+                // mapping both values to the current interactive policy.
+                let value = match value {
+                    "untrusted" | "on-failure" => "on-request",
+                    value => value,
+                };
                 args.extend(["--ask-for-approval".to_owned(), value.to_owned()]);
             }
             if let Some(value) = value("--sandbox") {
                 args.extend(["--sandbox".to_owned(), value.to_owned()]);
             }
             if enabled("--full-auto") {
-                args.push("--full-auto".to_owned());
+                // `--full-auto` was removed from Codex CLI. This is its
+                // supported replacement in current releases.
+                args.push("--approve-for-me".to_owned());
             }
             if enabled("--dangerously-bypass-approvals-and-sandbox") {
                 args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
