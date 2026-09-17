@@ -9,9 +9,7 @@ impl Workspace {
             }
         });
         self.add_action("toggle-sidebar", true, |workspace| {
-            workspace
-                .sidebar_panel
-                .set_visible(!workspace.sidebar_panel.is_visible());
+            workspace.sidebar_toggle.emit_clicked();
         });
         self.add_action("next-session", true, |workspace| {
             workspace.select_relative_session(1);
