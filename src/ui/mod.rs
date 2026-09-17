@@ -540,7 +540,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let launch_popover = gtk::Popover::builder().child(&launch_form).build();
     launch_popover.add_css_class("tui-popover");
     let launch_button = gtk::MenuButton::builder()
-        .icon_name("list-add-symbolic")
         .popover(&launch_popover)
         .sensitive(false)
         .build();
@@ -751,7 +750,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let theme_popover = gtk::Popover::builder().child(&theme_list).build();
     theme_popover.add_css_class("tui-popover");
     let theme_button = gtk::MenuButton::builder()
-        .icon_name("preferences-desktop-theme-symbolic")
         .popover(&theme_popover)
         .sensitive(false)
         .build();
@@ -816,7 +814,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let shortcut_popover = gtk::Popover::builder().child(&shortcut_list).build();
     shortcut_popover.add_css_class("tui-popover");
     let shortcut_button = gtk::MenuButton::builder()
-        .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
         .popover(&shortcut_popover)
         .sensitive(false)
         .build();
