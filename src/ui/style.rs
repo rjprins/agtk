@@ -65,8 +65,16 @@ const TUI_CSS: &str = r#"
   box-shadow: none;
 }
 
-.tui-brand { color: @accent; font-weight: bold; }
+.tui-brand { color: @text; font-weight: bold; letter-spacing: 0.3px; }
 .tui-muted { color: @muted; }
+
+.tui-brand-row {
+  min-height: 34px;
+  padding: 4px 8px;
+  color: @text;
+  background: @panel;
+  border-bottom: 1px solid @line;
+}
 
 .tui-button {
   min-height: 24px;
@@ -116,21 +124,58 @@ const TUI_CSS: &str = r#"
   border-top: 1px solid @line;
   background: @panel;
 }
+.tui-sidebar-controls > button {
+  flex: 0 0 auto;
+}
+.tui-surface-anchors {
+  min-width: 1px;
+  min-height: 1px;
+  max-height: 1px;
+  opacity: 0;
+}
+.tui-surface-anchors > button {
+  min-width: 1px;
+  min-height: 1px;
+  max-width: 1px;
+  max-height: 1px;
+  padding: 0;
+}
 .tui-session-list, .tui-session-list > row { background: transparent; }
 .tui-session-row {
+  margin: 2px 0;
   padding: 0;
   color: @text;
-  border-radius: 0;
-  border-bottom: 1px solid @line;
+  border: 1px solid @line;
+  border-left: 2px solid @line;
+  border-radius: 6px;
+  background: @background;
 }
 .tui-session-row:hover { background: @hover; }
-.tui-session-row:selected { color: @background; background: @text; }
-.tui-session-row:selected .tui-muted,
-.tui-session-row:selected .tui-state,
-.tui-session-row:selected .tui-kind { color: @panel; }
-.tui-session-content { padding: 4px 7px; min-height: 27px; }
+.tui-session-row:selected {
+  color: @text;
+  background: @hover;
+  border-color: @accent;
+  border-left-color: @accent;
+}
+.tui-session-content { padding: 5px 7px; min-height: 42px; }
+.tui-session-primary, .tui-session-secondary {
+  min-width: 0;
+}
+.tui-session-primary { min-height: 18px; }
+.tui-session-secondary { color: @muted; }
+.tui-session-actions { margin-left: 4px; }
 .tui-state { color: @ready; font-weight: bold; }
+.tui-state-running { color: @accent; }
+.tui-state-busy { color: #e5a50a; }
+.tui-state-ready { color: @ready; }
+.tui-state-waiting { color: #e5a50a; }
+.tui-state-reconnecting { color: @muted; }
 .tui-state-exited { color: @danger; }
+.tui-elapsed {
+  min-width: 28px;
+  color: @ready;
+  font-size: @small-font-size;
+}
 .tui-kind { color: @muted; font-size: @small-font-size; }
 .tui-provider-icon { min-width: 16px; min-height: 16px; }
 
@@ -195,9 +240,48 @@ const TUI_CSS: &str = r#"
   border-bottom: 1px solid @line;
 }
 
+.tui-main-pane {
+  padding: 8px;
+  background: @background;
+}
 .tui-main { background: @background; }
 .tui-empty { color: @muted; }
 .tui-empty-title { color: @text; font-weight: bold; }
+
+.tui-session-context {
+  min-height: 36px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+  color: @muted;
+  background: @background;
+  border: 1px solid @line;
+  border-radius: 6px;
+}
+.tui-context-input {
+  min-width: 0;
+  padding: 2px 4px 2px 8px;
+  background: @panel;
+  border: 1px solid @line;
+  border-radius: 6px;
+}
+.tui-context-caption { color: @muted; font-weight: bold; }
+.tui-context-last-input {
+  min-width: 0;
+  padding: 3px 0;
+  color: @text;
+}
+.tui-context-action {
+  min-height: 25px;
+  min-width: 0;
+  padding: 2px 8px;
+  color: @text;
+  background: transparent;
+  border: 1px solid @line;
+  border-radius: 0;
+  box-shadow: none;
+}
+.tui-context-action:hover { color: @background; background: @accent; }
+.tui-context-action:disabled { color: @muted; }
 
 .tui-statusbar {
   min-height: 23px;

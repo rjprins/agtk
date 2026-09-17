@@ -241,37 +241,40 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         .iter()
         .filter_map(|node| node["id"].as_str())
         .collect::<Vec<_>>();
-    assert_eq!(ids, ["top-bar", "sidebar", "terminal-pane", "status-bar"]);
+    assert_eq!(ids, ["sidebar", "terminal-pane"]);
     let sidebar = children
         .iter()
         .find(|node| node["id"] == "sidebar")
         .unwrap();
     assert_eq!(sidebar["role"], "complementary");
-    assert_eq!(sidebar["children"][0]["id"], "new-shell");
-    assert_eq!(sidebar["children"][1]["id"], "git-actions");
-    assert_eq!(sidebar["children"][2]["id"], "sessions");
-    assert_eq!(children[2]["role"], "main");
-    assert!(children[3]["label"].as_str().unwrap().contains("new"));
-    let top_bar_ids = children[0]["children"]
+    assert_eq!(sidebar["children"][0]["id"], "brand");
+    assert_eq!(sidebar["children"][1]["id"], "sessions");
+    assert_eq!(sidebar["children"][2]["id"], "sidebar-controls");
+    assert_eq!(children[1]["role"], "main");
+    let sidebar_control_ids = sidebar["children"][2]["children"]
         .as_array()
         .unwrap()
         .iter()
         .filter_map(|node| node["id"].as_str())
         .collect::<Vec<_>>();
     assert_eq!(
-        top_bar_ids,
-        [
-            "launch",
-            "worktrees",
-            "agents",
-            "pull-requests",
-            "claude-model",
-            "shortcuts",
-            "appearance",
-            "search",
-            "history"
-        ]
+        sidebar_control_ids,
+        ["shortcuts", "appearance", "launch", "sidebar-toggle"]
     );
+    let context_ids = children[1]["children"][0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(context_ids, ["branch-review", "magit", "context-input"]);
+    let context_input_ids = children[1]["children"][0]["children"][2]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(context_input_ids, ["last-input", "history"]);
     assert_eq!(
         app.request("ui.show", json!({"surface":"launch"}))["shown"],
         true
@@ -281,7 +284,12 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|node| node["id"] == "top-bar")
+        .find(|node| node["id"] == "sidebar")
+        .unwrap()["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "sidebar-controls")
         .unwrap()["children"]
         .as_array()
         .unwrap()
@@ -355,7 +363,12 @@ fn launch_surface_populates_project_and_git_worktree_choices() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|node| node["id"] == "top-bar")
+            .find(|node| node["id"] == "sidebar")
+            .unwrap()["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == "sidebar-controls")
             .unwrap()["children"]
             .as_array()
             .unwrap()
@@ -469,17 +482,8 @@ fn emacs_actions_use_the_selected_sessions_repository_context() {
     );
     let id = session["id"].as_str().unwrap();
     let inspection = app.request("ui.inspect", json!({}));
-    let sidebar = &inspection["root"]["children"][1]["children"];
-    assert!(
-        sidebar
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|node| node["id"] == "git-actions")
-            .unwrap()["isEnabled"]
-            .as_bool()
-            .unwrap()
-    );
+    let context = &inspection["root"]["children"][1]["children"][0]["children"];
+    assert!(context[1]["isEnabled"].as_bool().unwrap());
 
     let magit = app.request("session.open_magit", json!({"sessionId":id}));
     assert_eq!(magit["action"], "magit");
@@ -509,7 +513,7 @@ fn claude_model_presets_are_exact_provider_only_and_durable() {
     app.wait_text(&id, "__RESTORE_ARGS___");
 
     let inspection = app.request("ui.inspect", json!({}));
-    let claude_model = inspection["root"]["children"][0]["children"]
+    let claude_model = inspection["root"]["children"][0]["children"][3]["children"]
         .as_array()
         .unwrap()
         .iter()
@@ -692,7 +696,7 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     );
     thread::sleep(Duration::from_millis(100));
     let inspection = app.request("ui.inspect", json!({}));
-    let pr_node = inspection["root"]["children"][0]["children"]
+    let pr_node = inspection["root"]["children"][0]["children"][3]["children"]
         .as_array()
         .unwrap()
         .iter()

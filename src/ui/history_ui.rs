@@ -28,15 +28,28 @@ impl Workspace {
 
         let Some(id) = id else {
             self.history_button.set_sensitive(false);
+            self.history_button.set_label("History (0)");
+            self.context_last_input.set_text("(none yet)");
             return;
         };
         let sessions = self.sessions.borrow();
         let Some(session) = sessions.get(id) else {
             self.history_button.set_sensitive(false);
+            self.history_button.set_label("History (0)");
+            self.context_last_input.set_text("(none yet)");
             return;
         };
         self.history_button
             .set_sensitive(!session.history.is_empty());
+        self.history_button
+            .set_label(&format!("History ({})", session.history.len()));
+        self.context_last_input.set_text(
+            session
+                .history
+                .last()
+                .map(String::as_str)
+                .unwrap_or("(none yet)"),
+        );
         for input in session.history.iter().rev() {
             let button = gtk::Button::with_label(input);
             button.add_css_class("tui-button");

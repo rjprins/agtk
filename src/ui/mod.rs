@@ -149,9 +149,16 @@ struct Workspace {
     shortcut_button: gtk::MenuButton,
     shortcut_popover: gtk::Popover,
     shortcut_entries: Rc<Vec<(ShortcutAction, gtk::Entry)>>,
-    top_bar: adw::HeaderBar,
+    session_context_bar: gtk::Box,
+    context_input: gtk::Box,
+    context_last_input: gtk::Label,
+    context_branch_review: gtk::Button,
+    context_magit: gtk::Button,
     sidebar_panel: gtk::Box,
-    status_bar: gtk::Box,
+    sidebar_header: gtk::Box,
+    sidebar_controls: gtk::Box,
+    sidebar_toggle: gtk::Button,
+    surface_anchors: gtk::Box,
     paths: InstancePaths,
     host_binary: PathBuf,
     sessions: Rc<RefCell<HashMap<String, SessionView>>>,
@@ -180,6 +187,7 @@ struct SessionView {
     row: gtk::ListBoxRow,
     label: gtk::Label,
     state_label: gtk::Label,
+    elapsed_label: gtk::Label,
     history: Vec<String>,
     _pty: Option<vte::Pty>,
     control: Option<UnixStream>,
@@ -204,19 +212,17 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .vexpand(true)
         .child(&list)
         .build();
-    let sidebar_heading = gtk::Label::new(Some("SESSIONS"));
+    let sidebar_heading = gtk::Label::new(Some("agmux"));
     sidebar_heading.set_xalign(0.0);
     sidebar_heading.set_hexpand(true);
+    sidebar_heading.add_css_class("tui-brand");
     let sidebar_header = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-    sidebar_header.add_css_class("tui-sidebar-heading");
+    sidebar_header.add_css_class("tui-brand-row");
     sidebar_header.append(&sidebar_heading);
-    let sidebar_actions = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-    sidebar_actions.add_css_class("tui-sidebar-actions");
     let sidebar_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
     sidebar_panel.add_css_class("tui-sidebar");
-    sidebar_panel.set_size_request(252, -1);
+    sidebar_panel.set_size_request(280, -1);
     sidebar_panel.append(&sidebar_header);
-    sidebar_panel.append(&sidebar_actions);
     sidebar_panel.append(&sidebar);
     let sidebar_controls = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     sidebar_controls.add_css_class("tui-sidebar-controls");
@@ -239,25 +245,49 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     empty.append(&empty_hint);
     stack.add_named(&empty, Some(EMPTY_PAGE));
 
+    let session_context_bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    session_context_bar.add_css_class("tui-session-context");
+    session_context_bar.set_visible(false);
+    let context_branch_review = gtk::Button::with_label("Review");
+    context_branch_review.add_css_class("tui-context-action");
+    context_branch_review
+        .set_tooltip_text(Some("Open the selected worktree in Emacs branch-review"));
+    let context_magit = gtk::Button::with_label("Magit");
+    context_magit.add_css_class("tui-context-action");
+    context_magit.set_tooltip_text(Some("Open the selected worktree in Emacs Magit"));
+    session_context_bar.append(&context_branch_review);
+    session_context_bar.append(&context_magit);
+    let context_last_input = gtk::Label::new(Some("(none yet)"));
+    context_last_input.set_xalign(0.0);
+    context_last_input.set_hexpand(true);
+    context_last_input.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    context_last_input.add_css_class("tui-context-last-input");
+    let context_last_input_label = gtk::Label::new(Some("Last input"));
+    context_last_input_label.add_css_class("tui-context-caption");
+    let context_input = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    context_input.add_css_class("tui-context-input");
+    context_input.set_hexpand(true);
+    context_input.append(&context_last_input_label);
+    context_input.append(&context_last_input);
+    session_context_bar.append(&context_input);
+
+    let main_pane = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    main_pane.add_css_class("tui-main-pane");
+    main_pane.append(&session_context_bar);
+    main_pane.append(&stack);
+
     let split = gtk::Paned::new(gtk::Orientation::Horizontal);
     split.set_start_child(Some(&sidebar_panel));
-    split.set_end_child(Some(&stack));
+    split.set_end_child(Some(&main_pane));
     split.set_resize_start_child(false);
     split.set_shrink_start_child(false);
     split.set_position(260);
 
-    let header = adw::HeaderBar::new();
-    header.add_css_class("tui-topbar");
-    header.set_show_title(false);
-    let brand = gtk::Label::new(Some("agmux-native"));
-    brand.add_css_class("tui-brand");
-    header.pack_start(&brand);
     let new_shell = gtk::Button::builder()
         .icon_name("utilities-terminal-symbolic")
         .build();
     new_shell.add_css_class("tui-button");
     new_shell.set_tooltip_text(Some("Start a shell session"));
-    sidebar_actions.append(&new_shell);
     let git_surface = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     git_surface.add_css_class("tui-surface");
     let magit_button = gtk::Button::builder()
@@ -283,7 +313,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     git_button.add_css_class("tui-button");
     git_button.set_tooltip_text(Some("Open the selected worktree in Emacs"));
-    sidebar_actions.append(&git_button);
 
     let claude_model_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
     claude_model_list.add_css_class("tui-surface");
@@ -297,7 +326,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     claude_model_button.add_css_class("tui-button");
     claude_model_button.set_visible(false);
     claude_model_button.set_tooltip_text(Some("Choose a Claude model and effort preset"));
-    header.pack_end(&claude_model_button);
 
     let pr_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
     pr_surface.add_css_class("tui-surface");
@@ -346,7 +374,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     pr_button.set_tooltip_text(Some(
         "Active Azure DevOps pull requests and review attention",
     ));
-    header.pack_end(&pr_button);
 
     let launch_form = gtk::Box::new(gtk::Orientation::Vertical, 4);
     launch_form.add_css_class("tui-surface");
@@ -519,7 +546,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     launch_button.add_css_class("tui-button");
     launch_button.set_tooltip_text(Some("Launch a shell, Codex, Claude, or Gemini session"));
-    header.pack_end(&launch_button);
+    launch_button.set_label("New");
 
     let worktree_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
     worktree_surface.add_css_class("tui-surface");
@@ -567,7 +594,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     worktree_button.add_css_class("tui-button");
     worktree_button.set_tooltip_text(Some("Inspect, create, and safely reap worktrees"));
-    header.pack_end(&worktree_button);
 
     let agent_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
     agent_surface.add_css_class("tui-surface");
@@ -632,7 +658,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     agent_button.add_css_class("tui-button");
     agent_button.set_tooltip_text(Some("Preview and restore recent Codex and Claude sessions"));
-    header.pack_end(&agent_button);
 
     let history_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
     history_list.add_css_class("tui-surface");
@@ -655,7 +680,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     history_popover.add_css_class("tui-popover");
     history_button.add_css_class("tui-button");
     history_button.set_tooltip_text(Some("Scroll to a submitted prompt"));
-    header.pack_end(&history_button);
+    history_button.set_label("History (0)");
+    context_input.append(&history_button);
 
     let search_surface = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     search_surface.add_css_class("tui-surface");
@@ -684,7 +710,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     search_button.add_css_class("tui-button");
     search_button.set_tooltip_text(Some("Search selected terminal scrollback"));
-    header.pack_end(&search_button);
 
     let theme_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
     theme_list.add_css_class("tui-surface");
@@ -732,7 +757,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     theme_button.add_css_class("tui-button");
     theme_button.set_tooltip_text(Some("Choose terminal colors and font"));
-    header.pack_end(&theme_button);
+    theme_button.set_label("⚙");
 
     let shortcut_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
     shortcut_list.add_css_class("tui-surface");
@@ -797,33 +822,36 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     shortcut_button.add_css_class("tui-button");
     shortcut_button.set_tooltip_text(Some("Configure application shortcuts"));
-    header.pack_end(&shortcut_button);
+    shortcut_button.set_label("?");
 
-    sidebar_actions.remove(&new_shell);
-    sidebar_controls.append(&new_shell);
-    let sidebar_keys = gtk::Button::builder()
-        .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
-        .build();
-    sidebar_keys.add_css_class("tui-button");
-    sidebar_keys.set_tooltip_text(Some("Configure application shortcuts"));
-    sidebar_controls.append(&sidebar_keys);
-    let sidebar_settings = gtk::Button::builder()
-        .icon_name("preferences-desktop-theme-symbolic")
-        .build();
-    sidebar_settings.add_css_class("tui-button");
-    sidebar_settings.set_tooltip_text(Some("Choose terminal appearance"));
-    sidebar_controls.append(&sidebar_settings);
-    let sidebar_toggle = gtk::Button::builder()
-        .icon_name("sidebar-show-symbolic")
-        .build();
+    new_shell.set_visible(false);
+    sidebar_controls.append(&shortcut_button);
+    sidebar_controls.append(&theme_button);
+    sidebar_controls.append(&launch_button);
+    let sidebar_toggle = gtk::Button::builder().label("«").build();
     sidebar_toggle.add_css_class("tui-button");
     sidebar_toggle.set_tooltip_text(Some("Collapse sidebar"));
     sidebar_controls.append(&sidebar_toggle);
 
-    let sidebar_keys_shortcut = shortcut_popover.clone();
-    sidebar_keys.connect_clicked(move |_| sidebar_keys_shortcut.popup());
-    let sidebar_settings_theme = theme_popover.clone();
-    sidebar_settings.connect_clicked(move |_| sidebar_settings_theme.popup());
+    // Keep the non-global popovers attached to the window without rendering
+    // their former header buttons. Project rows and keyboard commands open
+    // these surfaces directly, so they still need a GTK anchor widget.
+    let surface_anchors = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    surface_anchors.add_css_class("tui-surface-anchors");
+    surface_anchors.set_size_request(1, 1);
+    for button in [
+        &worktree_button,
+        &agent_button,
+        &pr_button,
+        &search_button,
+        &claude_model_button,
+    ] {
+        button.set_opacity(0.0);
+        button.set_size_request(1, 1);
+        surface_anchors.append(button);
+    }
+    sidebar_panel.append(&surface_anchors);
+
     let sidebar_collapsed = Rc::new(Cell::new(false));
     let sidebar_collapsed_state = sidebar_collapsed.clone();
     let sidebar_split = split.clone();
@@ -831,11 +859,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         let collapsed = !sidebar_collapsed_state.get();
         sidebar_collapsed_state.set(collapsed);
         sidebar_split.set_position(if collapsed { 0 } else { 260 });
-        button.set_icon_name(if collapsed {
-            "sidebar-show-symbolic"
-        } else {
-            "sidebar-hide-symbolic"
-        });
+        button.set_label(if collapsed { "»" } else { "«" });
         button.set_tooltip_text(Some(if collapsed {
             "Expand sidebar"
         } else {
@@ -843,28 +867,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         }));
     });
 
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(&split));
-    let status_bar = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    status_bar.add_css_class("tui-statusbar");
-    let shortcuts = gtk::Label::new(Some(
-        "ctrl+shift+` new   ctrl+shift+q close   ctrl+shift+\\ sidebar   ctrl+shift+[ ] sessions",
-    ));
-    shortcuts.set_xalign(0.0);
-    shortcuts.set_hexpand(true);
-    let instance = gtk::Label::new(Some(paths.name().as_str()));
-    instance.add_css_class("tui-status-accent");
-    status_bar.append(&shortcuts);
-    status_bar.append(&instance);
-    toolbar.add_bottom_bar(&status_bar);
-
     let overlay = adw::ToastOverlay::new();
     overlay.add_css_class("tui-root");
-    overlay.set_child(Some(&toolbar));
+    overlay.set_child(Some(&split));
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("agmux native")
+        .title("agmux")
         .default_width(1200)
         .default_height(800)
         .content(&overlay)
@@ -958,9 +966,16 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         shortcut_button,
         shortcut_popover,
         shortcut_entries: Rc::new(shortcut_entries),
-        top_bar: header,
+        session_context_bar: session_context_bar.clone(),
+        context_input: context_input.clone(),
+        context_last_input: context_last_input.clone(),
+        context_branch_review: context_branch_review.clone(),
+        context_magit: context_magit.clone(),
         sidebar_panel: sidebar_panel.clone(),
-        status_bar: status_bar.clone(),
+        sidebar_header: sidebar_header.clone(),
+        sidebar_controls: sidebar_controls.clone(),
+        sidebar_toggle: sidebar_toggle.clone(),
+        surface_anchors: surface_anchors.clone(),
         paths,
         host_binary: sibling_binary("agmux-session"),
         sessions: Rc::new(RefCell::new(HashMap::new())),
@@ -991,6 +1006,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             .borrow_mut()
             .replace(id.to_string());
         selected_workspace.stack.set_visible_child_name(&id);
+        selected_workspace.session_context_bar.set_visible(true);
         if let Some(session) = selected_workspace.sessions.borrow().get(id.as_str()) {
             session.terminal.grab_focus();
         }
@@ -1050,6 +1066,26 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     branch_review_button.connect_clicked(move |_| {
         if let Some(id) = review_workspace.selected_session_id() {
             review_workspace.open_session_in_emacs(
+                &id,
+                crate::emacs::EmacsAction::BranchReview,
+                None,
+            );
+        }
+    });
+    let context_magit_workspace = workspace.clone();
+    context_magit.connect_clicked(move |_| {
+        if let Some(id) = context_magit_workspace.selected_session_id() {
+            context_magit_workspace.open_session_in_emacs(
+                &id,
+                crate::emacs::EmacsAction::Magit,
+                None,
+            );
+        }
+    });
+    let context_review_workspace = workspace.clone();
+    context_branch_review.connect_clicked(move |_| {
+        if let Some(id) = context_review_workspace.selected_session_id() {
+            context_review_workspace.open_session_in_emacs(
                 &id,
                 crate::emacs::EmacsAction::BranchReview,
                 None,
@@ -1193,6 +1229,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         });
     }
 
+    let elapsed_workspace = workspace.clone();
+    glib::timeout_add_seconds_local(30, move || {
+        elapsed_workspace.refresh_session_elapsed();
+        glib::ControlFlow::Continue
+    });
     workspace.install_shortcut_actions();
     workspace.discover_sessions();
 
@@ -1221,6 +1262,7 @@ impl Workspace {
                 self.list.select_row(Some(&row));
             } else {
                 self.stack.set_visible_child_name(EMPTY_PAGE);
+                self.session_context_bar.set_visible(false);
                 self.selected_session.borrow_mut().take();
                 self.render_history(None);
                 self.search_button.set_sensitive(false);

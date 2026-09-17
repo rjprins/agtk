@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::*;
 use crate::projects::ProjectSettings;
@@ -156,36 +156,18 @@ impl Workspace {
                     is_collapsed: project.is_collapsed,
                 },
             ));
-            let mut grouped = BTreeMap::<Option<String>, Vec<&SessionView>>::new();
-            for session in
-                sessions.values().filter(|session| {
+            let mut project_sessions = sessions
+                .values()
+                .filter(|session| {
                     session.record.project_root.as_ref().is_some_and(|root| {
                         root.to_string_lossy().as_ref() == project.root.as_str()
                     })
                 })
-            {
-                grouped
-                    .entry(
-                        session
-                            .record
-                            .worktree_path
-                            .as_ref()
-                            .map(|path| path.to_string_lossy().to_string()),
-                    )
-                    .or_default()
-                    .push(session);
-            }
-            for (worktree, mut project_sessions) in grouped {
-                project_sessions.sort_by_key(|session| session.record.position);
-                if let Some(worktree) = worktree {
-                    let row = self.worktree_header(&project.root, &worktree);
-                    row.set_visible(!project.is_collapsed);
-                    self.list.append(&row);
-                }
-                for session in project_sessions {
-                    session.row.set_visible(!project.is_collapsed);
-                    self.list.append(&session.row);
-                }
+                .collect::<Vec<_>>();
+            project_sessions.sort_by_key(|session| session.record.position);
+            for session in project_sessions {
+                session.row.set_visible(!project.is_collapsed);
+                self.list.append(&session.row);
             }
         }
 
@@ -247,7 +229,6 @@ impl Workspace {
         let launch_workspace = self.clone();
         let launch_root = root.to_owned();
         launch.connect_clicked(move |_| launch_workspace.open_launch_for_project(&launch_root));
-        content.append(&launch);
         let pin = gtk::Button::builder()
             .icon_name(if settings.is_pinned {
                 "starred-symbolic"
@@ -271,7 +252,6 @@ impl Workspace {
                 None,
             );
         });
-        content.append(&pin);
         let resume = gtk::Button::builder()
             .icon_name("document-open-recent-symbolic")
             .build();
@@ -280,7 +260,6 @@ impl Workspace {
         let resume_workspace = self.clone();
         let resume_root = root.to_owned();
         resume.connect_clicked(move |_| resume_workspace.open_agent_for_project(&resume_root));
-        content.append(&resume);
         let worktrees = gtk::Button::builder()
             .icon_name("folder-open-symbolic")
             .build();
@@ -291,7 +270,6 @@ impl Workspace {
         worktrees.connect_clicked(move |_| {
             worktree_workspace.open_worktrees_for_project(&worktree_root)
         });
-        content.append(&worktrees);
         let pull_requests = gtk::Button::builder()
             .icon_name("git-merge-symbolic")
             .build();
@@ -300,49 +278,14 @@ impl Workspace {
         let pr_workspace = self.clone();
         let pr_root = root.to_owned();
         pull_requests.connect_clicked(move |_| pr_workspace.open_pr_for_project(&pr_root));
-        content.append(&pull_requests);
-        row.set_child(Some(&content));
-        row
-    }
 
-    fn worktree_header(&self, project_root: &str, worktree: &str) -> gtk::ListBoxRow {
-        let row = gtk::ListBoxRow::new();
-        row.set_selectable(false);
-        row.set_activatable(false);
-        row.add_css_class("tui-subgroup-row");
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 1);
-        let headline = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        let icon = gtk::Image::from_icon_name("folder-open-symbolic");
-        icon.set_pixel_size(14);
-        icon.set_tooltip_text(Some("Worktree"));
-        headline.append(&icon);
-        let label = gtk::Label::new(Some(&format!("WORKTREE  {}", project_name(worktree))));
-        label.set_xalign(0.0);
-        label.set_hexpand(true);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        label.set_tooltip_text(Some(worktree));
-        label.add_css_class("tui-worktree-name");
-        headline.append(&label);
-        let launch = gtk::Button::builder()
-            .icon_name("list-add-symbolic")
-            .build();
-        launch.add_css_class("tui-button");
-        launch.set_tooltip_text(Some("Launch in this worktree"));
-        let workspace = self.clone();
-        let project_root = PathBuf::from(project_root);
-        let worktree = PathBuf::from(worktree);
-        let launch_worktree = worktree.clone();
-        launch.connect_clicked(move |_| {
-            workspace.open_launch_for_worktree(&project_root, &launch_worktree)
-        });
-        headline.append(&launch);
-        content.append(&headline);
-        let path = gtk::Label::new(Some(worktree.to_string_lossy().as_ref()));
-        path.set_xalign(0.0);
-        path.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        path.set_tooltip_text(Some(worktree.to_string_lossy().as_ref()));
-        path.add_css_class("tui-worktree-path");
-        content.append(&path);
+        // Keep the project affordances in the same order as the original
+        // sidebar: PRs, worktrees, pin, resume, and launch.
+        content.append(&pull_requests);
+        content.append(&worktrees);
+        content.append(&pin);
+        content.append(&resume);
+        content.append(&launch);
         row.set_child(Some(&content));
         row
     }

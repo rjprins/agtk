@@ -1,4 +1,5 @@
 use super::*;
+use crate::persist::now_millis;
 use crate::session::Attachment;
 use std::time::Instant;
 
@@ -226,6 +227,14 @@ impl Workspace {
             },
             None,
         );
+    }
+
+    pub(super) fn refresh_session_elapsed(&self) {
+        for session in self.sessions.borrow().values() {
+            session
+                .elapsed_label
+                .set_text(&elapsed_since(session.record.created_at));
+        }
     }
 
     pub(super) fn launch_controlled_session(
@@ -547,45 +556,59 @@ impl Workspace {
         let row = gtk::ListBoxRow::new();
         row.set_widget_name(&id);
         row.add_css_class("tui-session-row");
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 7);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
         content.add_css_class("tui-session-content");
-        let kind = provider_icons::session_icon(record.kind, &record.program);
-        content.append(&kind);
+        let mainline = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        mainline.set_hexpand(true);
+        let primary = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        primary.add_css_class("tui-session-primary");
         let state_label = gtk::Label::new(Some(agents_ui::session_state_indicator(record.state)));
         state_label.add_css_class("tui-state");
-        if record.state == SessionState::Exited {
-            state_label.add_css_class("tui-state-exited");
-        }
+        state_label.add_css_class(agents_ui::session_state_css_class(record.state));
         state_label.set_tooltip_text(Some(agents_ui::session_state_name(record.state)));
         let eof_indicator = state_label.clone();
         terminal.connect_eof(move |_| {
             eof_indicator.set_text("x");
+            for class in [
+                "tui-state-running",
+                "tui-state-busy",
+                "tui-state-ready",
+                "tui-state-waiting",
+                "tui-state-reconnecting",
+            ] {
+                eof_indicator.remove_css_class(class);
+            }
             eof_indicator.add_css_class("tui-state-exited");
             eof_indicator.set_tooltip_text(Some("Exited"));
         });
-        content.append(&state_label);
+        primary.append(&state_label);
+        let elapsed_label = gtk::Label::new(Some(&elapsed_since(record.created_at)));
+        elapsed_label.add_css_class("tui-elapsed");
+        primary.append(&elapsed_label);
         let label = gtk::Label::new(Some(&name));
         label.set_xalign(0.0);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.set_tooltip_text(Some("Select session"));
-        let details = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        details.set_hexpand(true);
-        details.append(&label);
-        if let Some(worktree) = record.worktree_path.as_ref() {
+        primary.append(&label);
+        let details = primary.clone();
+        let kind = provider_icons::session_icon(record.kind, &record.program);
+        let secondary = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        secondary.add_css_class("tui-session-secondary");
+        secondary.append(&kind);
+        if let Some(worktree) = record.worktree_path.as_ref().or(record.cwd.as_ref()) {
             let worktree_name = worktree
                 .file_name()
                 .and_then(|name| name.to_str())
                 .filter(|name| !name.is_empty())
                 .map(str::to_owned)
                 .unwrap_or_else(|| worktree.to_string_lossy().into_owned());
-            let worktree_label = gtk::Label::new(Some(&format!("in {worktree_name}")));
+            let worktree_label = gtk::Label::new(Some(&worktree_name));
             worktree_label.set_xalign(0.0);
             worktree_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
             worktree_label.set_tooltip_text(Some(&worktree.to_string_lossy()));
             worktree_label.add_css_class("tui-session-worktree");
-            details.append(&worktree_label);
+            secondary.append(&worktree_label);
         }
-        content.append(&details);
         let edit = gtk::Button::builder()
             .icon_name("document-edit-symbolic")
             .build();
@@ -618,10 +641,20 @@ impl Workspace {
             });
             editor.start_editing();
         });
-        content.append(&edit);
+        primary.append(&edit);
+        mainline.append(&primary);
+        mainline.append(&secondary);
+        content.append(&mainline);
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 1);
+        actions.add_css_class("tui-session-actions");
+        actions.set_valign(gtk::Align::Center);
         if let (Some(project_root), Some(worktree)) = (
             record.project_root.clone(),
-            record.worktree_path.clone().or_else(|| record.cwd.clone()),
+            record
+                .worktree_path
+                .clone()
+                .or_else(|| record.cwd.clone())
+                .or_else(|| record.project_root.clone()),
         ) {
             let launch = gtk::Button::builder()
                 .icon_name("list-add-symbolic")
@@ -632,14 +665,15 @@ impl Workspace {
             launch.connect_clicked(move |_| {
                 launch_workspace.open_launch_for_worktree(&project_root, &worktree)
             });
-            content.append(&launch);
+            actions.append(&launch);
         }
         let close = gtk::Button::builder()
             .icon_name("window-close-symbolic")
             .build();
         close.add_css_class("tui-button");
         close.set_tooltip_text(Some("Close this shell session"));
-        content.append(&close);
+        actions.append(&close);
+        content.append(&actions);
         row.set_child(Some(&content));
         let close_workspace = self.clone();
         let close_id = id.clone();
@@ -656,6 +690,7 @@ impl Workspace {
                 row: row.clone(),
                 label,
                 state_label,
+                elapsed_label,
                 history: Vec::new(),
                 _pty: pty,
                 control,
@@ -673,4 +708,19 @@ fn connect_session(socket: &Path) -> io::Result<(UnixStream, Attachment)> {
     control.set_write_timeout(Some(Duration::from_millis(300)))?;
     let attachment = receive_attachment(&control)?;
     Ok((control, attachment))
+}
+
+fn elapsed_since(created_at: u64) -> String {
+    let elapsed = now_millis().saturating_sub(created_at) / 1_000;
+    if elapsed < 5 {
+        "now".to_owned()
+    } else if elapsed < 60 {
+        format!("{elapsed}s")
+    } else if elapsed < 3_600 {
+        format!("{}m", elapsed / 60)
+    } else if elapsed < 86_400 {
+        format!("{}h", elapsed / 3_600)
+    } else {
+        format!("{}d", elapsed / 86_400)
+    }
 }

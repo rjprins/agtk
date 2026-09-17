@@ -217,10 +217,19 @@ impl Workspace {
             session
                 .state_label
                 .set_tooltip_text(Some(session_state_name(state)));
-            session.state_label.remove_css_class("tui-state-exited");
-            if state == SessionState::Exited {
-                session.state_label.add_css_class("tui-state-exited");
+            for class in [
+                "tui-state-running",
+                "tui-state-busy",
+                "tui-state-ready",
+                "tui-state-waiting",
+                "tui-state-exited",
+                "tui-state-reconnecting",
+            ] {
+                session.state_label.remove_css_class(class);
             }
+            session
+                .state_label
+                .add_css_class(session_state_css_class(state));
         }
     }
 
@@ -408,14 +417,18 @@ fn entry_path(entry: &gtk::Entry) -> Option<PathBuf> {
     (!text.is_empty()).then(|| PathBuf::from(text))
 }
 
-pub(super) const fn session_state_indicator(state: SessionState) -> &'static str {
+pub(super) const fn session_state_indicator(_state: SessionState) -> &'static str {
+    "●"
+}
+
+pub(super) const fn session_state_css_class(state: SessionState) -> &'static str {
     match state {
-        SessionState::Running => "*",
-        SessionState::Busy => "~",
-        SessionState::Ready => "!",
-        SessionState::Waiting => "?",
-        SessionState::Exited => "x",
-        SessionState::Reconnecting => ".",
+        SessionState::Running => "tui-state-running",
+        SessionState::Busy => "tui-state-busy",
+        SessionState::Ready => "tui-state-ready",
+        SessionState::Waiting => "tui-state-waiting",
+        SessionState::Exited => "tui-state-exited",
+        SessionState::Reconnecting => "tui-state-reconnecting",
     }
 }
 

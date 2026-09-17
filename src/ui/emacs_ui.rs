@@ -63,5 +63,7 @@ impl Workspace {
                 })
         });
         self.git_button.set_sensitive(enabled);
+        self.context_branch_review.set_sensitive(enabled);
+        self.context_magit.set_sensitive(enabled);
     }
 }
