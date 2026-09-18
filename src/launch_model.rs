@@ -55,7 +55,7 @@ pub fn worktree_choices(
     }
     let mut rest = worktrees
         .into_iter()
-        .filter(|(path, _)| path != project_root)
+        .filter(|(path, _)| Path::new(path) != Path::new(project_root))
         .map(|(value, label)| Choice { value, label })
         .collect::<Vec<_>>();
     rest.sort_by(|left, right| left.label.cmp(&right.label));
@@ -121,6 +121,25 @@ pub fn path_completions(prefix: &str) -> Vec<String> {
             path
         })
         .collect()
+}
+
+/// Match a launch choice by either its compact name or its full path.
+/// Accepting both forms keeps the editable entry useful when a user types a
+/// worktree name, an absolute path, or the shell-style `~/...` shorthand.
+pub fn choice_matches(query: &str, label: &str, value: &str) -> bool {
+    let query = query.trim();
+    if query.is_empty() {
+        return true;
+    }
+    let query_lower = query.to_ascii_lowercase();
+    let expanded_lower = expand_user_path(query)
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    let label_lower = label.to_ascii_lowercase();
+    let value_lower = value.to_ascii_lowercase();
+    label_lower.contains(&query_lower)
+        || value_lower.contains(&query_lower)
+        || value_lower.contains(&expanded_lower)
 }
 
 pub fn provider_args(

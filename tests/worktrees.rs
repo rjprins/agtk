@@ -20,6 +20,28 @@ fn porcelain_parser_preserves_detached_locked_and_prunable_flags() {
 }
 
 #[test]
+fn linked_worktree_paths_include_every_checkout_without_status_scanning() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let extra = fixture.root().parent().unwrap().join("demo-extra");
+    git(
+        fixture.root(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "extra-work",
+            extra.to_str().unwrap(),
+            "main",
+        ],
+    );
+
+    let paths = manager.linked_paths(fixture.root()).unwrap();
+
+    assert_eq!(paths, vec![fixture.root().to_path_buf(), extra]);
+}
+
+#[test]
 fn create_records_purpose_and_uses_the_sibling_template() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic());

@@ -124,9 +124,6 @@ const TUI_CSS: &str = r#"
   border-top: 1px solid @line;
   background: @panel;
 }
-.tui-sidebar-controls > button {
-  flex: 0 0 auto;
-}
 .tui-surface-anchors {
   min-width: 1px;
   min-height: 1px;

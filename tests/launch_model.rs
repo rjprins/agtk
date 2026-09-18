@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use agmux_native::control::SessionKind;
 use agmux_native::launch_model::{
-    NEW_WORKTREE, directory_choices, path_completions, provider_args, worktree_choices,
+    NEW_WORKTREE, choice_matches, directory_choices, path_completions, provider_args,
+    worktree_choices,
 };
 use serde_json::json;
 
@@ -24,6 +25,42 @@ fn worktree_choices_keep_new_and_current_pinned_then_sort_real_worktrees() {
     assert_eq!(choices[1].label, "Current (agmux)");
     assert_eq!(choices[2].label, "alpha");
     assert_eq!(choices[3].label, "zeta");
+}
+
+#[test]
+fn worktree_choices_treat_trailing_project_separators_as_the_current_tree() {
+    let choices = worktree_choices(
+        "/work/agmux/",
+        [("/work/agmux".to_owned(), "agmux".to_owned())],
+        true,
+    );
+
+    assert_eq!(
+        choices
+            .iter()
+            .map(|choice| choice.value.as_str())
+            .collect::<Vec<_>>(),
+        vec![NEW_WORKTREE, "/work/agmux/"]
+    );
+}
+
+#[test]
+fn choice_matching_searches_names_and_absolute_paths() {
+    assert!(choice_matches(
+        "orders",
+        "main-orders-overview",
+        "/home/rutger/shop/main-orders-overview"
+    ));
+    assert!(choice_matches(
+        "~/shop/main-orders",
+        "main-orders-overview",
+        "/home/rutger/shop/main-orders-overview"
+    ));
+    assert!(!choice_matches(
+        "unrelated",
+        "main-orders-overview",
+        "/home/rutger/shop/main-orders-overview"
+    ));
 }
 
 #[test]

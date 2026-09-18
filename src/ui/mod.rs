@@ -1490,6 +1490,14 @@ fn install_choice_completion(
         .inline_completion(false)
         .text_column(0)
         .build();
+    completion.set_match_func(|completion, key, iter| {
+        let Some(model) = completion.model() else {
+            return false;
+        };
+        let label = model.get_value(iter, 0).get::<String>().unwrap_or_default();
+        let value = model.get_value(iter, 1).get::<String>().unwrap_or_default();
+        crate::launch_model::choice_matches(key, &label, &value)
+    });
     let selected_entry = entry.clone();
     completion.connect_match_selected(move |_, model, iter| {
         let Some(value) = model.get_value(iter, 1).get::<String>().ok() else {
@@ -1506,6 +1514,7 @@ fn install_choice_completion(
         }
     });
     let completion_model = model.clone();
+    let changed_completion = completion.clone();
     entry.connect_changed(move |entry| {
         while let Some(row) = completion_model.iter_first() {
             completion_model.remove(&row);
@@ -1519,6 +1528,9 @@ fn install_choice_completion(
                 let row = completion_model.append();
                 completion_model.set(&row, &[(0, &completion), (1, &completion)]);
             }
+        }
+        if entry.has_focus() {
+            changed_completion.complete();
         }
     });
 }

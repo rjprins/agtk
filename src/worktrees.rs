@@ -120,6 +120,19 @@ impl WorktreeManager {
         Self { attic_root }
     }
 
+    /// Return the linked checkout paths without running per-worktree status
+    /// and classification commands. Launch controls only need these paths,
+    /// and repositories with many worktrees must not wait for full inventory
+    /// hashing before showing their choices.
+    pub fn linked_paths(&self, repo_root: &Path) -> WorktreeResult<Vec<PathBuf>> {
+        let repo_root = canonical_repo(repo_root)?;
+        let output = git_text(&repo_root, ["worktree", "list", "--porcelain"])?;
+        Ok(parse_worktree_porcelain(&output)
+            .into_iter()
+            .map(|worktree| worktree.path)
+            .collect())
+    }
+
     pub fn list(
         &self,
         repo_root: &Path,

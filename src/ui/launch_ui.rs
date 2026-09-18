@@ -261,7 +261,6 @@ impl Workspace {
             return;
         }
         let manager = WorktreeManager::new(self.paths.attic_dir());
-        let live_paths = self.live_worktree_paths();
         let initial = launch_model::worktree_choices(&root, [], true);
         let selected_worktree = self.launch_worktree.text().trim().to_owned();
         self.updating_launch_choices.set(true);
@@ -298,7 +297,7 @@ impl Workspace {
         self.updating_launch_choices.set(false);
         let worker_root = root.clone();
         self.run_io(
-            move || manager.list(Path::new(&worker_root), &live_paths),
+            move || manager.linked_paths(Path::new(&worker_root)),
             move |workspace, result| {
                 if workspace.launch_choice_sequence.get() != sequence
                     || launch_path_text(&workspace.launch_project).as_deref() != Some(root.as_str())
@@ -306,12 +305,11 @@ impl Workspace {
                     return;
                 }
                 let mut worktrees = Vec::new();
-                if let Ok(inventory) = result {
-                    worktrees = inventory
-                        .worktrees
+                if let Ok(paths) = result {
+                    worktrees = paths
                         .into_iter()
-                        .map(|worktree| {
-                            let path = worktree.path.to_string_lossy().to_string();
+                        .map(|path| {
+                            let path = path.to_string_lossy().to_string();
                             let label = project_name(&path);
                             (path, label)
                         })
