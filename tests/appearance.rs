@@ -54,7 +54,7 @@ fn system_theme_pairings_match_the_original_application() {
 fn appearance_preferences_have_safe_stable_defaults() {
     let preferences = AppearancePreferences::default();
     assert_eq!(preferences.theme, ThemeKey::Neutral);
-    assert!(!preferences.follow_system);
+    assert!(preferences.follow_system);
     assert_eq!(preferences.font, "Monospace 11");
     assert_eq!(preferences.ui_font_size, 13);
     let json = serde_json::to_value(&preferences).unwrap();

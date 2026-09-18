@@ -54,7 +54,7 @@ impl Default for AppearancePreferences {
     fn default() -> Self {
         Self {
             theme: ThemeKey::Neutral,
-            follow_system: false,
+            follow_system: true,
             font: "Monospace 11".to_owned(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
         }
