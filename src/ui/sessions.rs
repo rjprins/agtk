@@ -3,6 +3,9 @@ use crate::persist::now_millis;
 use crate::session::Attachment;
 use std::time::Instant;
 
+// Stops before trailing punctuation so "see https://x.y." opens https://x.y.
+const URL_PATTERN: &str = r#"\b(?:https?|file)://[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]"#;
+
 impl Workspace {
     pub(super) fn rename_session(
         &self,
@@ -478,6 +481,52 @@ impl Workspace {
         );
     }
 
+    fn enable_terminal_links(&self, terminal: &vte::Terminal) {
+        terminal.set_allow_hyperlink(true);
+        match vte::Regex::for_match(URL_PATTERN, PCRE2_UTF | PCRE2_MULTILINE) {
+            Ok(regex) => {
+                let tag = terminal.match_add_regex(&regex, 0);
+                terminal.match_set_cursor_name(tag, "pointer");
+            }
+            Err(error) => eprintln!("agmux-native: invalid URL pattern: {error}"),
+        }
+
+        // Ctrl+click, because agent TUIs usually grab plain mouse clicks.
+        let click = gtk::GestureClick::new();
+        click.set_button(gtk::gdk::BUTTON_PRIMARY);
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let workspace = self.clone();
+        click.connect_pressed(move |gesture, _, x, y| {
+            if !gesture
+                .current_event_state()
+                .contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
+                return;
+            }
+            let Some(terminal) = gesture.widget().and_downcast::<vte::Terminal>() else {
+                return;
+            };
+            let Some(url) = terminal
+                .check_hyperlink_at(x, y)
+                .or_else(|| terminal.check_match_at(x, y).0)
+            else {
+                return;
+            };
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            let launch_workspace = workspace.clone();
+            gtk::UriLauncher::new(&url).launch(
+                Some(&workspace.window),
+                None::<&gio::Cancellable>,
+                move |result| {
+                    if let Err(error) = result {
+                        launch_workspace.show_error(&format!("Could not open link: {error}"));
+                    }
+                },
+            );
+        });
+        terminal.add_controller(click);
+    }
+
     pub(super) fn attach(
         &self,
         record: SessionRecord,
@@ -494,6 +543,7 @@ impl Workspace {
         terminal.set_scrollback_lines(50_000);
         terminal.set_scroll_on_keystroke(true);
         self.apply_current_terminal_appearance(&terminal);
+        self.enable_terminal_links(&terminal);
         let pty = if let Some(attachment) = attachment {
             terminal.feed(&attachment.replay);
             let pty = vte::Pty::foreign_sync(attachment.pty, None::<&gio::Cancellable>)?;

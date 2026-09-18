@@ -59,6 +59,7 @@ const EMPTY_PAGE: &str = "empty";
 const MAX_INSPECTED_SESSIONS: usize = 500;
 const PCRE2_LITERAL: u32 = 0x0200_0000;
 const PCRE2_UTF: u32 = 0x0008_0000;
+const PCRE2_MULTILINE: u32 = 0x0000_0400;
 
 #[derive(Clone)]
 struct Workspace {
