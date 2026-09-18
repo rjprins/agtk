@@ -359,7 +359,7 @@ impl Workspace {
                                         label: Some("Azure pull requests".to_owned()),
                                         is_visible: self.pr_button.is_visible(),
                                         is_enabled: self.pr_button.is_sensitive(),
-                                        is_selected: self.pr_popover.is_mapped(),
+                                        is_selected: self.pr_window.is_visible(),
                                         bounds: widget_bounds(&self.pr_button, &self.window),
                                         children: Vec::new(),
                                     },

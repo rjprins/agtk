@@ -18,10 +18,10 @@ struct LoadedPrContext {
 impl Workspace {
     pub(super) fn open_pr_for_project(&self, root: &str) {
         self.pr_root.set_text(root);
-        if self.pr_popover.is_mapped() {
+        if self.pr_window.is_visible() {
             self.refresh_pr_panel(None);
         } else {
-            self.pr_popover.popup();
+            self.pr_window.present();
         }
     }
 
@@ -78,7 +78,7 @@ impl Workspace {
             );
             return;
         };
-        if !self.pr_popover.is_mapped() {
+        if !self.pr_window.is_visible() {
             self.render_pr_message("LOADING ACTIVE PULL REQUESTS...");
         }
         let preferences = self.pr_preferences.borrow().clone();
@@ -212,7 +212,7 @@ impl Workspace {
 
     fn pr_row(&self, context: &PrContext, item: &PrItem) -> gtk::Box {
         let row = gtk::Box::new(gtk::Orientation::Vertical, 1);
-        row.add_css_class("tui-worktree-row");
+        row.add_css_class("pr-row");
         let headline = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let marker = item
             .attention
@@ -223,14 +223,45 @@ impl Workspace {
         } else {
             ""
         };
-        let title = gtk::Label::new(Some(&format!(
-            "{marker}#{} {}{draft}",
-            item.pull_request.id, item.pull_request.title
-        )));
+        let number = gtk::Button::with_label(&format!("#{}", item.pull_request.id));
+        number.add_css_class("pr-number-link");
+        number.set_tooltip_text(Some("Open this pull request in Azure DevOps"));
+        let number_workspace = self.clone();
+        let number_url = item.pull_request.url.clone();
+        let number_project_root = context.project_root.clone();
+        let number_pull_request_id = item.pull_request.id;
+        let number_attention = item.attention;
+        number.connect_clicked(move |_| {
+            let launcher = gtk::UriLauncher::new(&number_url);
+            let launch_workspace = number_workspace.clone();
+            launcher.launch(
+                Some(&number_workspace.window),
+                None::<&gio::Cancellable>,
+                move |result| {
+                    if let Err(error) = result {
+                        launch_workspace.show_error(&format!("Could not open PR: {error}"));
+                    }
+                },
+            );
+            if let Some(marker) = number_attention {
+                number_workspace.acknowledge_pr(
+                    PrAcknowledgeParams {
+                        project_root: number_project_root.clone(),
+                        pull_request_id: number_pull_request_id,
+                        marker,
+                    },
+                    None,
+                );
+            }
+        });
+
+        let title = gtk::Label::new(Some(&format!("{marker}{}{draft}", item.pull_request.title)));
         title.set_xalign(0.0);
         title.set_hexpand(true);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title.set_tooltip_text(Some(&item.pull_request.title));
+        title.add_css_class("pr-title");
+        headline.append(&number);
         headline.append(&title);
 
         let view = gtk::Button::builder()
@@ -297,7 +328,7 @@ impl Workspace {
         )));
         details.set_xalign(0.0);
         details.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        details.add_css_class("tui-muted");
+        details.add_css_class("pr-meta");
         details.set_tooltip_text(Some(&format!(
             "{} -> {} by {}, {} unresolved thread(s)",
             item.pull_request.source_branch,
@@ -309,7 +340,7 @@ impl Workspace {
         let location = gtk::Label::new(Some(&format!("cwd  {location}")));
         location.set_xalign(0.0);
         location.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        location.add_css_class("tui-muted");
+        location.add_css_class("pr-meta");
         row.append(&location);
         row
     }
@@ -349,7 +380,7 @@ impl Workspace {
                             id,
                             serde_json::json!({ "acknowledged": acknowledged }),
                         ));
-                    } else if workspace.pr_popover.is_mapped() {
+                    } else if workspace.pr_window.is_visible() {
                         workspace.refresh_pr_panel(None);
                     }
                 }

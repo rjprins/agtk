@@ -78,7 +78,7 @@ struct Workspace {
     selected_claude_preset: Rc<Cell<i32>>,
     claude_presets_entry: gtk::Entry,
     pr_button: gtk::MenuButton,
-    pr_popover: gtk::Popover,
+    pr_window: gtk::Window,
     pr_root: gtk::Entry,
     pr_auto_toggle: gtk::CheckButton,
     pr_list: gtk::Box,
@@ -342,28 +342,30 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     claude_model_button.set_visible(false);
     claude_model_button.set_tooltip_text(Some("Choose a Claude model and effort preset"));
 
-    let pr_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    pr_surface.add_css_class("tui-surface");
-    pr_surface.set_margin_top(6);
-    pr_surface.set_margin_bottom(6);
-    pr_surface.set_margin_start(6);
-    pr_surface.set_margin_end(6);
+    let pr_surface = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    pr_surface.add_css_class("pr-dialog");
+    pr_surface.set_margin_top(18);
+    pr_surface.set_margin_bottom(18);
+    pr_surface.set_margin_start(18);
+    pr_surface.set_margin_end(18);
     let pr_heading_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let pr_heading = gtk::Label::new(Some("AZURE PULL REQUESTS"));
     pr_heading.set_xalign(0.0);
     pr_heading.set_hexpand(true);
-    pr_heading.add_css_class("tui-sidebar-heading");
+    pr_heading.add_css_class("pr-heading");
     pr_heading_row.append(&pr_heading);
     let pr_refresh = gtk::Button::builder()
         .icon_name("view-refresh-symbolic")
         .build();
-    pr_refresh.add_css_class("tui-button");
+    pr_refresh.add_css_class("pr-icon-button");
+    pr_refresh.set_tooltip_text(Some("Refresh active pull requests"));
     pr_heading_row.append(&pr_refresh);
     pr_surface.append(&pr_heading_row);
     let pr_root = launch_entry("Project root", "absolute Azure DevOps repository root");
+    pr_root.0.add_css_class("pr-setting-row");
     pr_surface.append(&pr_root.0);
     let pr_auto_toggle = gtk::CheckButton::with_label("Auto-review new attention");
-    pr_auto_toggle.add_css_class("tui-setting-row");
+    pr_auto_toggle.add_css_class("pr-setting-row");
     pr_auto_toggle.set_tooltip_text(Some(
         "Opt in to launching Codex review sessions for later PR attention changes",
     ));
@@ -371,19 +373,15 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let pr_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
     let pr_scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .min_content_width(720)
-        .min_content_height(260)
-        .max_content_height(560)
+        .min_content_width(1040)
+        .min_content_height(560)
+        .max_content_height(720)
         .child(&pr_list)
         .build();
+    pr_scroller.add_css_class("pr-list-scroller");
     pr_surface.append(&pr_scroller);
-    let pr_popover = gtk::Popover::builder().child(&pr_surface).build();
-    pr_popover.add_css_class("tui-popover");
-    pr_popover.set_position(gtk::PositionType::Left);
-    add_popover_close_button(&pr_surface, &pr_popover);
     let pr_button = gtk::MenuButton::builder()
         .icon_name("git-merge-symbolic")
-        .popover(&pr_popover)
         .sensitive(false)
         .build();
     pr_button.add_css_class("tui-button");
@@ -934,6 +932,29 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .content(&overlay)
         .build();
 
+    let pr_window = gtk::Window::builder()
+        .application(app)
+        .title("Azure pull requests")
+        .transient_for(&window)
+        .modal(true)
+        .default_width(1120)
+        .default_height(760)
+        .resizable(true)
+        .child(&pr_surface)
+        .build();
+    pr_window.set_hide_on_close(true);
+    let pr_close = gtk::Button::builder()
+        .icon_name("window-close-symbolic")
+        .build();
+    pr_close.add_css_class("pr-icon-button");
+    pr_close.set_tooltip_text(Some("Close pull requests"));
+    let pr_close_window = pr_window.clone();
+    pr_close.connect_clicked(move |_| pr_close_window.hide());
+    let pr_close_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    pr_close_row.set_halign(gtk::Align::End);
+    pr_close_row.append(&pr_close);
+    pr_surface.append(&pr_close_row);
+
     let workspace = Workspace {
         application: app.clone(),
         window: window.clone(),
@@ -948,7 +969,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         selected_claude_preset: Rc::new(Cell::new(0)),
         claude_presets_entry: claude_presets_entry.clone(),
         pr_button,
-        pr_popover,
+        pr_window,
         pr_root: pr_root.1,
         pr_auto_toggle: pr_auto_toggle.clone(),
         pr_list,
@@ -1182,7 +1203,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     pr_refresh.connect_clicked(move |_| pr_workspace.refresh_pr_panel(None));
     let pr_workspace = workspace.clone();
     workspace
-        .pr_popover
+        .pr_window
         .connect_show(move |_| pr_workspace.prepare_pr_panel());
     let pr_workspace = workspace.clone();
     pr_auto_toggle.connect_toggled(move |toggle| {

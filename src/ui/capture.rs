@@ -80,6 +80,12 @@ pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, 
 }
 
 fn active_surface(workspace: &Workspace) -> gtk::Widget {
+    if workspace.pr_window.is_visible() {
+        return workspace
+            .pr_window
+            .child()
+            .expect("visible PR window has capture content");
+    }
     for popover in [
         &workspace.launch_popover,
         &workspace.shortcut_popover,
@@ -88,7 +94,6 @@ fn active_surface(workspace: &Workspace) -> gtk::Widget {
         &workspace.search_popover,
         &workspace.worktree_popover,
         &workspace.agent_popover,
-        &workspace.pr_popover,
         &workspace.claude_model_popover,
     ] {
         if popover.is_mapped() {

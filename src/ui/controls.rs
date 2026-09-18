@@ -185,7 +185,7 @@ impl Workspace {
                     UiSurface::PullRequests => {
                         if let Some(root) = self.preferred_project_root() {
                             self.pr_root.set_text(&root);
-                            self.pr_button.popup();
+                            self.pr_window.present();
                             true
                         } else {
                             false

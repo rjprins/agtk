@@ -313,6 +313,84 @@ const TUI_CSS: &str = r#"
   font-size: @font-size;
 }
 
+.pr-dialog {
+  min-width: 1040px;
+  color: @text;
+  background: @panel;
+  border: 1px solid @line;
+  border-radius: 12px;
+  font-family: sans-serif;
+  font-size: @font-size;
+}
+.pr-heading {
+  padding: 4px 2px 10px 2px;
+  color: @text;
+  font-size: 20px;
+  font-weight: bold;
+}
+.pr-icon-button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 5px;
+  color: @muted;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+}
+.pr-icon-button:hover {
+  color: @text;
+  background: @hover;
+}
+.pr-setting-row {
+  padding: 3px 2px;
+}
+.pr-setting-row .tui-setting-entry {
+  min-height: 34px;
+  padding: 4px 9px;
+  border-radius: 6px;
+}
+.pr-list-scroller {
+  border: 1px solid @line;
+  border-radius: 8px;
+  background: @background;
+}
+.pr-row {
+  padding: 12px 14px;
+  color: @text;
+  background: @background;
+  border-bottom: 1px solid @line;
+}
+.pr-row:hover { background: @hover; }
+.pr-title {
+  min-width: 0;
+  font-size: 16px;
+  font-weight: bold;
+}
+.pr-number-link {
+  min-width: 50px;
+  min-height: 28px;
+  padding: 2px 5px;
+  color: @accent;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  box-shadow: none;
+  font-weight: bold;
+}
+.pr-number-link:hover {
+  color: @background;
+  background: @accent;
+}
+.pr-number-link:focus-visible {
+  outline: 2px solid @accent;
+  outline-offset: 1px;
+}
+.pr-meta {
+  color: @muted;
+  font-size: @small-font-size;
+}
+
 .tui-setting-row { padding: 2px 7px; }
 .tui-setting-entry {
   min-height: 25px;
