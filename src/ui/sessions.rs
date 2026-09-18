@@ -1,3 +1,4 @@
+use super::sidebar::{SIDEBAR_WIDTH_PREFERENCE, sidebar_width};
 use super::*;
 use crate::persist::now_millis;
 use crate::session::Attachment;
@@ -128,6 +129,8 @@ impl Workspace {
                     .map(serde_json::from_value::<AppearancePreferences>)
                     .transpose()?
                     .unwrap_or_default();
+                let loaded_sidebar_width =
+                    sidebar_width(store.preference(SIDEBAR_WIDTH_PREFERENCE)?.as_ref());
                 let shortcuts = store
                     .preference("shortcuts")?
                     .map(serde_json::from_value::<ShortcutPreferences>)
@@ -197,6 +200,7 @@ impl Workspace {
                     store,
                     selected,
                     appearance,
+                    loaded_sidebar_width,
                     shortcuts,
                     projects,
                     quick_launch,
@@ -210,6 +214,7 @@ impl Workspace {
                     store,
                     selected,
                     appearance,
+                    sidebar_width,
                     shortcuts,
                     projects,
                     quick_launch,
@@ -218,6 +223,7 @@ impl Workspace {
                     recovered,
                 )) => {
                     *workspace.store.borrow_mut() = Some(store);
+                    workspace.sidebar_split.set_position(sidebar_width);
                     workspace.load_appearance(appearance);
                     workspace.load_shortcuts(shortcuts);
                     workspace.load_projects(projects);
@@ -704,6 +710,7 @@ impl Workspace {
         edit.set_tooltip_text(Some("Rename session"));
         let edit_details = details.clone();
         let edit_label = label.clone();
+        let edit_elapsed = elapsed_label.clone();
         let edit_workspace = self.clone();
         let edit_id = id.clone();
         edit.connect_clicked(move |_| {
@@ -713,9 +720,10 @@ impl Workspace {
                 .build();
             editor.set_text(&edit_label.text());
             edit_details.remove(&edit_label);
-            edit_details.prepend(&editor);
+            edit_details.insert_child_after(&editor, Some(&edit_elapsed));
             let finish_details = edit_details.clone();
             let finish_label = edit_label.clone();
+            let finish_elapsed = edit_elapsed.clone();
             let finish_workspace = edit_workspace.clone();
             let finish_id = edit_id.clone();
             editor.connect_editing_notify(move |editor| {
@@ -724,7 +732,7 @@ impl Workspace {
                 }
                 let name = editor.text().trim().to_owned();
                 finish_details.remove(editor);
-                finish_details.prepend(&finish_label);
+                finish_details.insert_child_after(&finish_label, Some(&finish_elapsed));
                 finish_workspace.rename_session(&finish_id, name, None);
             });
             editor.start_editing();

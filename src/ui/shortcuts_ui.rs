@@ -15,6 +15,14 @@ const REQUIRED_MODIFIERS: gtk::gdk::ModifierType = gtk::gdk::ModifierType::CONTR
     .union(gtk::gdk::ModifierType::META_MASK)
     .union(gtk::gdk::ModifierType::SUPER_MASK);
 
+fn is_image_mime_type(mime_type: &str) -> bool {
+    mime_type
+        .split_once(';')
+        .map_or(mime_type, |(mime_type, _)| mime_type)
+        .trim()
+        .starts_with("image/")
+}
+
 /// Shows an accelerator the way people write it, such as Shift+Ctrl+Q.
 pub(super) fn accelerator_label(accelerator: &str) -> String {
     gtk::accelerator_parse(accelerator).map_or_else(
@@ -68,7 +76,13 @@ impl Workspace {
         });
         self.add_action("paste", true, |workspace| {
             if let Some(terminal) = workspace.selected_terminal() {
-                terminal.paste_clipboard();
+                if clipboard_has_image(&terminal) {
+                    // VTE's clipboard action only requests text. Let agent TUIs
+                    // handle image paste through their native clipboard reader.
+                    terminal.feed_child(b"\x16");
+                } else {
+                    terminal.paste_clipboard();
+                }
             }
         });
         self.add_action("search", true, |workspace| {
@@ -367,5 +381,27 @@ impl Workspace {
         let row = ready[index].row.clone();
         drop(sessions);
         self.list.select_row(Some(&row));
+    }
+}
+
+fn clipboard_has_image(terminal: &vte::Terminal) -> bool {
+    terminal
+        .clipboard()
+        .formats()
+        .mime_types()
+        .iter()
+        .any(|mime_type| is_image_mime_type(mime_type.as_str()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_image_mime_type;
+
+    #[test]
+    fn image_mime_types_are_detected_for_clipboard_paste() {
+        assert!(is_image_mime_type("image/png"));
+        assert!(is_image_mime_type("image/jpeg; charset=binary"));
+        assert!(!is_image_mime_type("text/plain"));
+        assert!(!is_image_mime_type("application/octet-stream"));
     }
 }

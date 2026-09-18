@@ -104,6 +104,20 @@ impl fmt::Display for LaunchPlanError {
 impl std::error::Error for LaunchPlanError {}
 
 fn resolve_executable(command: &str, cwd: Option<&Path>) -> Option<PathBuf> {
+    resolve_executable_from(
+        command,
+        cwd,
+        env::var_os("PATH").as_deref(),
+        env::var_os("HOME").as_deref(),
+    )
+}
+
+fn resolve_executable_from(
+    command: &str,
+    cwd: Option<&Path>,
+    path: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
     let command_path = Path::new(command);
     if command_path.components().count() > 1 {
         let candidate = if command_path.is_absolute() {
@@ -118,9 +132,15 @@ fn resolve_executable(command: &str, cwd: Option<&Path>) -> Option<PathBuf> {
         return is_executable(&candidate).then_some(candidate);
     }
 
-    env::var_os("PATH")
+    let mut directories = path
         .into_iter()
-        .flat_map(|path| env::split_paths(&path).collect::<Vec<_>>())
+        .flat_map(env::split_paths)
+        .collect::<Vec<_>>();
+    if let Some(home) = home {
+        directories.push(PathBuf::from(home).join(".npm-global/bin"));
+    }
+    directories
+        .into_iter()
         .map(|directory| directory.join(command_path))
         .find(|candidate| is_executable(candidate))
 }
@@ -128,4 +148,35 @@ fn resolve_executable(command: &str, cwd: Option<&Path>) -> Option<PathBuf> {
 fn is_executable(path: &Path) -> bool {
     fs::metadata(path)
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::resolve_executable_from;
+
+    #[test]
+    fn resolves_user_npm_global_executable_when_path_omits_it() {
+        let home = tempfile::tempdir().expect("create fake home directory");
+        let bin = home.path().join(".npm-global/bin");
+        std::fs::create_dir_all(&bin).expect("create npm global bin directory");
+        let executable = bin.join("codex");
+        std::fs::write(&executable, "#!/bin/sh\n").expect("create fake executable");
+        let mut permissions = std::fs::metadata(&executable)
+            .expect("read fake executable metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).expect("make fake executable runnable");
+
+        let resolved = resolve_executable_from(
+            "codex",
+            None,
+            Some(OsStr::new("/usr/bin")),
+            Some(home.path().as_os_str()),
+        );
+
+        assert_eq!(resolved.as_deref(), Some(executable.as_path()));
+    }
 }

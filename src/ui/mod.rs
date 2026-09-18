@@ -51,8 +51,9 @@ mod projects_ui;
 mod provider_icons;
 mod search_ui;
 mod sessions;
-mod status_ui;
 mod shortcuts_ui;
+mod sidebar;
+mod status_ui;
 mod style;
 mod worktrees_ui;
 
@@ -157,6 +158,7 @@ struct Workspace {
     context_branch_review: gtk::Button,
     context_magit: gtk::Button,
     sidebar_panel: gtk::Box,
+    sidebar_split: gtk::Paned,
     sidebar_header: gtk::Box,
     sidebar_controls: gtk::Box,
     sidebar_toggle: gtk::Button,
@@ -219,12 +221,14 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .vexpand(true)
         .child(&list)
         .build();
+    let sidebar_brand_icon = provider_icons::brand_icon();
     let sidebar_heading = gtk::Label::new(Some("agmux"));
     sidebar_heading.set_xalign(0.0);
     sidebar_heading.set_hexpand(true);
     sidebar_heading.add_css_class("tui-brand");
     let sidebar_header = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     sidebar_header.add_css_class("tui-brand-row");
+    sidebar_header.append(&sidebar_brand_icon);
     sidebar_header.append(&sidebar_heading);
     let sidebar_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
     sidebar_panel.add_css_class("tui-sidebar");
@@ -288,7 +292,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     split.set_end_child(Some(&main_pane));
     split.set_resize_start_child(false);
     split.set_shrink_start_child(false);
-    split.set_position(260);
+    split.set_position(sidebar::DEFAULT_SIDEBAR_WIDTH);
 
     let new_shell = gtk::Button::builder()
         .icon_name("utilities-terminal-symbolic")
@@ -871,6 +875,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     sidebar_controls.append(&shortcut_button);
     sidebar_controls.append(&theme_button);
     sidebar_controls.append(&launch_button);
+    let sidebar_controls_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    sidebar_controls_spacer.set_hexpand(true);
+    sidebar_controls.append(&sidebar_controls_spacer);
     let sidebar_toggle = gtk::Button::builder().label("«").build();
     sidebar_toggle.add_css_class("tui-button");
     sidebar_toggle.set_tooltip_text(Some("Collapse sidebar"));
@@ -896,12 +903,18 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     sidebar_panel.append(&surface_anchors);
 
     let sidebar_collapsed = Rc::new(Cell::new(false));
+    let sidebar_width = Rc::new(Cell::new(sidebar::DEFAULT_SIDEBAR_WIDTH));
     let sidebar_collapsed_state = sidebar_collapsed.clone();
+    let sidebar_width_state = sidebar_width.clone();
     let sidebar_split = split.clone();
     sidebar_toggle.connect_clicked(move |button| {
         let collapsed = !sidebar_collapsed_state.get();
         sidebar_collapsed_state.set(collapsed);
-        sidebar_split.set_position(if collapsed { 0 } else { 260 });
+        sidebar_split.set_position(if collapsed {
+            0
+        } else {
+            sidebar_width_state.get()
+        });
         button.set_label(if collapsed { "»" } else { "«" });
         button.set_tooltip_text(Some(if collapsed {
             "Expand sidebar"
@@ -1015,6 +1028,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         context_branch_review: context_branch_review.clone(),
         context_magit: context_magit.clone(),
         sidebar_panel: sidebar_panel.clone(),
+        sidebar_split: split.clone(),
         sidebar_header: sidebar_header.clone(),
         sidebar_controls: sidebar_controls.clone(),
         sidebar_toggle: sidebar_toggle.clone(),
@@ -1039,6 +1053,19 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_choice_sequence: Rc::new(Cell::new(0)),
         updating_launch_choices: Rc::new(Cell::new(false)),
     };
+
+    let sidebar_width_workspace = workspace.clone();
+    let sidebar_width_state = sidebar_width.clone();
+    split.connect_position_notify(move |split| {
+        let position = split.position();
+        if position >= sidebar::MIN_SIDEBAR_WIDTH {
+            sidebar_width_state.set(position);
+            sidebar_width_workspace.save_preference(
+                sidebar::SIDEBAR_WIDTH_PREFERENCE,
+                serde_json::json!(position),
+            );
+        }
+    });
 
     let selected_workspace = workspace.clone();
     list.connect_row_selected(move |_, row| {

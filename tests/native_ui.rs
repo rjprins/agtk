@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use agmux_native::control::{ControlClient, ErrorCode, ResponseBody, decode_request};
 use agmux_native::instance::{InstanceName, InstancePaths};
+use agmux_native::persist::Store;
 use serde_json::{Value, json};
 
 struct App {
@@ -318,6 +319,27 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
     let transient = app.request("ui.capture", json!({}));
     assert!(transient["width"].as_i64().unwrap() < 1280);
     assert!(transient["height"].as_i64().unwrap() < 800);
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn sidebar_width_is_restored_on_ui_restart() {
+    let mut app = App::new();
+    app.stop();
+    let store = Store::open(&app.paths.database()).unwrap();
+    store.set_preference("sidebarWidth", &json!(480)).unwrap();
+    app.start();
+
+    let inspection = app.request("ui.inspect", json!({}));
+    let sidebar_width = inspection["root"]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "sidebar")
+        .unwrap()["bounds"]["width"]
+        .as_f64()
+        .unwrap();
+    assert_eq!(sidebar_width, 480.0);
 }
 
 #[test]
@@ -805,6 +827,14 @@ fn shortcut_overrides_are_validated_and_survive_ui_restart() {
         .find(|shortcut| shortcut["action"] == "toggle-sidebar")
         .unwrap();
     assert_eq!(shortcut["accelerator"], "<Alt>b");
+    let inspection = app.request("ui.inspect", json!({}));
+    let shortcuts = inspection["root"]["children"][0]["children"][2]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "shortcuts")
+        .unwrap();
+    assert_eq!(shortcuts["isSelected"], true);
 
     let duplicate = app.request_body(
         "shortcut.set",

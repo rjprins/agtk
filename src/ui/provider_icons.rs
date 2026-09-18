@@ -84,6 +84,20 @@ pub(super) fn agent_icon(provider: AgentProvider) -> gtk::Image {
     })
 }
 
+pub(super) fn brand_icon() -> gtk::Image {
+    let bytes = glib::Bytes::from_static(include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/galaxy.png"
+    )));
+    let texture = gtk::gdk::Texture::from_bytes(&bytes).expect("embedded brand icon is valid");
+    let image = gtk::Image::from_paintable(Some(&texture));
+    image.set_pixel_size(22);
+    image.set_valign(gtk::Align::Center);
+    image.set_tooltip_text(Some("agmux"));
+    image.add_css_class("tui-brand-icon");
+    image
+}
+
 fn image(icon: ProviderIcon) -> gtk::Image {
     let bytes = glib::Bytes::from_static(icon.svg());
     let texture = gtk::gdk::Texture::from_bytes(&bytes).expect("embedded provider icon is valid");

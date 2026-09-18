@@ -78,9 +78,13 @@ pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()
 }
 
 fn prepare_environment() -> io::Result<Vec<CString>> {
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
+    let prefer_wayland_clipboard =
+        wayland_clipboard_socket(wayland_display.as_deref(), runtime_dir.as_deref()).is_some();
     let mut environment = std::env::vars_os()
         .filter(|(key, _)| {
-            !matches!(
+            let is_terminal_override = matches!(
                 key.as_bytes(),
                 b"TERM"
                     | b"COLORTERM"
@@ -89,7 +93,10 @@ fn prepare_environment() -> io::Result<Vec<CString>> {
                     | b"TERM_PROGRAM_VERSION"
                     | b"TMUX"
                     | b"TMUX_PANE"
-            )
+            );
+            let is_x11_clipboard_variable =
+                key.as_bytes() == b"DISPLAY" || key.as_bytes() == b"XAUTHORITY";
+            !is_terminal_override && !(prefer_wayland_clipboard && is_x11_clipboard_variable)
         })
         .map(|(key, value)| {
             let mut entry = key.as_bytes().to_vec();
@@ -115,6 +122,16 @@ fn prepare_environment() -> io::Result<Vec<CString>> {
         .expect("package version cannot contain a NUL byte"),
     );
     Ok(environment)
+}
+
+fn wayland_clipboard_socket(display: Option<&str>, runtime_dir: Option<&Path>) -> Option<PathBuf> {
+    let display = Path::new(display?);
+    let socket = if display.is_absolute() {
+        display.to_owned()
+    } else {
+        runtime_dir?.join(display)
+    };
+    socket.exists().then_some(socket)
 }
 
 fn prepare_command(command: &[String]) -> io::Result<Vec<CString>> {
@@ -229,5 +246,36 @@ struct SocketGuard(PathBuf);
 impl Drop for SocketGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::wayland_clipboard_socket;
+
+    #[test]
+    fn resolves_a_named_wayland_socket_from_the_runtime_directory() {
+        let runtime = tempfile::tempdir().expect("create runtime directory");
+        let socket = runtime.path().join("wayland-0");
+        fs::write(&socket, []).expect("create socket marker");
+
+        assert_eq!(
+            wayland_clipboard_socket(Some("wayland-0"), Some(runtime.path())),
+            Some(socket)
+        );
+    }
+
+    #[test]
+    fn resolves_an_absolute_wayland_socket_without_a_runtime_directory() {
+        let runtime = tempfile::tempdir().expect("create runtime directory");
+        let socket = runtime.path().join("custom-wayland");
+        fs::write(&socket, []).expect("create socket marker");
+
+        assert_eq!(
+            wayland_clipboard_socket(Some(socket.to_str().expect("UTF-8 socket path")), None),
+            Some(socket)
+        );
     }
 }
