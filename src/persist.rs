@@ -27,6 +27,9 @@ pub struct SessionRecord {
     pub socket_path: PathBuf,
     pub created_at: u64,
     pub state: SessionState,
+    /// Zero for records saved before this field existed.
+    #[serde(default)]
+    pub state_changed_at: u64,
     pub position: i64,
 }
 
@@ -45,6 +48,7 @@ impl SessionRecord {
             socket_path,
             created_at: now_millis(),
             state: SessionState::Running,
+            state_changed_at: 0,
             position: 0,
         }
     }

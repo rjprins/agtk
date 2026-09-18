@@ -51,6 +51,7 @@ mod projects_ui;
 mod provider_icons;
 mod search_ui;
 mod sessions;
+mod status_ui;
 mod shortcuts_ui;
 mod style;
 mod worktrees_ui;
@@ -190,6 +191,9 @@ struct SessionView {
     state_label: gtk::Label,
     elapsed_label: gtk::Label,
     history: Vec<String>,
+    /// Last state an agent hook reported; None until the agent sends one.
+    hook_signal: Option<crate::agent_status::Signal>,
+    tracker: crate::agent_status::ScreenTracker,
     _pty: Option<vte::Pty>,
     control: Option<UnixStream>,
 }
@@ -1038,6 +1042,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         if let Some(session) = selected_workspace.sessions.borrow().get(id.as_str()) {
             session.terminal.grab_focus();
         }
+        selected_workspace.acknowledge_session(id.as_str());
         selected_workspace.render_history(Some(id.as_str()));
         selected_workspace.search_button.set_sensitive(true);
         selected_workspace.save_preference("selectedSessionId", serde_json::json!(id.as_str()));
@@ -1257,11 +1262,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         });
     }
 
-    let elapsed_workspace = workspace.clone();
-    glib::timeout_add_seconds_local(30, move || {
-        elapsed_workspace.refresh_session_elapsed();
-        glib::ControlFlow::Continue
-    });
+    workspace.install_status_timers();
     workspace.install_shortcut_actions();
     workspace.discover_sessions();
 

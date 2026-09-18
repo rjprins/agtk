@@ -1,10 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::*;
-use crate::control::{
-    AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState,
-    SessionSetStateParams,
-};
+use crate::control::{AgentListParams, AgentPreviewParams, AgentRestoreParams};
 use crate::persist::now_millis;
 use crate::providers::{
     AgentProvider, ConversationRole, DiscoveryRoots, ProviderDiscovery, ProviderPreview,
@@ -124,113 +121,6 @@ impl Workspace {
                 ),
             },
         );
-    }
-
-    fn set_session_state(&self, params: SessionSetStateParams, pending: PendingRequest) {
-        let state = match params.state {
-            AgentSignalState::Busy => SessionState::Busy,
-            AgentSignalState::Ready => SessionState::Ready,
-            AgentSignalState::Waiting => SessionState::Waiting,
-        };
-        let record = self
-            .sessions
-            .borrow()
-            .get(&params.session_id)
-            .map(|session| session.record.clone());
-        let Some(mut record) = record else {
-            let id = pending.request.id.clone();
-            let _ = pending.respond(session_not_found(id, &params.session_id));
-            return;
-        };
-        if record.state == SessionState::Exited {
-            self.report_failure(
-                Some(pending),
-                ErrorCode::OperationRefused,
-                "Could not update agent state",
-                "session has exited".to_owned(),
-            );
-            return;
-        }
-        let Some(store) = self.store.borrow().clone() else {
-            self.report_launch_failure(
-                Some(pending),
-                "Could not update agent state",
-                "workspace is loading".to_owned(),
-            );
-            return;
-        };
-        record.state = state;
-        let session_id = params.session_id;
-        self.run_io(
-            move || store.save_session(&record),
-            move |workspace, result| match result {
-                Ok(()) => {
-                    workspace.apply_session_state(&session_id, state);
-                    let response = workspace.session_summary(&session_id).and_then(|summary| {
-                        serde_json::to_value(summary).map_err(|error| error.to_string())
-                    });
-                    match response {
-                        Ok(response) => {
-                            let id = pending.request.id.clone();
-                            let _ = pending.respond(ControlResponse::success(id, response));
-                        }
-                        Err(error) => workspace.report_launch_failure(
-                            Some(pending),
-                            "Could not describe agent state",
-                            error,
-                        ),
-                    }
-                }
-                Err(error) => workspace.report_launch_failure(
-                    Some(pending),
-                    "Could not save agent state",
-                    error.to_string(),
-                ),
-            },
-        );
-    }
-
-    pub(super) fn mark_agent_busy(&self, session_id: &str) {
-        let record = {
-            let mut sessions = self.sessions.borrow_mut();
-            let Some(session) = sessions.get_mut(session_id) else {
-                return;
-            };
-            if !matches!(
-                session.record.kind,
-                SessionKind::Codex | SessionKind::Claude | SessionKind::Gemini
-            ) || session.record.state == SessionState::Exited
-            {
-                return;
-            }
-            session.record.state = SessionState::Busy;
-            session.record.clone()
-        };
-        self.apply_session_state(session_id, SessionState::Busy);
-        self.persist_record(record);
-    }
-
-    pub(super) fn apply_session_state(&self, session_id: &str, state: SessionState) {
-        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
-            session.record.state = state;
-            session.state_label.set_text(session_state_indicator(state));
-            session
-                .state_label
-                .set_tooltip_text(Some(session_state_name(state)));
-            for class in [
-                "tui-state-running",
-                "tui-state-busy",
-                "tui-state-ready",
-                "tui-state-waiting",
-                "tui-state-exited",
-                "tui-state-reconnecting",
-            ] {
-                session.state_label.remove_css_class(class);
-            }
-            session
-                .state_label
-                .add_css_class(session_state_css_class(state));
-        }
     }
 
     fn live_provider_sessions(&self) -> BTreeSet<(AgentProvider, String)> {
@@ -415,30 +305,4 @@ fn entry_path(entry: &gtk::Entry) -> Option<PathBuf> {
     let text = entry.text();
     let text = text.trim();
     (!text.is_empty()).then(|| PathBuf::from(text))
-}
-
-pub(super) const fn session_state_indicator(_state: SessionState) -> &'static str {
-    "●"
-}
-
-pub(super) const fn session_state_css_class(state: SessionState) -> &'static str {
-    match state {
-        SessionState::Running => "tui-state-running",
-        SessionState::Busy => "tui-state-busy",
-        SessionState::Ready => "tui-state-ready",
-        SessionState::Waiting => "tui-state-waiting",
-        SessionState::Exited => "tui-state-exited",
-        SessionState::Reconnecting => "tui-state-reconnecting",
-    }
-}
-
-pub(super) const fn session_state_name(state: SessionState) -> &'static str {
-    match state {
-        SessionState::Running => "Running",
-        SessionState::Busy => "Busy",
-        SessionState::Ready => "Ready",
-        SessionState::Waiting => "Waiting for input",
-        SessionState::Exited => "Exited",
-        SessionState::Reconnecting => "Reconnecting",
-    }
 }

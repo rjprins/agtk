@@ -754,11 +754,11 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "set_session_state",
             "Set readiness",
-            "Mark an exact agent session busy, ready, or waiting through the trusted local callback.",
+            "Mark an exact agent session busy, ready, waiting, or idle through the trusted local callback.",
             schema(
                 &[
                     ("sessionId", string()),
-                    ("state", enum_values(&["busy", "ready", "waiting"])),
+                    ("state", enum_values(&["busy", "ready", "waiting", "idle"])),
                 ],
                 &["sessionId", "state"],
             ),

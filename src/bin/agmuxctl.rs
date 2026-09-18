@@ -257,6 +257,7 @@ fn parse_session_state(value: &str) -> Result<SessionState, Failure> {
         "busy" => Ok(SessionState::Busy),
         "ready" => Ok(SessionState::Ready),
         "waiting" => Ok(SessionState::Waiting),
+        "idle" => Ok(SessionState::Idle),
         "exited" => Ok(SessionState::Exited),
         "reconnecting" => Ok(SessionState::Reconnecting),
         _ => Err(Failure::Usage(format!("unknown session state: {value}"))),
@@ -899,6 +900,7 @@ fn parse_agent_signal_state(value: &str) -> Result<AgentSignalState, Failure> {
         "busy" => Ok(AgentSignalState::Busy),
         "ready" => Ok(AgentSignalState::Ready),
         "waiting" => Ok(AgentSignalState::Waiting),
+        "idle" => Ok(AgentSignalState::Idle),
         _ => Err(Failure::Usage(format!(
             "unknown agent signal state: {value}"
         ))),

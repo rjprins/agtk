@@ -62,6 +62,7 @@ const fn state_name(state: SessionState) -> &'static str {
         SessionState::Busy => "busy",
         SessionState::Ready => "ready",
         SessionState::Waiting => "waiting",
+        SessionState::Idle => "idle",
         SessionState::Exited => "exited",
         SessionState::Reconnecting => "reconnecting",
     }

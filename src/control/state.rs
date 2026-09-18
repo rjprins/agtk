@@ -74,6 +74,8 @@ pub enum SessionState {
     Busy,
     Ready,
     Waiting,
+    /// Nothing is running, or the finished turn has been viewed.
+    Idle,
     Exited,
     Reconnecting,
 }
@@ -91,6 +93,7 @@ pub struct SessionSummary {
     pub project_root: Option<PathBuf>,
     pub worktree_path: Option<PathBuf>,
     pub created_at: u64,
+    pub state_changed_at: u64,
     pub position: i64,
 }
 

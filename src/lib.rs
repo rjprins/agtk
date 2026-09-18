@@ -1,5 +1,7 @@
 //! Shared domain and session-lifecycle code for agmux native.
 
+pub mod agent_hooks;
+pub mod agent_status;
 pub mod appearance;
 pub mod azure;
 pub mod capture;

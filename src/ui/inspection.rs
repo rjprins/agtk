@@ -18,6 +18,7 @@ impl Workspace {
                 project_root: session.record.project_root.clone(),
                 worktree_path: session.record.worktree_path.clone(),
                 created_at: session.record.created_at,
+                state_changed_at: session.record.state_changed_at,
                 position: session.record.position,
             })
             .collect::<Vec<_>>();
@@ -70,6 +71,7 @@ impl Workspace {
             project_root: session.record.project_root.clone(),
             worktree_path: session.record.worktree_path.clone(),
             created_at: session.record.created_at,
+            state_changed_at: session.record.state_changed_at,
             position: session.record.position,
         })
     }

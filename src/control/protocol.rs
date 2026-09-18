@@ -245,6 +245,7 @@ pub enum AgentSignalState {
     Busy,
     Ready,
     Waiting,
+    Idle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

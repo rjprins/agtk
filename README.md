@@ -22,7 +22,7 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Persisted session metadata, ordering, project pins, collapsed groups, launch preferences, terminal themes, fonts, and keyboard overrides
 - Ctrl-plus and Ctrl-minus font scaling for the TUI chrome and every embedded terminal, persisted with appearance settings
 - Safe purpose-aware worktree creation and guarded reap with salvage and attic tags
-- Recent Codex and Claude conversation discovery, preview, direct restore, and explicit busy, ready, and waiting callbacks
+- Recent Codex and Claude conversation discovery, preview, direct restore, and busy, waiting, ready, and idle agent states from Claude hooks and screen reading
 - Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
 - Emacs Magit and branch-review integration for the selected session
 - Azure DevOps PR attention, exact acknowledgement, source-worktree matching, manual review launch, and per-project opt-in auto-review
@@ -120,11 +120,24 @@ agmuxctl claude apply SESSION_ID opus-high
 Hosted agent processes receive `AGMUX_INSTANCE`, `AGMUX_SESSION_ID`, and `AGMUX_CONTROL_SOCKET`. A provider hook can report explicit readiness with:
 
 ```sh
-agmuxctl session state "$AGMUX_SESSION_ID" ready
+agmuxctl session state "$AGMUX_SESSION_ID" busy
 agmuxctl session state "$AGMUX_SESSION_ID" waiting
+agmuxctl session state "$AGMUX_SESSION_ID" ready
+agmuxctl session state "$AGMUX_SESSION_ID" idle
 ```
 
-Submitted input marks agent sessions busy.
+### Agent states
+
+| Glyph | State | Meaning |
+|---|---|---|
+| ◐ | busy | The agent is working on a turn |
+| ◆ | waiting | Blocked on you: a permission prompt, dialog, question, or usage limit |
+| ● | ready | The turn finished and you have not viewed it yet |
+| ○ | idle | Nothing is running, or you viewed the finished turn |
+
+Selecting a ready session, or finishing a turn while you look at it, marks it viewed. The timer shows how long the session has been in its state.
+
+Claude sessions launch with `--settings` pointing at generated hooks that call `agmuxctl session state`, so no global Claude configuration is needed. Codex and Gemini sessions are read from the screen once a second, using status rules ported from [agent-manager](https://github.com/YoanWai/agent-manager). The screen also corrects Claude hooks where they cannot see, such as an Esc interrupt or a dialog after a turn ended. Submitted input marks agent sessions busy.
 
 ## MCP
 

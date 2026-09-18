@@ -158,16 +158,27 @@ const TUI_CSS: &str = r#"
 .tui-session-primary { min-height: 18px; }
 .tui-session-secondary { color: @muted; }
 .tui-session-actions { margin-left: 4px; }
-.tui-state { color: @ready; font-weight: bold; }
+.tui-state { min-width: 12px; color: @ready; font-weight: bold; }
 .tui-state-running { color: @accent; }
 .tui-state-busy { color: #e5a50a; }
 .tui-state-ready { color: @ready; }
-.tui-state-waiting { color: #e5a50a; }
+.tui-state-waiting { color: #ff7800; }
+.tui-state-idle { color: @muted; }
 .tui-state-reconnecting { color: @muted; }
 .tui-state-exited { color: @danger; }
+.tui-session-row.tui-session-ready:not(:selected) {
+  background: alpha(@ready, 0.14);
+  border-color: alpha(@ready, 0.45);
+  border-left-color: @ready;
+}
+.tui-session-row.tui-session-waiting:not(:selected) {
+  background: alpha(#ff7800, 0.12);
+  border-color: alpha(#ff7800, 0.45);
+  border-left-color: #ff7800;
+}
 .tui-elapsed {
   min-width: 28px;
-  color: @ready;
+  color: @muted;
   font-size: @small-font-size;
 }
 .tui-kind { color: @muted; font-size: @small-font-size; }

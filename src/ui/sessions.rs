@@ -1,7 +1,11 @@
 use super::*;
 use crate::persist::now_millis;
 use crate::session::Attachment;
+use std::ffi::OsString;
 use std::time::Instant;
+
+use crate::agent_hooks::ensure_claude_hook_settings;
+use crate::agent_status::ScreenTracker;
 
 // Stops before trailing punctuation so "see https://x.y." opens https://x.y.
 const URL_PATTERN: &str = r#"\b(?:https?|file)://[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]"#;
@@ -137,7 +141,10 @@ impl Workspace {
                     record.state = if connected.is_some() {
                         if matches!(
                             record.state,
-                            SessionState::Busy | SessionState::Ready | SessionState::Waiting
+                            SessionState::Busy
+                                | SessionState::Ready
+                                | SessionState::Waiting
+                                | SessionState::Idle
                         ) {
                             record.state
                         } else {
@@ -232,14 +239,6 @@ impl Workspace {
         );
     }
 
-    pub(super) fn refresh_session_elapsed(&self) {
-        for session in self.sessions.borrow().values() {
-            session
-                .elapsed_label
-                .set_text(&elapsed_since(session.record.created_at));
-        }
-    }
-
     pub(super) fn launch_controlled_session(
         &self,
         params: CreateSessionParams,
@@ -282,6 +281,7 @@ impl Workspace {
         let socket = self.paths.sessions_dir().join(format!("{id}.sock"));
         let paths = self.paths.clone();
         let host_binary = self.host_binary.clone();
+        let agmuxctl = sibling_binary("agmuxctl");
         self.run_io(
             move || {
                 let plan = SessionLaunchPlan::new(params)?;
@@ -298,6 +298,12 @@ impl Workspace {
                 record.position = position;
                 record.state = SessionState::Reconnecting;
                 store.save_session(&record)?;
+                let hook_args: Vec<OsString> = if record.kind == SessionKind::Claude {
+                    let settings = ensure_claude_hook_settings(paths.runtime_dir(), &agmuxctl)?;
+                    vec!["--settings".into(), settings.into_os_string()]
+                } else {
+                    Vec::new()
+                };
                 let mut command = Command::new(host_binary);
                 command
                     .arg("--socket")
@@ -305,6 +311,7 @@ impl Workspace {
                     .arg("--")
                     .arg(&record.program)
                     .args(&record.args)
+                    .args(&hook_args)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
@@ -340,14 +347,13 @@ impl Workspace {
                     let _ = child.wait();
                 });
                 let (control, attachment) = connected?;
-                record.state = if matches!(
-                    record.kind,
-                    SessionKind::Codex | SessionKind::Claude | SessionKind::Gemini
-                ) {
-                    SessionState::Busy
+                // Agents start idle; hooks or the screen report the first turn.
+                record.state = if status_ui::is_agent(record.kind) {
+                    SessionState::Idle
                 } else {
                     SessionState::Running
                 };
+                record.state_changed_at = now_millis();
                 store.save_session(&record)?;
                 Ok((record, control, attachment, plan.initial_input))
             },
@@ -560,6 +566,7 @@ impl Workspace {
                 let mut sessions = eof_workspace.sessions.borrow_mut();
                 sessions.get_mut(&eof_id).map(|session| {
                     session.record.state = SessionState::Exited;
+                    session.record.state_changed_at = now_millis();
                     session
                         .label
                         .set_text(&format!("{} (exited)", session.record.name));
@@ -567,6 +574,7 @@ impl Workspace {
                     session.record.clone()
                 })
             };
+            eof_workspace.apply_session_state(&eof_id);
             if let Some(record) = record
                 && !eof_workspace.closing_sessions.borrow().contains(&eof_id)
             {
@@ -612,27 +620,10 @@ impl Workspace {
         mainline.set_hexpand(true);
         let primary = gtk::Box::new(gtk::Orientation::Horizontal, 5);
         primary.add_css_class("tui-session-primary");
-        let state_label = gtk::Label::new(Some(agents_ui::session_state_indicator(record.state)));
+        let state_label = gtk::Label::new(None);
         state_label.add_css_class("tui-state");
-        state_label.add_css_class(agents_ui::session_state_css_class(record.state));
-        state_label.set_tooltip_text(Some(agents_ui::session_state_name(record.state)));
-        let eof_indicator = state_label.clone();
-        terminal.connect_eof(move |_| {
-            eof_indicator.set_text("x");
-            for class in [
-                "tui-state-running",
-                "tui-state-busy",
-                "tui-state-ready",
-                "tui-state-waiting",
-                "tui-state-reconnecting",
-            ] {
-                eof_indicator.remove_css_class(class);
-            }
-            eof_indicator.add_css_class("tui-state-exited");
-            eof_indicator.set_tooltip_text(Some("Exited"));
-        });
         primary.append(&state_label);
-        let elapsed_label = gtk::Label::new(Some(&elapsed_since(record.created_at)));
+        let elapsed_label = gtk::Label::new(None);
         elapsed_label.add_css_class("tui-elapsed");
         primary.append(&elapsed_label);
         let label = gtk::Label::new(Some(&name));
@@ -742,10 +733,13 @@ impl Workspace {
                 state_label,
                 elapsed_label,
                 history: Vec::new(),
+                hook_signal: None,
+                tracker: ScreenTracker::new(Instant::now()),
                 _pty: pty,
                 control,
             },
         );
+        self.apply_session_state(&id);
         self.rebuild_sidebar();
         self.list.select_row(Some(&row));
         Ok(())
@@ -758,19 +752,4 @@ fn connect_session(socket: &Path) -> io::Result<(UnixStream, Attachment)> {
     control.set_write_timeout(Some(Duration::from_millis(300)))?;
     let attachment = receive_attachment(&control)?;
     Ok((control, attachment))
-}
-
-fn elapsed_since(created_at: u64) -> String {
-    let elapsed = now_millis().saturating_sub(created_at) / 1_000;
-    if elapsed < 5 {
-        "now".to_owned()
-    } else if elapsed < 60 {
-        format!("{elapsed}s")
-    } else if elapsed < 3_600 {
-        format!("{}m", elapsed / 60)
-    } else if elapsed < 86_400 {
-        format!("{}h", elapsed / 3_600)
-    } else {
-        format!("{}d", elapsed / 86_400)
-    }
 }

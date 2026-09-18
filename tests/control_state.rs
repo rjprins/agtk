@@ -47,6 +47,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
             project_root: None,
             worktree_path: None,
             created_at: 0,
+            state_changed_at: 0,
             position: 0,
             id: "shell-1".to_owned(),
             name: "Shell 1".to_owned(),
@@ -106,6 +107,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 "projectRoot": null,
                 "worktreePath": null,
                 "createdAt": 0,
+                "stateChangedAt": 0,
                 "position": 0
             }],
             "attention": { "count": 0 }
