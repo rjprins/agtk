@@ -322,14 +322,24 @@ impl Workspace {
     }
 
     fn select_relative_session(&self, offset: i32) {
+        // Sidebar order across projects; headers and collapsed projects are skipped.
         let rows = (0..)
             .map_while(|index| self.list.row_at_index(index))
+            .filter(|row| row.is_selectable() && row.is_visible())
             .collect::<Vec<_>>();
         if rows.is_empty() {
             return;
         }
-        let selected = self.list.selected_row().map_or(0, |row| row.index());
-        let index = (selected + offset).rem_euclid(rows.len() as i32) as usize;
+        let selected = self
+            .list
+            .selected_row()
+            .and_then(|selected| rows.iter().position(|row| *row == selected));
+        let index = match selected {
+            Some(index) => (index as i32 + offset).rem_euclid(rows.len() as i32) as usize,
+            // The selection is hidden in a collapsed project: start from an end.
+            None if offset > 0 => 0,
+            None => rows.len() - 1,
+        };
         self.list.select_row(Some(&rows[index]));
     }
 
