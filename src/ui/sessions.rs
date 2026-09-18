@@ -7,6 +7,11 @@ use std::time::Instant;
 use crate::agent_hooks::ensure_claude_hook_settings;
 use crate::agent_status::ScreenTracker;
 
+// Matches the original agmux, which sent 3 events for a browser wheel notch.
+const WHEEL_EVENTS_PER_NOTCH: f64 = 3.0;
+const SGR_WHEEL_UP: &str = "\x1b[<64;1;1M";
+const SGR_WHEEL_DOWN: &str = "\x1b[<65;1;1M";
+
 // Stops before trailing punctuation so "see https://x.y." opens https://x.y.
 const URL_PATTERN: &str = r#"\b(?:https?|file)://[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]"#;
 
@@ -550,6 +555,9 @@ impl Workspace {
         terminal.set_scroll_on_keystroke(true);
         self.apply_current_terminal_appearance(&terminal);
         self.enable_terminal_links(&terminal);
+        if runs_claude(&record) {
+            route_wheel_to_fullscreen_app(&terminal);
+        }
         let pty = if let Some(attachment) = attachment {
             terminal.feed(&attachment.replay);
             let pty = vte::Pty::foreign_sync(attachment.pty, None::<&gio::Cancellable>)?;
@@ -744,6 +752,56 @@ impl Workspace {
         self.list.select_row(Some(&row));
         Ok(())
     }
+}
+
+fn runs_claude(record: &SessionRecord) -> bool {
+    record.kind == SessionKind::Claude
+        || record
+            .program
+            .file_name()
+            .is_some_and(|name| name == "claude")
+}
+
+/// Fullscreen Claude never enables mouse tracking, so VTE would turn the wheel into
+/// arrow keys, which recall prompt history. Claude reads SGR wheel events instead.
+fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let pending = Cell::new(0.0_f64);
+    scroll.connect_scroll(move |controller, _, dy| {
+        let Some(terminal) = controller.widget().and_downcast::<vte::Terminal>() else {
+            return glib::Propagation::Proceed;
+        };
+        let zooming = controller
+            .current_event_state()
+            .contains(gtk::gdk::ModifierType::CONTROL_MASK);
+        if zooming || !on_alternate_screen(&terminal) {
+            pending.set(0.0);
+            return glib::Propagation::Proceed;
+        }
+        // Touchpads send fractions of a notch, so carry the remainder over.
+        let total = pending.get() + dy * WHEEL_EVENTS_PER_NOTCH;
+        let events = total.trunc();
+        pending.set(total - events);
+        let sequence = if events < 0.0 {
+            SGR_WHEEL_UP
+        } else {
+            SGR_WHEEL_DOWN
+        };
+        let count = events.abs() as usize;
+        if count > 0 {
+            terminal.feed_child(sequence.repeat(count).as_bytes());
+        }
+        glib::Propagation::Stop
+    });
+    terminal.add_controller(scroll);
+}
+
+/// The alternate screen keeps no scrollback, so its scroll range is one screen tall.
+fn on_alternate_screen(terminal: &vte::Terminal) -> bool {
+    terminal.vadjustment().is_some_and(|adjustment| {
+        (adjustment.upper() - adjustment.lower()) as libc::c_long <= terminal.row_count()
+    })
 }
 
 fn connect_session(socket: &Path) -> io::Result<(UnixStream, Attachment)> {
