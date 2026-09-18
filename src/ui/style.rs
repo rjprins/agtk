@@ -130,14 +130,11 @@ const TUI_CSS: &str = r#"
 .tui-surface-anchors {
   min-width: 1px;
   min-height: 1px;
-  max-height: 1px;
   opacity: 0;
 }
 .tui-surface-anchors > button {
   min-width: 1px;
   min-height: 1px;
-  max-width: 1px;
-  max-height: 1px;
   padding: 0;
 }
 .tui-session-list, .tui-session-list > row { background: transparent; }
