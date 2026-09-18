@@ -5,27 +5,23 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use super::{ControlError, ControlRequest, ControlResponse, decode_response, encode_request};
-
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+use super::{
+    ControlError, ControlRequest, ControlResponse, control_timeout, decode_response, encode_request,
+};
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ControlClient {
     socket_path: PathBuf,
-    timeout: Duration,
 }
 
 impl ControlClient {
     pub fn new(socket_path: PathBuf) -> Self {
-        Self {
-            socket_path,
-            timeout: DEFAULT_TIMEOUT,
-        }
+        Self { socket_path }
     }
 
     pub fn send(&self, request: &ControlRequest) -> Result<ControlResponse, ClientError> {
-        self.send_with_timeout(request, self.timeout)
+        self.send_with_timeout(request, control_timeout(&request.command))
     }
 
     pub fn send_with_timeout(

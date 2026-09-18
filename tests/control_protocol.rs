@@ -1,15 +1,16 @@
 use agmux_native::appearance::ThemeKey;
 use agmux_native::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
-    ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, ProjectSetParams, ResponseBody,
-    SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams, WorktreeCreateParams,
-    WorktreeListParams, WorktreeReapParams, decode_request, decode_response, encode_request,
-    encode_response,
+    ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, PrListParams, ProjectSetParams,
+    ResponseBody, SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams, control_timeout, decode_request,
+    decode_response, encode_request, encode_response,
 };
 use agmux_native::providers::AgentProvider;
 use agmux_native::shortcuts::ShortcutAction;
 use agmux_native::worktrees::DeleteBranch;
 use serde_json::json;
+use std::time::Duration;
 
 #[test]
 fn request_round_trips_with_the_documented_envelope() {
@@ -44,6 +45,19 @@ fn request_defaults_are_applied_at_the_protocol_boundary() {
         panic!("expected session.send_input");
     };
     assert!(params.append_enter);
+}
+
+#[test]
+fn pull_request_commands_get_a_longer_control_deadline() {
+    let pull_requests = ControlCommand::PrList(PrListParams {
+        project_root: "/work/agmux".into(),
+    });
+
+    assert_eq!(control_timeout(&pull_requests), Duration::from_secs(30));
+    assert_eq!(
+        control_timeout(&ControlCommand::AppGetState),
+        Duration::from_secs(5)
+    );
 }
 
 #[test]

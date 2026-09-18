@@ -13,10 +13,11 @@ use serde_json::Value;
 
 use super::protocol::MAX_REQUEST_BYTES;
 use super::{
-    ControlError, ControlRequest, ControlResponse, ErrorCode, decode_request, encode_response,
+    ControlError, ControlRequest, ControlResponse, ErrorCode, control_timeout, decode_request,
+    encode_response,
 };
 
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct PendingRequest {
     pub request: ControlRequest,
@@ -112,8 +113,8 @@ fn serve(listener: UnixListener, requests: Sender<PendingRequest>, shutdown: Arc
 }
 
 fn handle_client(mut stream: UnixStream, requests: &Sender<PendingRequest>) -> io::Result<()> {
-    stream.set_read_timeout(Some(RESPONSE_TIMEOUT))?;
-    stream.set_write_timeout(Some(RESPONSE_TIMEOUT))?;
+    stream.set_read_timeout(Some(REQUEST_TIMEOUT))?;
+    stream.set_write_timeout(Some(REQUEST_TIMEOUT))?;
     let (bytes, newline_terminated) = read_request(&stream)?;
     let request_id = request_id_hint(&bytes);
     if !newline_terminated && bytes.len() <= MAX_REQUEST_BYTES {
@@ -129,6 +130,7 @@ fn handle_client(mut stream: UnixStream, requests: &Sender<PendingRequest>) -> i
             return write_response(&mut stream, &ControlResponse::from_error(request_id, error));
         }
     };
+    let response_timeout = control_timeout(&request.command);
 
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
     let response_id = request.id.clone();
@@ -139,7 +141,7 @@ fn handle_client(mut stream: UnixStream, requests: &Sender<PendingRequest>) -> i
         })
         .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "request receiver closed"))?;
 
-    let response = match response_receiver.recv_timeout(RESPONSE_TIMEOUT) {
+    let response = match response_receiver.recv_timeout(response_timeout) {
         Ok(response) => response,
         Err(RecvTimeoutError::Timeout) => ControlResponse::failure(
             response_id,

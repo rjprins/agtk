@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::appearance::ThemeKey;
 use crate::azure::PrAttention;
@@ -11,6 +12,8 @@ use crate::worktrees::DeleteBranch;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub(crate) const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+const DEFAULT_CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
+const PR_CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REQUEST_ID_CHARS: usize = 128;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
@@ -55,6 +58,16 @@ pub enum ControlCommand {
     SessionOpenMagit(SessionIdParams),
     SessionOpenBranchReview(SessionIdParams),
     HistoryList(SessionIdParams),
+}
+
+pub fn control_timeout(command: &ControlCommand) -> Duration {
+    match command {
+        ControlCommand::PrList(_)
+        | ControlCommand::PrAcknowledge(_)
+        | ControlCommand::PrSetAutoReview(_)
+        | ControlCommand::PrLaunchReview(_) => PR_CONTROL_TIMEOUT,
+        _ => DEFAULT_CONTROL_TIMEOUT,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
