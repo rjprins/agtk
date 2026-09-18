@@ -225,22 +225,27 @@ impl Workspace {
                     *workspace.pr_preferences.borrow_mut() = pr_preferences;
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
+                    let mut last = None;
                     for (record, connected) in recovered {
                         let (control, attachment) =
                             connected.map_or((None, None), |(c, a)| (Some(c), Some(a)));
-                        if let Err(error) = workspace.attach(record, control, attachment) {
-                            workspace.show_error(&format!("Could not restore terminal: {error}"));
+                        let id = record.id.clone();
+                        // Selecting marks a finished turn as seen, so select only once below.
+                        match workspace.attach(record, control, attachment, false) {
+                            Ok(()) => last = Some(id),
+                            Err(error) => workspace
+                                .show_error(&format!("Could not restore terminal: {error}")),
                         }
                     }
-                    if let Some(selected) = selected {
-                        let row = workspace
-                            .sessions
-                            .borrow()
-                            .get(&selected)
-                            .map(|s| s.row.clone());
-                        if let Some(row) = row {
-                            workspace.list.select_row(Some(&row));
-                        }
+                    let row = {
+                        let sessions = workspace.sessions.borrow();
+                        selected
+                            .and_then(|id| sessions.get(&id))
+                            .or_else(|| last.and_then(|id| sessions.get(&id)))
+                            .map(|s| s.row.clone())
+                    };
+                    if let Some(row) = row {
+                        workspace.list.select_row(Some(&row));
                     }
                     workspace.new_shell_button.set_sensitive(true);
                     workspace.theme_button.set_sensitive(true);
@@ -397,7 +402,7 @@ impl Workspace {
             move |workspace, result| match result {
                 Ok((record, control, attachment, initial_input)) => {
                     let id = record.id.clone();
-                    match workspace.attach(record, Some(control), Some(attachment)) {
+                    match workspace.attach(record, Some(control), Some(attachment), true) {
                         Ok(()) => {
                             let terminal = workspace
                                 .sessions
@@ -575,6 +580,7 @@ impl Workspace {
         record: SessionRecord,
         control: Option<UnixStream>,
         attachment: Option<Attachment>,
+        select: bool,
     ) -> Result<(), Box<dyn Error>> {
         let id = record.id.clone();
         if self.sessions.borrow().contains_key(&id) {
@@ -783,7 +789,9 @@ impl Workspace {
         );
         self.apply_session_state(&id);
         self.rebuild_sidebar();
-        self.list.select_row(Some(&row));
+        if select {
+            self.list.select_row(Some(&row));
+        }
         Ok(())
     }
 }
