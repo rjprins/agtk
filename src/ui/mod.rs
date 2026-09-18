@@ -82,6 +82,8 @@ struct Workspace {
     pr_root: gtk::Entry,
     pr_auto_toggle: gtk::CheckButton,
     pr_list: gtk::Box,
+    pr_loading: gtk::Box,
+    pr_spinner: gtk::Spinner,
     updating_pr_toggle: Rc<Cell<bool>>,
     launch_button: gtk::MenuButton,
     launch_popover: gtk::Popover,
@@ -361,6 +363,16 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     pr_refresh.set_tooltip_text(Some("Refresh active pull requests"));
     pr_heading_row.append(&pr_refresh);
     pr_surface.append(&pr_heading_row);
+    let pr_loading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    pr_loading.add_css_class("pr-loading");
+    let pr_spinner = gtk::Spinner::new();
+    pr_spinner.set_size_request(18, 18);
+    pr_loading.append(&pr_spinner);
+    let pr_loading_label = gtk::Label::new(Some("Loading active pull requests..."));
+    pr_loading_label.set_xalign(0.0);
+    pr_loading.append(&pr_loading_label);
+    pr_loading.set_visible(false);
+    pr_surface.append(&pr_loading);
     let pr_root = launch_entry("Project root", "absolute Azure DevOps repository root");
     pr_root.0.add_css_class("pr-setting-row");
     pr_surface.append(&pr_root.0);
@@ -973,6 +985,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         pr_root: pr_root.1,
         pr_auto_toggle: pr_auto_toggle.clone(),
         pr_list,
+        pr_loading,
+        pr_spinner,
         updating_pr_toggle: Rc::new(Cell::new(false)),
         launch_button,
         launch_popover,

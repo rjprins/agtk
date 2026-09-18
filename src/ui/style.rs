@@ -342,6 +342,13 @@ const TUI_CSS: &str = r#"
   color: @text;
   background: @hover;
 }
+.pr-loading {
+  padding: 8px 10px;
+  color: @muted;
+  background: alpha(@accent, 0.08);
+  border-radius: 6px;
+}
+.pr-loading spinner { color: @accent; }
 .pr-setting-row {
   padding: 3px 2px;
 }

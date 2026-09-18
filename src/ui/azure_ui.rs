@@ -78,9 +78,8 @@ impl Workspace {
             );
             return;
         };
-        if !self.pr_window.is_visible() {
-            self.render_pr_message("LOADING ACTIVE PULL REQUESTS...");
-        }
+        self.pr_loading.set_visible(true);
+        self.pr_spinner.start();
         let preferences = self.pr_preferences.borrow().clone();
         let attic = self.paths.attic_dir();
         let live_paths = self.live_worktree_paths();
@@ -141,6 +140,8 @@ impl Workspace {
             },
             move |workspace, result| match result {
                 Ok(loaded) => {
+                    workspace.pr_spinner.stop();
+                    workspace.pr_loading.set_visible(false);
                     *workspace.pr_preferences.borrow_mut() = loaded.preferences;
                     workspace.update_pr_indicator();
                     workspace.updating_pr_toggle.set(true);
@@ -175,6 +176,8 @@ impl Workspace {
                     }
                 }
                 Err(error) => {
+                    workspace.pr_spinner.stop();
+                    workspace.pr_loading.set_visible(false);
                     workspace.render_pr_message(&format!("ERROR  {error}"));
                     workspace.report_failure(
                         pending,
