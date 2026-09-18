@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -314,12 +314,10 @@ fn scan_jsonl(
 }
 
 fn parse_session(candidate: &LogCandidate) -> PersistResult<Option<ProviderSession>> {
-    let content = read_prefix(&candidate.path, LOG_HEAD_BYTES)?;
-    let entries = jsonl_entries(&content);
-    if entries.is_empty() || is_ancillary(candidate.provider, &entries) {
+    let Some(facts) = read_session_facts(candidate)? else {
         return Ok(None);
-    }
-    let provider_session_id = extract_session_id(&entries).unwrap_or_else(|| {
+    };
+    let provider_session_id = facts.session_id.unwrap_or_else(|| {
         candidate
             .path
             .file_stem()
@@ -330,8 +328,9 @@ fn parse_session(candidate: &LogCandidate) -> PersistResult<Option<ProviderSessi
     if validate_provider_session_id(&provider_session_id).is_err() {
         return Ok(None);
     }
-    let cwd = extract_cwd(&entries).map(PathBuf::from);
-    let name = first_user_text(&entries)
+    let cwd = facts.cwd.map(PathBuf::from);
+    let name = facts
+        .user_text
         .map(|text| first_line(&text, 160))
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| {
@@ -358,67 +357,105 @@ fn parse_session(candidate: &LogCandidate) -> PersistResult<Option<ProviderSessi
     }))
 }
 
-fn is_ancillary(provider: AgentProvider, entries: &[Map<String, Value>]) -> bool {
-    if provider == AgentProvider::Codex
-        && entries.first().is_some_and(|entry| {
-            entry.get("type").and_then(Value::as_str) == Some("session_meta")
-                && entry
-                    .get("payload")
-                    .and_then(Value::as_object)
-                    .and_then(|payload| payload.get("source"))
-                    .is_some_and(Value::is_object)
-        })
-    {
-        return true;
+#[derive(Default)]
+struct SessionFacts {
+    session_id: Option<String>,
+    cwd: Option<String>,
+    user_text: Option<String>,
+    has_conversation: bool,
+}
+
+impl SessionFacts {
+    fn is_complete(&self) -> bool {
+        self.session_id.is_some()
+            && self.cwd.is_some()
+            && self.user_text.is_some()
+            && self.has_conversation
     }
-    provider == AgentProvider::Claude
-        && entries.iter().all(|entry| {
-            matches!(
+}
+
+/// Reads the log head line by line and stops once every fact is known, which
+/// is usually within the first few lines. None for empty or ancillary logs.
+fn read_session_facts(candidate: &LogCandidate) -> PersistResult<Option<SessionFacts>> {
+    let reader = BufReader::new(File::open(&candidate.path)?.take(LOG_HEAD_BYTES));
+    let mut facts = SessionFacts::default();
+    let mut is_first = true;
+    for line in reader.split(b'\n') {
+        let line = line?;
+        let Ok(Value::Object(entry)) =
+            serde_json::from_str::<Value>(String::from_utf8_lossy(&line).trim())
+        else {
+            continue;
+        };
+        if is_first && is_ancillary_codex_head(candidate.provider, &entry) {
+            return Ok(None);
+        }
+        is_first = false;
+        // A Claude log of only snapshots and summaries holds no conversation.
+        facts.has_conversation |= candidate.provider != AgentProvider::Claude
+            || !matches!(
                 entry.get("type").and_then(Value::as_str),
                 Some("file-history-snapshot" | "summary")
-            )
+            );
+        if facts.session_id.is_none() {
+            facts.session_id = entry_session_id(&entry);
+        }
+        if facts.cwd.is_none() {
+            facts.cwd = entry_cwd(&entry);
+        }
+        if facts.user_text.is_none() {
+            facts.user_text = entry_user_text(&entry);
+        }
+        if facts.is_complete() {
+            break;
+        }
+    }
+    Ok((!is_first && facts.has_conversation).then_some(facts))
+}
+
+fn is_ancillary_codex_head(provider: AgentProvider, entry: &Map<String, Value>) -> bool {
+    provider == AgentProvider::Codex
+        && entry.get("type").and_then(Value::as_str) == Some("session_meta")
+        && entry
+            .get("payload")
+            .and_then(Value::as_object)
+            .and_then(|payload| payload.get("source"))
+            .is_some_and(Value::is_object)
+}
+
+fn entry_session_id(entry: &Map<String, Value>) -> Option<String> {
+    string_field(entry, &["sessionId", "session_id"])
+        .or_else(|| {
+            (entry.get("type").and_then(Value::as_str) == Some("session"))
+                .then(|| string_field(entry, &["id"]))
+                .flatten()
         })
-}
-
-fn extract_session_id(entries: &[Map<String, Value>]) -> Option<String> {
-    entries.iter().find_map(|entry| {
-        string_field(entry, &["sessionId", "session_id"])
-            .or_else(|| {
-                (entry.get("type").and_then(Value::as_str) == Some("session"))
-                    .then(|| string_field(entry, &["id"]))
-                    .flatten()
-            })
-            .or_else(|| {
-                entry
-                    .get("payload")
-                    .and_then(Value::as_object)
-                    .and_then(|payload| string_field(payload, &["id", "sessionId", "session_id"]))
-            })
-    })
-}
-
-fn extract_cwd(entries: &[Map<String, Value>]) -> Option<String> {
-    entries.iter().find_map(|entry| {
-        string_field(entry, &["cwd"]).or_else(|| {
+        .or_else(|| {
             entry
                 .get("payload")
                 .and_then(Value::as_object)
-                .and_then(|payload| string_field(payload, &["cwd", "working_directory"]))
+                .and_then(|payload| string_field(payload, &["id", "sessionId", "session_id"]))
         })
+}
+
+fn entry_cwd(entry: &Map<String, Value>) -> Option<String> {
+    string_field(entry, &["cwd"]).or_else(|| {
+        entry
+            .get("payload")
+            .and_then(Value::as_object)
+            .and_then(|payload| string_field(payload, &["cwd", "working_directory"]))
     })
 }
 
-fn first_user_text(entries: &[Map<String, Value>]) -> Option<String> {
-    entries.iter().find_map(|entry| {
-        let text = message(entry)
-            .and_then(|(role, text)| (role == ConversationRole::User).then_some(text))?;
-        let trimmed = text.trim();
-        if trimmed.len() < 10 || skip_user_text(trimmed) {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
-    })
+fn entry_user_text(entry: &Map<String, Value>) -> Option<String> {
+    let text =
+        message(entry).and_then(|(role, text)| (role == ConversationRole::User).then_some(text))?;
+    let trimmed = text.trim();
+    if trimmed.len() < 10 || skip_user_text(trimmed) {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
 }
 
 fn conversation_messages(content: &str) -> Vec<ConversationMessage> {
@@ -526,13 +563,6 @@ fn validate_provider_session_id(value: &str) -> PersistResult<()> {
         return Err("provider session ID is invalid".into());
     }
     Ok(())
-}
-
-fn read_prefix(path: &Path, limit: u64) -> PersistResult<String> {
-    let file = File::open(path)?;
-    let mut bytes = Vec::new();
-    file.take(limit).read_to_end(&mut bytes)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 struct TailContent {
