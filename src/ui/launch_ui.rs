@@ -161,7 +161,7 @@ impl Workspace {
         self.launch_project_custom.set(false);
         self.launch_project.set_text(root);
         self.launch_cwd.set_text(root);
-        self.launch_worktree.set_text("");
+        self.launch_worktree.set_text(root);
         self.launch_creating_worktree.set(false);
         self.launch_branch.set_text(&generated_branch_name());
         self.launch_base_branch.set_text("main");
@@ -366,7 +366,10 @@ impl Workspace {
                 project_workspace.launch_project.set_text(&root);
                 project_workspace.launch_project_custom.set(false);
                 project_workspace.launch_cwd.set_text(&root);
-                project_workspace.launch_worktree.set_text("");
+                // Selecting a different project also selects its main
+                // directory. This keeps the visible worktree control and the
+                // launch target in sync until the user picks another tree.
+                project_workspace.launch_worktree.set_text(&root);
                 project_workspace.launch_creating_worktree.set(false);
                 project_workspace
                     .launch_branch
@@ -470,6 +473,11 @@ impl Workspace {
         self.launch_project.connect_activate(move |_| {
             project_workspace.launch_project_custom.set(true);
             project_workspace.launch_creating_worktree.set(false);
+            let project_root = project_workspace.launch_project.text().trim().to_owned();
+            if !project_root.is_empty() {
+                project_workspace.launch_worktree.set_text(&project_root);
+                project_workspace.launch_cwd.set_text(&project_root);
+            }
             project_workspace.refresh_launch_project_choices();
             project_workspace.refresh_launch_worktree_choices();
             project_workspace.refresh_launch_base_branches();
@@ -498,7 +506,7 @@ impl Workspace {
                 .launch_project_custom
                 .set(false);
             project_completion_workspace.launch_cwd.set_text(&root);
-            project_completion_workspace.launch_worktree.set_text("");
+            project_completion_workspace.launch_worktree.set_text(&root);
             project_completion_workspace
                 .launch_creating_worktree
                 .set(false);

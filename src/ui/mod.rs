@@ -483,7 +483,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let launch_project = launch_entry("Project directory", "Search projects or type a path…");
     let launch_project_choices = gtk::StringList::new(&[]);
     let launch_project_dropdown = searchable_path_dropdown(&launch_project_choices);
-    launch_project_dropdown.set_visible(false);
+    // Keep the editable field for arbitrary paths and expose the known-project
+    // chooser alongside it, matching the original launch combobox behavior.
+    launch_project_dropdown.set_visible(true);
     launch_project.0.append(&launch_project_dropdown);
     let launch_project_completion =
         gtk::ListStore::new(&[String::static_type(), String::static_type()]);
@@ -497,7 +499,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let launch_worktree = launch_entry("Worktree", "Search worktrees…");
     let launch_worktree_choices = gtk::StringList::new(&[]);
     let launch_worktree_dropdown = searchable_path_dropdown(&launch_worktree_choices);
-    launch_worktree_dropdown.set_visible(false);
+    launch_worktree_dropdown.set_visible(true);
     launch_worktree.0.append(&launch_worktree_dropdown);
     let launch_worktree_completion =
         gtk::ListStore::new(&[String::static_type(), String::static_type()]);

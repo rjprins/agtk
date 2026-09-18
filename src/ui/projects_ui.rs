@@ -198,14 +198,25 @@ impl Workspace {
         row.set_activatable(false);
         row.add_css_class("tui-group-row");
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
-        let collapse = gtk::Button::builder()
-            .label(name)
-            .icon_name(if settings.is_collapsed {
-                "pan-end-symbolic"
-            } else {
-                "pan-down-symbolic"
-            })
-            .build();
+        // GtkButton's `icon_name` child replaces its label child. Build the
+        // compact project control explicitly so the chevron and project name
+        // remain visible together.
+        let collapse = gtk::Button::new();
+        let collapse_contents = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        collapse_contents.set_hexpand(true);
+        let collapse_icon = gtk::Image::from_icon_name(if settings.is_collapsed {
+            "pan-end-symbolic"
+        } else {
+            "pan-down-symbolic"
+        });
+        collapse_icon.set_pixel_size(14);
+        let collapse_label = gtk::Label::new(Some(name));
+        collapse_label.set_xalign(0.0);
+        collapse_label.set_hexpand(true);
+        collapse_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        collapse_contents.append(&collapse_icon);
+        collapse_contents.append(&collapse_label);
+        collapse.set_child(Some(&collapse_contents));
         collapse.add_css_class("tui-group-button");
         collapse.set_hexpand(true);
         collapse.set_halign(gtk::Align::Fill);
