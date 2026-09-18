@@ -100,15 +100,46 @@ fn provider_args_translate_saved_options_without_affecting_shell() {
     .collect();
     assert_eq!(
         provider_args(SessionKind::Codex, &flags),
-        [
-            "--ask-for-approval",
-            "never",
-            "--sandbox",
-            "workspace-write",
-            "--approve-for-me"
-        ]
+        ["--approve-for-me"]
     );
     assert!(provider_args(SessionKind::Shell, &flags).is_empty());
+}
+
+#[test]
+fn provider_args_codex_bypass_suppresses_manual_policies() {
+    let flags = [
+        ("--ask-for-approval".to_owned(), json!("never")),
+        ("--sandbox".to_owned(), json!("danger-full-access")),
+        (
+            "--dangerously-bypass-approvals-and-sandbox".to_owned(),
+            json!(true),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(
+        provider_args(SessionKind::Codex, &flags),
+        ["--dangerously-bypass-approvals-and-sandbox"]
+    );
+}
+
+#[test]
+fn provider_args_codex_prefers_bypass_when_both_automatic_modes_are_saved() {
+    let flags = [
+        ("--full-auto".to_owned(), json!(true)),
+        (
+            "--dangerously-bypass-approvals-and-sandbox".to_owned(),
+            json!(true),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(
+        provider_args(SessionKind::Codex, &flags),
+        ["--dangerously-bypass-approvals-and-sandbox"]
+    );
 }
 
 #[test]

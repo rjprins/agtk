@@ -140,26 +140,29 @@ pub fn provider_args(
             }
         }
         SessionKind::Codex => {
-            if let Some(value) = value("--ask-for-approval") {
-                // Codex versions before 0.154 accepted `untrusted` and
-                // `on-failure`. Keep old saved preferences launchable by
-                // mapping both values to the current interactive policy.
-                let value = match value {
-                    "untrusted" | "on-failure" => "on-request",
-                    value => value,
-                };
-                args.extend(["--ask-for-approval".to_owned(), value.to_owned()]);
-            }
-            if let Some(value) = value("--sandbox") {
-                args.extend(["--sandbox".to_owned(), value.to_owned()]);
-            }
-            if enabled("--full-auto") {
+            // Codex's automatic modes replace both manual approval and
+            // sandbox policy flags. Passing them together makes current
+            // Codex reject the launch before the TUI starts.
+            if enabled("--dangerously-bypass-approvals-and-sandbox") {
+                args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+            } else if enabled("--full-auto") {
                 // `--full-auto` was removed from Codex CLI. This is its
                 // supported replacement in current releases.
                 args.push("--approve-for-me".to_owned());
-            }
-            if enabled("--dangerously-bypass-approvals-and-sandbox") {
-                args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+            } else {
+                if let Some(value) = value("--ask-for-approval") {
+                    // Codex versions before 0.154 accepted `untrusted` and
+                    // `on-failure`. Keep old saved preferences launchable by
+                    // mapping both values to the current interactive policy.
+                    let value = match value {
+                        "untrusted" | "on-failure" => "on-request",
+                        value => value,
+                    };
+                    args.extend(["--ask-for-approval".to_owned(), value.to_owned()]);
+                }
+                if let Some(value) = value("--sandbox") {
+                    args.extend(["--sandbox".to_owned(), value.to_owned()]);
+                }
             }
         }
         SessionKind::Gemini => {

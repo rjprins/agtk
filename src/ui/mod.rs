@@ -430,8 +430,22 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let (launch_codex_approval, launch_codex_sandbox, launch_codex_full_auto, launch_codex_bypass) =
         codex_launch_options();
     let (launch_gemini_approval, launch_gemini_yolo) = gemini_launch_options();
+    // Keep the original agmux choices and default to its on-request policy.
+    launch_codex_approval.set_selected(2);
     launch_claude_danger.set_active(true);
     launch_codex_full_auto.set_active(true);
+    let bypass_for_full_auto = launch_codex_bypass.clone();
+    launch_codex_full_auto.connect_toggled(move |toggle| {
+        if toggle.is_active() {
+            bypass_for_full_auto.set_active(false);
+        }
+    });
+    let full_auto_for_bypass = launch_codex_full_auto.clone();
+    launch_codex_bypass.connect_toggled(move |toggle| {
+        if toggle.is_active() {
+            full_auto_for_bypass.set_active(false);
+        }
+    });
     launch_agent_options.add_named(
         &launch_option_page(
             "Permission mode",
@@ -448,7 +462,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             "Sandbox",
             &launch_codex_sandbox,
             &[
-                ("Full auto", &launch_codex_full_auto),
+                ("--full-auto", &launch_codex_full_auto),
                 ("Bypass approvals and sandbox", &launch_codex_bypass),
             ],
         ),
@@ -1541,9 +1555,9 @@ fn codex_launch_options() -> (
     gtk::CheckButton,
 ) {
     (
-        launch_dropdown(&["on-request", "never"]),
+        launch_dropdown(&["untrusted", "on-failure", "on-request", "never"]),
         launch_dropdown(&["read-only", "workspace-write", "danger-full-access"]),
-        gtk::CheckButton::with_label("Full auto (approve for me)"),
+        gtk::CheckButton::with_label("--full-auto"),
         gtk::CheckButton::with_label("--dangerously-bypass-approvals-and-sandbox"),
     )
 }
