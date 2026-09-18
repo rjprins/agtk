@@ -306,6 +306,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     git_surface.append(&branch_review_button);
     let git_popover = gtk::Popover::builder().child(&git_surface).build();
     git_popover.add_css_class("tui-popover");
+    add_popover_close_button(&git_surface, &git_popover);
     let git_button = gtk::MenuButton::builder()
         .icon_name("applications-development-symbolic")
         .popover(&git_popover)
@@ -315,9 +316,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     git_button.set_tooltip_text(Some("Open the selected worktree in Emacs"));
 
     let claude_model_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
-    claude_model_list.add_css_class("tui-surface");
-    let claude_model_popover = gtk::Popover::builder().child(&claude_model_list).build();
+    let claude_model_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    claude_model_surface.add_css_class("tui-surface");
+    claude_model_surface.append(&claude_model_list);
+    let claude_model_popover = gtk::Popover::builder().child(&claude_model_surface).build();
     claude_model_popover.add_css_class("tui-popover");
+    add_popover_close_button(&claude_model_surface, &claude_model_popover);
     let claude_model_button = gtk::MenuButton::builder()
         .icon_name("preferences-system-symbolic")
         .popover(&claude_model_popover)
@@ -365,6 +369,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let pr_popover = gtk::Popover::builder().child(&pr_surface).build();
     pr_popover.add_css_class("tui-popover");
     pr_popover.set_position(gtk::PositionType::Left);
+    add_popover_close_button(&pr_surface, &pr_popover);
     let pr_button = gtk::MenuButton::builder()
         .icon_name("git-merge-symbolic")
         .popover(&pr_popover)
@@ -555,6 +560,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_form.append(&launch_actions);
     let launch_popover = gtk::Popover::builder().child(&launch_form).build();
     launch_popover.add_css_class("tui-popover");
+    add_popover_close_button(&launch_form, &launch_popover);
     let launch_button = gtk::MenuButton::builder()
         .popover(&launch_popover)
         .sensitive(false)
@@ -602,6 +608,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     worktree_surface.append(&worktree_scroller);
     let worktree_popover = gtk::Popover::builder().child(&worktree_surface).build();
     worktree_popover.add_css_class("tui-popover");
+    add_popover_close_button(&worktree_surface, &worktree_popover);
     let worktree_button = gtk::MenuButton::builder()
         .icon_name("folder-open-symbolic")
         .popover(&worktree_popover)
@@ -666,6 +673,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     agent_surface.append(&agent_split);
     let agent_popover = gtk::Popover::builder().child(&agent_surface).build();
     agent_popover.add_css_class("tui-popover");
+    add_popover_close_button(&agent_surface, &agent_popover);
     let agent_button = gtk::MenuButton::builder()
         .icon_name("document-open-recent-symbolic")
         .popover(&agent_popover)
@@ -675,18 +683,21 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     agent_button.set_tooltip_text(Some("Preview and restore recent Codex and Claude sessions"));
 
     let history_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    history_list.add_css_class("tui-surface");
-    history_list.set_margin_top(6);
-    history_list.set_margin_bottom(6);
-    history_list.set_margin_start(6);
-    history_list.set_margin_end(6);
     let history_scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .min_content_width(360)
         .max_content_height(420)
         .child(&history_list)
         .build();
-    let history_popover = gtk::Popover::builder().child(&history_scroller).build();
+    let history_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    history_surface.add_css_class("tui-surface");
+    history_surface.set_margin_top(6);
+    history_surface.set_margin_bottom(6);
+    history_surface.set_margin_start(6);
+    history_surface.set_margin_end(6);
+    history_surface.append(&history_scroller);
+    let history_popover = gtk::Popover::builder().child(&history_surface).build();
+    add_popover_close_button(&history_surface, &history_popover);
     let history_button = gtk::MenuButton::builder()
         .icon_name("view-list-symbolic")
         .popover(&history_popover)
@@ -718,6 +729,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     search_surface.append(&search_next);
     let search_popover = gtk::Popover::builder().child(&search_surface).build();
     search_popover.add_css_class("tui-popover");
+    add_popover_close_button(&search_surface, &search_popover);
     let search_button = gtk::MenuButton::builder()
         .icon_name("edit-find-symbolic")
         .popover(&search_popover)
@@ -765,6 +777,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     theme_list.append(&apply_font);
     let theme_popover = gtk::Popover::builder().child(&theme_list).build();
     theme_popover.add_css_class("tui-popover");
+    add_popover_close_button(&theme_list, &theme_popover);
     let theme_button = gtk::MenuButton::builder()
         .popover(&theme_popover)
         .sensitive(false)
@@ -829,6 +842,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     shortcut_list.append(&claude_presets_row);
     let shortcut_popover = gtk::Popover::builder().child(&shortcut_list).build();
     shortcut_popover.add_css_class("tui-popover");
+    add_popover_close_button(&shortcut_list, &shortcut_popover);
     let shortcut_button = gtk::MenuButton::builder()
         .popover(&shortcut_popover)
         .sensitive(false)
@@ -1450,6 +1464,21 @@ fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
     entry.add_css_class("tui-setting-entry");
     row.append(&entry);
     (row, entry)
+}
+
+fn add_popover_close_button(surface: &gtk::Box, popover: &gtk::Popover) {
+    popover.set_autohide(true);
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    row.set_halign(gtk::Align::End);
+    let close = gtk::Button::builder()
+        .icon_name("window-close-symbolic")
+        .build();
+    close.add_css_class("tui-button");
+    close.set_tooltip_text(Some("Close"));
+    let popover = popover.clone();
+    close.connect_clicked(move |_| popover.popdown());
+    row.append(&close);
+    surface.append(&row);
 }
 
 fn launch_entry_with_hint(label: &str, placeholder: &str, hint: &str) -> (gtk::Box, gtk::Entry) {

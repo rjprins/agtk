@@ -147,29 +147,24 @@ impl Workspace {
             ControlCommand::UiShow(params) => {
                 let shown = match params.surface {
                     UiSurface::Launch => {
-                        self.launch_popover.set_autohide(false);
                         self.prepare_launch_panel();
                         self.launch_popover.popup();
                         true
                     }
                     UiSurface::Appearance => {
-                        self.theme_popover.set_autohide(false);
                         self.theme_popover.popup();
                         true
                     }
                     UiSurface::Shortcuts => {
-                        self.shortcut_popover.set_autohide(false);
                         self.shortcut_popover.popup();
                         true
                     }
                     UiSurface::History if self.history_button.is_sensitive() => {
-                        self.history_popover.set_autohide(false);
                         self.history_popover.popup();
                         true
                     }
                     UiSurface::History => false,
                     UiSurface::Search if self.search_button.is_sensitive() => {
-                        self.search_popover.set_autohide(false);
                         self.search_popover.popup();
                         self.search_entry.grab_focus();
                         true
@@ -177,7 +172,6 @@ impl Workspace {
                     UiSurface::Search => false,
                     UiSurface::Worktrees => {
                         if let Some(root) = self.preferred_project_root() {
-                            self.worktree_popover.set_autohide(false);
                             self.open_worktrees_for_project(&root);
                             true
                         } else {
@@ -185,14 +179,12 @@ impl Workspace {
                         }
                     }
                     UiSurface::Agents => {
-                        self.agent_popover.set_autohide(false);
                         self.agent_popover.popup();
                         true
                     }
                     UiSurface::PullRequests => {
                         if let Some(root) = self.preferred_project_root() {
                             self.pr_root.set_text(&root);
-                            self.pr_popover.set_autohide(false);
                             self.pr_button.popup();
                             true
                         } else {
@@ -200,7 +192,6 @@ impl Workspace {
                         }
                     }
                     UiSurface::ClaudeModels if self.claude_model_button.is_sensitive() => {
-                        self.claude_model_popover.set_autohide(false);
                         self.claude_model_button.popup();
                         true
                     }
