@@ -1,5 +1,28 @@
 use super::*;
 
+const FIXED_SHORTCUTS: [(&str, &str); 3] = [
+    ("copy", "<Control><Shift>c"),
+    ("paste", "<Control><Shift>v"),
+    ("search", "<Control><Shift>f"),
+];
+const SHORTCUT_MODIFIERS: gtk::gdk::ModifierType = gtk::gdk::ModifierType::SHIFT_MASK
+    .union(gtk::gdk::ModifierType::CONTROL_MASK)
+    .union(gtk::gdk::ModifierType::ALT_MASK)
+    .union(gtk::gdk::ModifierType::META_MASK)
+    .union(gtk::gdk::ModifierType::SUPER_MASK);
+const REQUIRED_MODIFIERS: gtk::gdk::ModifierType = gtk::gdk::ModifierType::CONTROL_MASK
+    .union(gtk::gdk::ModifierType::ALT_MASK)
+    .union(gtk::gdk::ModifierType::META_MASK)
+    .union(gtk::gdk::ModifierType::SUPER_MASK);
+
+/// Shows an accelerator the way people write it, such as Shift+Ctrl+Q.
+pub(super) fn accelerator_label(accelerator: &str) -> String {
+    gtk::accelerator_parse(accelerator).map_or_else(
+        || accelerator.to_owned(),
+        |(key, modifiers)| gtk::accelerator_get_label(key, modifiers).to_string(),
+    )
+}
+
 impl Workspace {
     pub(super) fn install_shortcut_actions(&self) {
         self.add_action("new-shell", true, |workspace| workspace.launch_shell());
@@ -55,13 +78,10 @@ impl Workspace {
             }
         });
 
-        self.application
-            .set_accels_for_action("win.copy", &["<Control><Shift>c"]);
-        self.application
-            .set_accels_for_action("win.paste", &["<Control><Shift>v"]);
-        self.application
-            .set_accels_for_action("win.search", &["<Control><Shift>f"]);
         self.apply_shortcuts();
+        let workspace = self.clone();
+        self.shortcut_popover
+            .connect_closed(move |_| workspace.apply_shortcuts());
     }
 
     pub(super) fn load_shortcuts(&self, preferences: ShortcutPreferences) {
@@ -69,8 +89,63 @@ impl Workspace {
         self.apply_shortcuts();
         let preferences = self.shortcuts.borrow();
         for (action, entry) in self.shortcut_entries.iter() {
-            entry.set_text(preferences.binding(*action));
+            entry.set_text(&accelerator_label(preferences.binding(*action)));
         }
+    }
+
+    pub(super) fn install_terminal_shortcuts(&self, terminal: &vte::Terminal) {
+        let controller = gtk::EventControllerKey::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let workspace = self.clone();
+        controller.connect_key_pressed(move |controller, _, _, _| {
+            let Some(event) = controller
+                .current_event()
+                .and_then(|event| event.downcast::<gtk::gdk::KeyEvent>().ok())
+            else {
+                return glib::Propagation::Proceed;
+            };
+            let Some(action) = workspace.shortcut_action_for_event(&event) else {
+                return glib::Propagation::Proceed;
+            };
+            let action = format!("win.{action}");
+            if gtk::prelude::WidgetExt::activate_action(&workspace.window, &action, None).is_ok() {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        terminal.add_controller(controller);
+    }
+
+    /// Records a chord pressed in a shortcut field and saves it right away.
+    pub(super) fn install_shortcut_capture(&self, action: ShortcutAction, entry: &gtk::Entry) {
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let workspace = self.clone();
+        keys.connect_key_pressed(move |_, key, _, state| {
+            let modifiers = state & SHORTCUT_MODIFIERS;
+            if !modifiers.intersects(REQUIRED_MODIFIERS) || !gtk::accelerator_valid(key, modifiers)
+            {
+                return glib::Propagation::Proceed;
+            }
+            workspace.set_shortcut(
+                ShortcutSetParams {
+                    action,
+                    accelerator: Some(gtk::accelerator_name(key, modifiers).to_string()),
+                    reset: false,
+                },
+                None,
+            );
+            glib::Propagation::Stop
+        });
+        entry.add_controller(keys);
+        // While recording, a chord that is already bound must not run its action.
+        let focus = gtk::EventControllerFocus::new();
+        let workspace = self.clone();
+        focus.connect_enter(move |_| workspace.suspend_shortcuts());
+        let workspace = self.clone();
+        focus.connect_leave(move |_| workspace.apply_shortcuts());
+        entry.add_controller(focus);
     }
 
     pub(super) fn set_shortcut(&self, update: ShortcutSetParams, pending: Option<PendingRequest>) {
@@ -144,7 +219,6 @@ impl Workspace {
             move |workspace, result| match result {
                 Ok(()) => {
                     workspace.load_shortcuts(preferences);
-                    workspace.shortcut_popover.popdown();
                     if let Some(pending) = pending {
                         let id = pending.request.id.clone();
                         match serde_json::to_value(workspace.shortcut_summaries()) {
@@ -202,6 +276,41 @@ impl Workspace {
                 &[preferences.binding(action)],
             );
         }
+        for (action, accelerator) in FIXED_SHORTCUTS {
+            self.application
+                .set_accels_for_action(&format!("win.{action}"), &[accelerator]);
+        }
+    }
+
+    fn suspend_shortcuts(&self) {
+        let actions = ShortcutAction::ALL
+            .into_iter()
+            .map(ShortcutAction::as_str)
+            .chain(FIXED_SHORTCUTS.map(|(action, _)| action));
+        for action in actions {
+            self.application
+                .set_accels_for_action(&format!("win.{action}"), &[]);
+        }
+    }
+
+    /// GDK's matching treats Shift+] and } alike, which a raw key compare would not.
+    fn shortcut_action_for_event(&self, event: &gtk::gdk::KeyEvent) -> Option<&'static str> {
+        let matches = |accelerator: &str| {
+            gtk::accelerator_parse(accelerator).is_some_and(|(key, modifiers)| {
+                event.matches(key, modifiers) == gtk::gdk::KeyMatch::Exact
+            })
+        };
+        let preferences = self.shortcuts.borrow();
+        ShortcutAction::ALL
+            .into_iter()
+            .find(|action| matches(preferences.binding(*action)))
+            .map(ShortcutAction::as_str)
+            .or_else(|| {
+                FIXED_SHORTCUTS
+                    .into_iter()
+                    .find(|(_, accelerator)| matches(accelerator))
+                    .map(|(action, _)| action)
+            })
     }
 
     fn selected_terminal(&self) -> Option<vte::Terminal> {

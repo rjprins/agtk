@@ -756,6 +756,10 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
 #[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
 fn shortcut_overrides_are_validated_and_survive_ui_restart() {
     let mut app = App::new();
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"shortcuts"}))["shown"],
+        true
+    );
     let result = app.request(
         "shortcut.set",
         json!({"action":"toggle-sidebar","accelerator":"<Alt>b"}),

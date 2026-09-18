@@ -801,6 +801,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     shortcut_heading.set_xalign(0.0);
     shortcut_heading.add_css_class("tui-sidebar-heading");
     shortcut_list.append(&shortcut_heading);
+    let shortcut_hint = gtk::Label::new(Some(
+        "Click a field, then press a shortcut containing Ctrl, Alt, or Meta. It is saved right away.",
+    ));
+    shortcut_hint.set_xalign(0.0);
+    shortcut_hint.add_css_class("tui-context-caption");
+    shortcut_list.append(&shortcut_hint);
     let mut shortcut_entries = Vec::new();
     let mut shortcut_controls = Vec::new();
     for action in ShortcutAction::ALL {
@@ -811,22 +817,25 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         label.set_width_chars(24);
         row.append(&label);
         let entry = gtk::Entry::builder()
-            .text(action.default_accelerator())
+            .text(shortcuts_ui::accelerator_label(
+                action.default_accelerator(),
+            ))
+            .editable(false)
             .width_chars(25)
             .build();
+        entry.set_tooltip_text(Some(&format!(
+            "Click, then press the new shortcut for {}",
+            action.label()
+        )));
         entry.add_css_class("tui-setting-entry");
         row.append(&entry);
-        let set = gtk::Button::with_label("Set");
-        set.add_css_class("tui-button");
-        set.set_tooltip_text(Some(&format!("Set shortcut for {}", action.label())));
-        row.append(&set);
         let reset = gtk::Button::with_label("Reset");
         reset.add_css_class("tui-button");
         reset.set_tooltip_text(Some(&format!("Reset shortcut for {}", action.label())));
         row.append(&reset);
         shortcut_list.append(&row);
         shortcut_entries.push((action, entry.clone()));
-        shortcut_controls.push((action, entry, set, reset));
+        shortcut_controls.push((action, entry, reset));
     }
     let claude_presets_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     claude_presets_row.add_css_class("tui-setting-row");
@@ -1236,19 +1245,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let system_style_workspace = workspace.clone();
     style_manager.connect_dark_notify(move |_| system_style_workspace.apply_appearance());
 
-    for (action, entry, set, reset) in shortcut_controls {
-        let shortcut_workspace = workspace.clone();
-        let shortcut_entry = entry.clone();
-        set.connect_clicked(move |_| {
-            shortcut_workspace.set_shortcut(
-                ShortcutSetParams {
-                    action,
-                    accelerator: Some(shortcut_entry.text().to_string()),
-                    reset: false,
-                },
-                None,
-            );
-        });
+    for (action, entry, reset) in shortcut_controls {
+        workspace.install_shortcut_capture(action, &entry);
         let shortcut_workspace = workspace.clone();
         reset.connect_clicked(move |_| {
             shortcut_workspace.set_shortcut(

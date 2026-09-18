@@ -558,6 +558,7 @@ impl Workspace {
         if runs_claude(&record) {
             route_wheel_to_fullscreen_app(&terminal);
         }
+        self.install_terminal_shortcuts(&terminal);
         let pty = if let Some(attachment) = attachment {
             terminal.feed(&attachment.replay);
             let pty = vte::Pty::foreign_sync(attachment.pty, None::<&gio::Cancellable>)?;
