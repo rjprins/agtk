@@ -57,7 +57,7 @@ impl Workspace {
             button.set_tooltip_text(Some("Scroll the terminal to this prompt"));
 
             let terminal = session.terminal.clone();
-            let popover = self.history_popover.clone();
+            let window = self.history_window.clone();
             let overlay = self.overlay.clone();
             let input = input.clone();
             button.connect_clicked(move |_| {
@@ -71,7 +71,7 @@ impl Workspace {
                 if !terminal.search_find_previous() {
                     overlay.add_toast(adw::Toast::new("Prompt is no longer in scrollback"));
                 }
-                popover.popdown();
+                window.hide();
                 terminal.grab_focus();
             });
             self.history_list.append(&button);

@@ -117,7 +117,7 @@ impl Workspace {
             let base = optional_text(&self.launch_base_branch);
             let purpose = name.clone().unwrap_or_else(|| branch.clone());
             let manager = WorktreeManager::new(self.paths.attic_dir());
-            self.launch_popover.popdown();
+            self.launch_window.hide();
             self.run_io(
                 move || manager.create(&root, &branch, base.as_deref(), &purpose),
                 move |workspace, result| match result {
@@ -140,7 +140,7 @@ impl Workspace {
                 },
             );
         } else {
-            self.launch_popover.popdown();
+            self.launch_window.hide();
             self.launch_controlled(
                 CreateSessionParams {
                     kind,
@@ -173,7 +173,7 @@ impl Workspace {
         }
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
-        self.launch_popover.popup();
+        self.launch_window.present();
     }
 
     pub(super) fn open_launch_for_worktree(&self, project_root: &Path, worktree: &Path) {
@@ -193,8 +193,8 @@ impl Workspace {
         }
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
-        self.worktree_popover.popdown();
-        self.launch_popover.popup();
+        self.worktree_window.hide();
+        self.launch_window.present();
     }
 
     pub(super) fn refresh_launch_project_choices(&self) {

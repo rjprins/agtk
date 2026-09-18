@@ -87,15 +87,15 @@ impl Workspace {
         });
         self.add_action("search", true, |workspace| {
             if workspace.selected_session_id().is_some() {
-                workspace.search_popover.popup();
+                workspace.search_window.present();
                 workspace.search_entry.grab_focus();
             }
         });
 
         self.apply_shortcuts();
         let workspace = self.clone();
-        self.shortcut_popover
-            .connect_closed(move |_| workspace.apply_shortcuts());
+        self.shortcut_window
+            .connect_hide(move |_| workspace.apply_shortcuts());
     }
 
     pub(super) fn load_shortcuts(&self, preferences: ShortcutPreferences) {

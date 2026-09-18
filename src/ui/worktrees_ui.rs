@@ -32,10 +32,10 @@ impl Workspace {
 
     pub(super) fn open_worktrees_for_project(&self, root: &str) {
         self.worktree_root.set_text(root);
-        if self.worktree_popover.is_mapped() {
+        if self.worktree_window.is_visible() {
             self.refresh_worktree_panel();
         } else {
-            self.worktree_popover.popup();
+            self.worktree_window.present();
         }
     }
 

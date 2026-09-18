@@ -110,7 +110,7 @@ impl Workspace {
             })
             .collect();
 
-        let launch_children = if self.launch_popover.is_mapped() {
+        let launch_children = if self.launch_window.is_visible() {
             vec![
                 UiNode {
                     id: "launch-project-input".to_owned(),
@@ -281,7 +281,7 @@ impl Workspace {
                                         label: Some("Application shortcuts".to_owned()),
                                         is_visible: self.shortcut_button.is_visible(),
                                         is_enabled: self.shortcut_button.is_sensitive(),
-                                        is_selected: self.shortcut_popover.is_mapped(),
+                                        is_selected: self.shortcut_window.is_visible(),
                                         bounds: widget_bounds(&self.shortcut_button, &self.window),
                                         children: Vec::new(),
                                     },
@@ -291,7 +291,7 @@ impl Workspace {
                                         label: Some("Terminal appearance".to_owned()),
                                         is_visible: self.theme_button.is_visible(),
                                         is_enabled: self.theme_button.is_sensitive(),
-                                        is_selected: self.theme_popover.is_mapped(),
+                                        is_selected: self.theme_window.is_visible(),
                                         bounds: widget_bounds(&self.theme_button, &self.window),
                                         children: Vec::new(),
                                     },
@@ -301,7 +301,7 @@ impl Workspace {
                                         label: Some("New".to_owned()),
                                         is_visible: self.launch_button.is_visible(),
                                         is_enabled: self.launch_button.is_sensitive(),
-                                        is_selected: self.launch_popover.is_mapped(),
+                                        is_selected: self.launch_window.is_visible(),
                                         bounds: widget_bounds(&self.launch_button, &self.window),
                                         children: launch_children,
                                     },
@@ -339,7 +339,7 @@ impl Workspace {
                                         label: Some("Worktrees".to_owned()),
                                         is_visible: self.worktree_button.is_visible(),
                                         is_enabled: self.worktree_button.is_sensitive(),
-                                        is_selected: self.worktree_popover.is_mapped(),
+                                        is_selected: self.worktree_window.is_visible(),
                                         bounds: widget_bounds(&self.worktree_button, &self.window),
                                         children: Vec::new(),
                                     },
@@ -349,7 +349,7 @@ impl Workspace {
                                         label: Some("Recent agent sessions".to_owned()),
                                         is_visible: self.agent_button.is_visible(),
                                         is_enabled: self.agent_button.is_sensitive(),
-                                        is_selected: self.agent_popover.is_mapped(),
+                                        is_selected: self.agent_window.is_visible(),
                                         bounds: widget_bounds(&self.agent_button, &self.window),
                                         children: Vec::new(),
                                     },
@@ -369,7 +369,7 @@ impl Workspace {
                                         label: Some("Claude model presets".to_owned()),
                                         is_visible: self.claude_model_button.is_visible(),
                                         is_enabled: self.claude_model_button.is_sensitive(),
-                                        is_selected: self.claude_model_popover.is_mapped(),
+                                        is_selected: self.claude_model_window.is_visible(),
                                         bounds: widget_bounds(
                                             &self.claude_model_button,
                                             &self.window,
@@ -382,7 +382,7 @@ impl Workspace {
                                         label: Some("Search terminal".to_owned()),
                                         is_visible: self.search_button.is_visible(),
                                         is_enabled: self.search_button.is_sensitive(),
-                                        is_selected: self.search_popover.is_mapped(),
+                                        is_selected: self.search_window.is_visible(),
                                         bounds: widget_bounds(&self.search_button, &self.window),
                                         children: Vec::new(),
                                     },
@@ -461,7 +461,7 @@ impl Workspace {
                                                 .map(|label| label.to_string()),
                                             is_visible: self.history_button.is_visible(),
                                             is_enabled: self.history_button.is_sensitive(),
-                                            is_selected: self.history_popover.is_mapped(),
+                                            is_selected: self.history_window.is_visible(),
                                             bounds: widget_bounds(
                                                 &self.history_button,
                                                 &self.window,

@@ -11,8 +11,8 @@ use crate::providers::{
 impl Workspace {
     pub(super) fn open_agent_for_project(&self, root: &str) {
         self.agent_restore_project.set_text(root);
-        if !self.agent_popover.is_mapped() {
-            self.agent_popover.popup();
+        if !self.agent_window.is_visible() {
+            self.agent_window.present();
         } else {
             self.refresh_agent_panel();
         }
@@ -49,7 +49,7 @@ impl Workspace {
             name: None,
         };
         let plan = session.restore_plan(target);
-        self.agent_popover.popdown();
+        self.agent_window.hide();
         self.launch_controlled_with_conversation(plan.params, Some(plan.conversation_id), None);
     }
 

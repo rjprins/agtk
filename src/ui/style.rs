@@ -313,8 +313,7 @@ const TUI_CSS: &str = r#"
   font-size: @font-size;
 }
 
-.pr-dialog {
-  min-width: 1040px;
+.modal-surface, .pr-dialog, .agent-dialog {
   color: @text;
   background: @panel;
   border: 1px solid @line;
@@ -322,13 +321,20 @@ const TUI_CSS: &str = r#"
   font-family: sans-serif;
   font-size: @font-size;
 }
-.pr-heading {
+.modal-heading, .pr-heading, .agent-heading {
   padding: 4px 2px 10px 2px;
   color: @text;
   font-size: 20px;
   font-weight: bold;
 }
-.pr-icon-button {
+.modal-surface .tui-sidebar-heading {
+  padding: 4px 2px 10px 2px;
+  color: @text;
+  font-family: sans-serif;
+  font-size: 20px;
+  font-weight: bold;
+}
+.modal-icon-button, .pr-icon-button, .agent-icon-button {
   min-width: 32px;
   min-height: 32px;
   padding: 5px;
@@ -338,9 +344,20 @@ const TUI_CSS: &str = r#"
   border-radius: 6px;
   box-shadow: none;
 }
-.pr-icon-button:hover {
+.modal-icon-button:hover, .pr-icon-button:hover, .agent-icon-button:hover {
   color: @text;
   background: @hover;
+}
+.modal-scroller, .pr-list-scroller, .agent-list-scroller, .agent-preview-scroller {
+  border: 1px solid @line;
+  border-radius: 8px;
+  background: @background;
+}
+.agent-dialog { min-width: 1140px; }
+.agent-restore-button {
+  min-height: 34px;
+  padding: 5px 10px;
+  border-radius: 6px;
 }
 .pr-loading {
   padding: 8px 10px;
@@ -356,11 +373,6 @@ const TUI_CSS: &str = r#"
   min-height: 34px;
   padding: 4px 9px;
   border-radius: 6px;
-}
-.pr-list-scroller {
-  border: 1px solid @line;
-  border-radius: 8px;
-  background: @background;
 }
 .pr-row {
   padding: 12px 14px;

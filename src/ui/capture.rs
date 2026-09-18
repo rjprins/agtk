@@ -10,7 +10,7 @@ use crate::control::{CaptureResult, ControlResponse, ErrorCode, PendingRequest};
 use super::Workspace;
 
 pub(super) fn capture_controlled(workspace: Workspace, pending: PendingRequest) {
-    // Let presentation and popover mapping reach the next frame before taking a
+    // Let modal presentation reach the next frame before taking a
     // widget-only snapshot. This remains asynchronous, so GTK can render it.
     schedule_capture(workspace, pending, 0);
 }
@@ -86,20 +86,21 @@ fn active_surface(workspace: &Workspace) -> gtk::Widget {
             .child()
             .expect("visible PR window has capture content");
     }
-    for popover in [
-        &workspace.launch_popover,
-        &workspace.shortcut_popover,
-        &workspace.theme_popover,
-        &workspace.history_popover,
-        &workspace.search_popover,
-        &workspace.worktree_popover,
-        &workspace.agent_popover,
-        &workspace.claude_model_popover,
+    for window in [
+        &workspace.git_window,
+        &workspace.launch_window,
+        &workspace.shortcut_window,
+        &workspace.theme_window,
+        &workspace.history_window,
+        &workspace.search_window,
+        &workspace.worktree_window,
+        &workspace.agent_window,
+        &workspace.claude_model_window,
     ] {
-        if popover.is_mapped() {
-            return popover
+        if window.is_visible() {
+            return window
                 .child()
-                .expect("visible agmux popover has capture content");
+                .expect("visible agmux modal window has capture content");
         }
     }
     workspace.overlay.clone().upcast()

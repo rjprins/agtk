@@ -182,15 +182,15 @@ impl Workspace {
             self.show_error("No Claude model presets are configured");
             return;
         }
-        let was_mapped = self.claude_model_popover.is_mapped();
-        let index = if was_mapped {
+        let was_visible = self.claude_model_window.is_visible();
+        let index = if was_visible {
             (self.selected_claude_preset.get() + 1).rem_euclid(count as i32)
         } else {
-            self.claude_model_button.popup();
+            self.claude_model_window.present();
             0
         };
         self.selected_claude_preset.set(index);
-        if was_mapped {
+        if was_visible {
             self.focus_selected_claude_preset();
         } else {
             let workspace = self.clone();
@@ -209,7 +209,7 @@ impl Workspace {
         self.claude_model_button
             .set_sensitive(selected_is_claude && !self.claude_presets.borrow().presets.is_empty());
         if !selected_is_claude {
-            self.claude_model_popover.popdown();
+            self.claude_model_window.hide();
         }
     }
 
@@ -236,7 +236,7 @@ impl Workspace {
                 let Some(session_id) = workspace.selected_session_id() else {
                     return;
                 };
-                workspace.claude_model_popover.popdown();
+                workspace.claude_model_window.hide();
                 workspace.apply_claude_preset(
                     ClaudePresetApplyParams {
                         session_id,
@@ -250,7 +250,7 @@ impl Workspace {
     }
 
     fn focus_selected_claude_preset(&self) {
-        if !self.claude_model_popover.is_mapped() {
+        if !self.claude_model_window.is_visible() {
             return;
         }
         let index = self.selected_claude_preset.get().max(0) as usize;

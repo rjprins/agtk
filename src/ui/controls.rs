@@ -148,24 +148,24 @@ impl Workspace {
                 let shown = match params.surface {
                     UiSurface::Launch => {
                         self.prepare_launch_panel();
-                        self.launch_popover.popup();
+                        self.launch_window.present();
                         true
                     }
                     UiSurface::Appearance => {
-                        self.theme_popover.popup();
+                        self.theme_window.present();
                         true
                     }
                     UiSurface::Shortcuts => {
-                        self.shortcut_popover.popup();
+                        self.shortcut_window.present();
                         true
                     }
                     UiSurface::History if self.history_button.is_sensitive() => {
-                        self.history_popover.popup();
+                        self.history_window.present();
                         true
                     }
                     UiSurface::History => false,
                     UiSurface::Search if self.search_button.is_sensitive() => {
-                        self.search_popover.popup();
+                        self.search_window.present();
                         self.search_entry.grab_focus();
                         true
                     }
@@ -179,7 +179,7 @@ impl Workspace {
                         }
                     }
                     UiSurface::Agents => {
-                        self.agent_popover.popup();
+                        self.agent_window.present();
                         true
                     }
                     UiSurface::PullRequests => {
@@ -192,7 +192,7 @@ impl Workspace {
                         }
                     }
                     UiSurface::ClaudeModels if self.claude_model_button.is_sensitive() => {
-                        self.claude_model_button.popup();
+                        self.claude_model_window.present();
                         true
                     }
                     UiSurface::ClaudeModels => false,

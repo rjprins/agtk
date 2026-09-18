@@ -76,7 +76,7 @@ impl Workspace {
             move |workspace, result| match result {
                 Ok(()) => {
                     workspace.load_appearance(preferences);
-                    workspace.theme_popover.popdown();
+                    workspace.theme_window.hide();
                     if let Some(pending) = pending {
                         let id = pending.request.id.clone();
                         match serde_json::to_value(workspace.appearance_summary()) {
