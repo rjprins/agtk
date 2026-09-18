@@ -120,7 +120,10 @@ impl Workspace {
                     is_enabled: self.launch_project.is_sensitive(),
                     is_selected: self.launch_project.has_focus(),
                     bounds: widget_bounds(&self.launch_project, &self.window),
-                    children: Vec::new(),
+                    children: completion_nodes(
+                        "launch-project",
+                        &self.launch_project_completion_items.borrow(),
+                    ),
                 },
                 UiNode {
                     id: "launch-worktree-input".to_owned(),
@@ -130,7 +133,10 @@ impl Workspace {
                     is_enabled: self.launch_worktree.is_sensitive(),
                     is_selected: self.launch_worktree.has_focus(),
                     bounds: widget_bounds(&self.launch_worktree, &self.window),
-                    children: Vec::new(),
+                    children: completion_nodes(
+                        "launch-worktree",
+                        &self.launch_worktree_completion_items.borrow(),
+                    ),
                 },
                 UiNode {
                     id: "launch-agent".to_owned(),
@@ -472,4 +478,22 @@ impl Workspace {
             is_truncated,
         }
     }
+}
+
+/// Suggestions only render while typing, so expose them for inspection.
+fn completion_nodes(prefix: &str, items: &[(String, String)]) -> Vec<UiNode> {
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, (label, _))| UiNode {
+            id: format!("{prefix}-option-{index}"),
+            role: "option".to_owned(),
+            label: Some(label.clone()),
+            is_visible: false,
+            is_enabled: true,
+            is_selected: false,
+            bounds: Bounds::default(),
+            children: Vec::new(),
+        })
+        .collect()
 }

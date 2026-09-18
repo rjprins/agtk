@@ -376,19 +376,18 @@ fn launch_surface_populates_project_and_git_worktree_choices() {
             .find(|node| node["id"] == "launch")
             .unwrap()
             .clone();
-        let labels = launch["children"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|node| node["label"].as_str())
-            .collect::<Vec<_>>();
-        if labels
-            .iter()
-            .any(|label| label.starts_with("Known project directories (1)"))
-            && labels
+        let options = |input: &str| {
+            launch["children"]
+                .as_array()
+                .unwrap()
                 .iter()
-                .any(|label| label.starts_with("Known Git worktrees (2)"))
-        {
+                .find(|node| node["id"] == input)
+                .unwrap()["children"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+        if options("launch-project-input") == 1 && options("launch-worktree-input") == 2 {
             app.request("session.close", json!({"sessionId":id}));
             return;
         }
@@ -510,7 +509,8 @@ fn claude_model_presets_are_exact_provider_only_and_durable() {
         }),
     );
     let id = session["id"].as_str().unwrap().to_owned();
-    app.wait_text(&id, "__RESTORE_ARGS___");
+    // A fresh Claude session only gets the agmux hook settings.
+    app.wait_text(&id, "__RESTORE_ARGS_--settings_");
 
     let inspection = app.request("ui.inspect", json!({}));
     let claude_model = inspection["root"]["children"][0]["children"][3]["children"]
@@ -1029,7 +1029,7 @@ fn recent_agent_surface_uses_isolated_logs_and_readiness_survives_restart() {
         }),
     );
     let restored_id = restored["id"].as_str().unwrap();
-    assert_eq!(restored["state"], "busy");
+    assert_eq!(restored["state"], "idle");
     app.wait_text(restored_id, "__RESTORE_ARGS_resume_codex-native-1__");
     assert!(
         app.request("agent.list", json!({"limit":20,"maxAgeDays":30}))
@@ -1050,7 +1050,21 @@ fn recent_agent_surface_uses_isolated_logs_and_readiness_survives_restart() {
         }),
     );
     let id = session["id"].as_str().unwrap();
-    assert_eq!(session["state"], "busy");
+    assert_eq!(session["state"], "idle");
+    // A turn that finishes in front of the user counts as viewed, so look elsewhere.
+    let other = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c","exec sleep 30"],
+            "cwd":project,
+            "name":"elsewhere"
+        }),
+    );
+    let other_id = other["id"].as_str().unwrap();
+    let busy = app.request("session.set_state", json!({"sessionId":id,"state":"busy"}));
+    assert_eq!(busy["state"], "busy");
     let ready = app.request("session.set_state", json!({"sessionId":id,"state":"ready"}));
     assert_eq!(ready["state"], "ready");
     assert_eq!(
@@ -1060,6 +1074,13 @@ fn recent_agent_surface_uses_isolated_logs_and_readiness_survives_restart() {
     app.stop();
     app.start();
     let state = app.request("app.get_state", json!({}));
-    assert_eq!(state["sessions"][0]["state"], "ready");
+    let probe = state["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .unwrap();
+    assert_eq!(probe["state"], "ready");
+    app.request("session.close", json!({"sessionId":other_id}));
     app.request("session.close", json!({"sessionId":id}));
 }
