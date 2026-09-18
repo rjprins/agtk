@@ -754,6 +754,40 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
 
 #[test]
 #[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn renaming_an_agent_session_renames_it_in_the_agent_once_idle() {
+    let app = App::new();
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"claude",
+            "cwd":app.directory.path(),
+            "name":"before rename"
+        }),
+    );
+    let id = session["id"].as_str().unwrap().to_owned();
+    app.wait_text(&id, "__RESTORE_ARGS_");
+    app.request(
+        "session.send_input",
+        json!({"sessionId":id,"text":"start a turn","appendEnter":true}),
+    );
+    app.wait_text(&id, "__INPUT_start a turn__");
+
+    let renamed = app.request("session.rename", json!({"sessionId":id,"name":"Planner"}));
+    assert_eq!(renamed["state"], "busy");
+    app.request(
+        "session.send_input",
+        json!({"sessionId":id,"text":"still busy","appendEnter":true}),
+    );
+    let text = app.wait_text(&id, "__INPUT_still busy__");
+    assert!(!text.contains("/rename"), "rename reached a busy agent");
+
+    app.request("session.set_state", json!({"sessionId":id,"state":"ready"}));
+    app.wait_text(&id, "__INPUT_/rename Planner__");
+    app.request("session.close", json!({"sessionId":id}));
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
 fn shortcut_overrides_are_validated_and_survive_ui_restart() {
     let mut app = App::new();
     assert_eq!(

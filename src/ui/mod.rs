@@ -194,6 +194,8 @@ struct SessionView {
     /// Last state an agent hook reported; None until the agent sends one.
     hook_signal: Option<crate::agent_status::Signal>,
     tracker: crate::agent_status::ScreenTracker,
+    /// A sidebar rename still to be typed into the agent as `/rename`.
+    pending_agent_name: Option<String>,
     _pty: Option<vte::Pty>,
     control: Option<UnixStream>,
 }

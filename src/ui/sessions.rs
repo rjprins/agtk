@@ -55,7 +55,14 @@ impl Workspace {
                     if let Some(session) = workspace.sessions.borrow_mut().get_mut(&updated.id) {
                         session.record.name = updated.name.clone();
                         session.label.set_text(&updated.name);
+                        if matches!(
+                            session.record.kind,
+                            SessionKind::Claude | SessionKind::Codex
+                        ) {
+                            session.pending_agent_name = Some(updated.name.clone());
+                        }
                     }
+                    workspace.send_pending_agent_name(&updated.id);
                     if let Some(pending) = pending {
                         match workspace.session_summary(&updated.id).and_then(|summary| {
                             serde_json::to_value(summary).map_err(|error| error.to_string())
@@ -80,6 +87,31 @@ impl Workspace {
             },
         );
         true
+    }
+
+    /// Waits for a finished turn so `/rename` never lands in a running turn or a prompt.
+    pub(super) fn send_pending_agent_name(&self, id: &str) {
+        let pending = {
+            let mut sessions = self.sessions.borrow_mut();
+            let Some(session) = sessions.get_mut(id) else {
+                return;
+            };
+            if !matches!(
+                session.record.state,
+                SessionState::Ready | SessionState::Idle
+            ) {
+                return;
+            }
+            session
+                .pending_agent_name
+                .take()
+                .map(|name| (name, session.terminal.clone()))
+        };
+        // Released first: feeding the terminal re-enters handlers that borrow the sessions.
+        if let Some((name, terminal)) = pending {
+            let name = name.replace(char::is_control, " ");
+            terminal.feed_child(format!("/rename {name}\r").as_bytes());
+        }
     }
 
     pub(super) fn discover_sessions(&self) {
@@ -744,6 +776,7 @@ impl Workspace {
                 history: Vec::new(),
                 hook_signal: None,
                 tracker: ScreenTracker::new(Instant::now()),
+                pending_agent_name: None,
                 _pty: pty,
                 control,
             },

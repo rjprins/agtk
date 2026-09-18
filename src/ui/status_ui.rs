@@ -185,6 +185,7 @@ impl Workspace {
         };
         self.apply_session_state(id);
         self.persist_record(record);
+        self.send_pending_agent_name(id);
     }
 
     pub(super) fn apply_session_state(&self, id: &str) {
