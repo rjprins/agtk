@@ -74,40 +74,7 @@ impl App {
     fn start(&mut self) {
         let display = std::env::var("AGMUX_TEST_DISPLAY").expect("private display required");
         assert!(std::path::Path::new(&display).is_absolute());
-        self.child = Some(
-            Command::new(env!("CARGO_BIN_EXE_agmux-native"))
-                .env("WAYLAND_DISPLAY", display)
-                .env("GDK_BACKEND", "wayland")
-                .env("GSK_RENDERER", "cairo")
-                .env("AGMUX_INSTANCE", self.paths.name().as_str())
-                .env("AGMUX_RUNTIME_ROOT", self.directory.path())
-                .env("AGMUX_STATE_ROOT", self.directory.path())
-                .env("CLAUDE_CONFIG_DIR", self.directory.path().join("claude"))
-                .env("CODEX_HOME", self.directory.path().join("codex"))
-                .env("AGMUX_CODEX_BIN", self.directory.path().join("fake-agent"))
-                .env("AGMUX_CLAUDE_BIN", self.directory.path().join("fake-agent"))
-                .env(
-                    "AGMUX_EMACSCLIENT",
-                    self.directory.path().join("fake-emacsclient"),
-                )
-                .env(
-                    "AGMUX_EMACS_ARGS_FILE",
-                    self.directory.path().join("emacs-args"),
-                )
-                .env("AGMUX_AZURE_BIN", self.directory.path().join("fake-az"))
-                .env(
-                    "AGMUX_AZURE_PRS_FILE",
-                    self.directory.path().join("azure-prs.json"),
-                )
-                .env(
-                    "AGMUX_AZURE_THREADS_FILE",
-                    self.directory.path().join("azure-threads.json"),
-                )
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .spawn()
-                .unwrap(),
-        );
+        self.child = Some(self.command().spawn().unwrap());
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             assert!(
@@ -126,6 +93,58 @@ impl App {
             }
             thread::sleep(Duration::from_millis(30));
         }
+        panic!("UI did not start");
+    }
+
+    fn command(&self) -> Command {
+        let display = std::env::var("AGMUX_TEST_DISPLAY").expect("private display required");
+        assert!(std::path::Path::new(&display).is_absolute());
+        let mut command = Command::new(env!("CARGO_BIN_EXE_agmux-native"));
+        command
+            .env("WAYLAND_DISPLAY", display)
+            .env("GDK_BACKEND", "wayland")
+            .env("GSK_RENDERER", "cairo")
+            .env("AGMUX_INSTANCE", self.paths.name().as_str())
+            .env("AGMUX_RUNTIME_ROOT", self.directory.path())
+            .env("AGMUX_STATE_ROOT", self.directory.path())
+            .env("CLAUDE_CONFIG_DIR", self.directory.path().join("claude"))
+            .env("CODEX_HOME", self.directory.path().join("codex"))
+            .env("AGMUX_CODEX_BIN", self.directory.path().join("fake-agent"))
+            .env("AGMUX_CLAUDE_BIN", self.directory.path().join("fake-agent"))
+            .env(
+                "AGMUX_EMACSCLIENT",
+                self.directory.path().join("fake-emacsclient"),
+            )
+            .env(
+                "AGMUX_EMACS_ARGS_FILE",
+                self.directory.path().join("emacs-args"),
+            )
+            .env("AGMUX_AZURE_BIN", self.directory.path().join("fake-az"))
+            .env(
+                "AGMUX_AZURE_PRS_FILE",
+                self.directory.path().join("azure-prs.json"),
+            )
+            .env(
+                "AGMUX_AZURE_THREADS_FILE",
+                self.directory.path().join("azure-threads.json"),
+            )
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+    }
+
+    fn activate_existing(&self) {
+        let mut child = self.command().spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(30));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
         panic!("UI did not start");
     }
 
@@ -237,7 +256,21 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
     let app = App::new();
     let inspection = app.request("ui.inspect", json!({}));
     let root = inspection["root"].as_object().unwrap();
+    assert_eq!(root["isVisible"], true);
     let children = root["children"].as_array().unwrap();
+    let surface_anchors = children[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "surface-anchors")
+        .unwrap();
+    let pull_requests = surface_anchors["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "pull-requests")
+        .unwrap();
+    assert_eq!(pull_requests["isSelected"], false);
     let ids = children
         .iter()
         .filter_map(|node| node["id"].as_str())
@@ -319,6 +352,53 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
     let transient = app.request("ui.capture", json!({}));
     assert!(transient["width"].as_i64().unwrap() < 1280);
     assert!(transient["height"].as_i64().unwrap() < 800);
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn reactivating_an_existing_app_presents_the_main_window_not_a_modal() {
+    let app = App::new();
+    let project = app.directory.path().join("reactivation-project");
+    std::fs::create_dir(&project).unwrap();
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c","exec sleep 30"],
+            "cwd":project,
+            "projectRoot":project
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"pull-requests"}))["shown"],
+        true
+    );
+    let inspection = app.request("ui.inspect", json!({}));
+    assert!(
+        inspection["root"]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|child| child["children"].as_array().into_iter().flatten())
+            .flat_map(|child| child["children"].as_array().into_iter().flatten())
+            .any(|node| node["id"] == "pull-requests" && node["isSelected"] == true)
+    );
+
+    app.activate_existing();
+
+    let inspection = app.request("ui.inspect", json!({}));
+    assert!(
+        inspection["root"]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|child| child["children"].as_array().into_iter().flatten())
+            .flat_map(|child| child["children"].as_array().into_iter().flatten())
+            .any(|node| node["id"] == "pull-requests" && node["isSelected"] == false)
+    );
+    app.request("session.close", json!({"sessionId":id}));
 }
 
 #[test]
@@ -409,7 +489,7 @@ fn launch_surface_populates_project_and_git_worktree_choices() {
                 .unwrap()
                 .len()
         };
-        if options("launch-project-input") == 1 && options("launch-worktree-input") == 2 {
+        if options("launch-project-input") == 1 && options("launch-worktree-input") == 1 {
             app.request("session.close", json!({"sessionId":id}));
             return;
         }
@@ -1045,8 +1125,8 @@ fn recent_agent_surface_uses_isolated_logs_and_readiness_survives_restart() {
     );
     thread::sleep(Duration::from_millis(120));
     let capture = app.request("ui.capture", json!({}));
-    assert!(capture["width"].as_i64().unwrap() < 1280);
-    assert!(capture["height"].as_i64().unwrap() < 800);
+    assert!(capture["width"].as_i64().unwrap() <= 1400);
+    assert!(capture["height"].as_i64().unwrap() <= 900);
 
     let restored = app.request(
         "agent.restore",

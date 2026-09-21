@@ -113,6 +113,10 @@ struct Workspace {
     launch_worktree_choices: gtk::StringList,
     launch_worktree_completion: gtk::ListStore,
     launch_worktree_completion_items: Rc<RefCell<Vec<(String, String)>>>,
+    launch_existing_worktree_radio: gtk::CheckButton,
+    launch_new_worktree_radio: gtk::CheckButton,
+    launch_existing_worktree_mode: gtk::Box,
+    launch_new_worktree_mode: gtk::Box,
     launch_name: gtk::Entry,
     launch_args: gtk::Entry,
     launch_prompt: gtk::Entry,
@@ -136,11 +140,21 @@ struct Workspace {
     agent_button: gtk::MenuButton,
     agent_window: gtk::Window,
     agent_list: gtk::Box,
+    agent_project_filter: gtk::DropDown,
+    agent_project_choices: gtk::StringList,
+    agent_project_values: Rc<RefCell<Vec<Option<PathBuf>>>>,
+    agent_filter: gtk::SearchEntry,
+    agent_count: gtk::Label,
     agent_preview: gtk::Box,
-    agent_restore_cwd: gtk::Entry,
-    agent_restore_project: gtk::Entry,
-    agent_restore_worktree: gtk::Entry,
+    agent_restore_destination: gtk::DropDown,
+    agent_restore_destination_choices: gtk::StringList,
+    agent_restore_destination_values: Rc<RefCell<Vec<agents_ui::AgentRestoreDestination>>>,
+    agent_restore_branch: gtk::Entry,
+    agent_restore_custom_cwd: gtk::Entry,
     agent_restore_button: gtk::Button,
+    agent_sessions: Rc<RefCell<Vec<agents_ui::AgentSessionItem>>>,
+    hidden_agent_sessions: Rc<RefCell<HashSet<String>>>,
+    hidden_agent_sessions_loaded: Rc<Cell<bool>>,
     selected_agent: Rc<RefCell<Option<ProviderSession>>>,
     history_button: gtk::MenuButton,
     history_list: gtk::Box,
@@ -538,6 +552,22 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_worktree_completion_items.clone(),
         true,
     );
+    let launch_existing_worktree_radio = gtk::CheckButton::with_label("Use existing worktree");
+    let launch_new_worktree_radio = gtk::CheckButton::with_label("New worktree");
+    launch_new_worktree_radio.set_group(Some(&launch_existing_worktree_radio));
+    launch_existing_worktree_radio.set_active(true);
+    launch_existing_worktree_radio.set_valign(gtk::Align::Start);
+    launch_new_worktree_radio.set_valign(gtk::Align::Start);
+    launch_worktree.1.set_width_chars(16);
+    launch_worktree.1.set_max_width_chars(18);
+    launch_worktree.1.set_hexpand(false);
+    launch_worktree_dropdown.set_hexpand(true);
+    launch_worktree_dropdown.set_size_request(320, -1);
+    let launch_existing_worktree_mode = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+    launch_existing_worktree_mode.add_css_class("tui-worktree-mode");
+    launch_existing_worktree_mode.append(&launch_existing_worktree_radio);
+    launch_existing_worktree_mode.append(&launch_worktree.0);
+
     let launch_name = launch_entry("Name", "session name (optional)");
     let launch_args = launch_entry(
         "Arguments",
@@ -545,11 +575,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     );
     let launch_prompt = launch_entry("Initial input", "initial prompt (optional)");
     let launch_branch = launch_entry_with_hint(
-        "Branch name (optional)",
-        "generated branch",
-        "Worktree name will be based on the branch name.",
+        "New worktree name",
+        "concise-kebab-case",
+        "Used as the branch and worktree name.",
     );
-    let launch_base_branch = launch_entry("Base branch", "main");
+    let launch_base_branch = launch_entry("Base branch", "origin/main");
     let launch_base_branch_choices = gtk::StringList::new(&[]);
     let launch_base_branch_dropdown = searchable_path_dropdown(&launch_base_branch_choices);
     launch_base_branch_dropdown.set_visible(false);
@@ -563,16 +593,18 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_base_branch_completion_items.clone(),
         false,
     );
-    launch_branch.0.set_visible(false);
-    launch_base_branch.0.set_visible(false);
-    for row in [
-        &launch_project.0,
-        &launch_worktree.0,
-        &launch_branch.0,
-        &launch_base_branch.0,
-    ] {
-        launch_form.append(row);
-    }
+    let new_worktree_fields = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    new_worktree_fields.set_hexpand(true);
+    new_worktree_fields.append(&launch_branch.0);
+    new_worktree_fields.append(&launch_base_branch.0);
+    let launch_new_worktree_mode = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+    launch_new_worktree_mode.add_css_class("tui-worktree-mode");
+    launch_new_worktree_mode.append(&launch_new_worktree_radio);
+    launch_new_worktree_mode.append(&new_worktree_fields);
+    launch_new_worktree_mode.set_visible(false);
+    launch_form.append(&launch_project.0);
+    launch_form.append(&launch_existing_worktree_mode);
+    launch_form.append(&launch_new_worktree_mode);
     let launch_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let launch_cancel = gtk::Button::with_label("Cancel");
     launch_cancel.add_css_class("tui-button");
@@ -643,6 +675,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     agent_heading.set_hexpand(true);
     agent_heading.add_css_class("agent-heading");
     agent_heading_row.append(&agent_heading);
+    let agent_count = gtk::Label::new(None);
+    agent_count.set_xalign(1.0);
+    agent_count.add_css_class("tui-muted");
+    agent_heading_row.append(&agent_count);
     let agent_refresh = gtk::Button::builder()
         .icon_name("view-refresh-symbolic")
         .build();
@@ -650,6 +686,28 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     agent_refresh.set_tooltip_text(Some("Refresh recent agent sessions"));
     agent_heading_row.append(&agent_refresh);
     agent_surface.append(&agent_heading_row);
+    let agent_filter_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    agent_filter_row.add_css_class("agent-filter-row");
+    let agent_project_label = gtk::Label::new(Some("Project"));
+    agent_project_label.set_xalign(0.0);
+    agent_project_label.add_css_class("tui-muted");
+    agent_filter_row.append(&agent_project_label);
+    let agent_project_choices = gtk::StringList::new(&["All projects"]);
+    let agent_project_filter = gtk::DropDown::new(
+        Some(agent_project_choices.clone()),
+        None::<&gtk::Expression>,
+    );
+    agent_project_filter.add_css_class("agent-project-filter");
+    agent_project_filter.set_tooltip_text(Some("Filter recent sessions by project"));
+    agent_filter_row.append(&agent_project_filter);
+    let agent_filter = gtk::SearchEntry::builder()
+        .placeholder_text("Filter sessions...")
+        .hexpand(true)
+        .build();
+    agent_filter.add_css_class("agent-filter");
+    agent_filter.set_visible(false);
+    agent_filter_row.append(&agent_filter);
+    agent_surface.append(&agent_filter_row);
     let agent_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
     let agent_list_scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -669,12 +727,27 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     agent_preview_scroller.add_css_class("agent-preview-scroller");
     agent_detail.append(&agent_preview_scroller);
-    let agent_restore_cwd = launch_entry("Working directory", "original cwd");
-    let agent_restore_project = launch_entry("Project root", "optional project root");
-    let agent_restore_worktree = launch_entry("Worktree", "optional worktree path");
-    agent_detail.append(&agent_restore_cwd.0);
-    agent_detail.append(&agent_restore_project.0);
-    agent_detail.append(&agent_restore_worktree.0);
+    let agent_destination_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    agent_destination_row.add_css_class("agent-destination-row");
+    let agent_destination_label = gtk::Label::new(Some("Resume in"));
+    agent_destination_label.set_xalign(0.0);
+    agent_destination_label.add_css_class("tui-muted");
+    agent_destination_row.append(&agent_destination_label);
+    let agent_restore_destination_choices = gtk::StringList::new(&["Last known location"]);
+    let agent_restore_destination = gtk::DropDown::new(
+        Some(agent_restore_destination_choices.clone()),
+        None::<&gtk::Expression>,
+    );
+    agent_restore_destination.set_hexpand(true);
+    agent_restore_destination.add_css_class("agent-destination");
+    agent_destination_row.append(&agent_restore_destination);
+    agent_detail.append(&agent_destination_row);
+    let agent_restore_branch = launch_entry("Branch name", "restore-branch-name");
+    agent_restore_branch.0.set_visible(false);
+    agent_detail.append(&agent_restore_branch.0);
+    let agent_restore_custom_cwd = launch_entry("Custom directory", "/path/to/directory");
+    agent_restore_custom_cwd.0.set_visible(false);
+    agent_detail.append(&agent_restore_custom_cwd.0);
     let agent_restore_button = gtk::Button::builder()
         .icon_name("document-revert-symbolic")
         .label("Restore session")
@@ -948,8 +1021,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         app,
         &window,
         "Recent agent sessions",
-        1180,
-        800,
+        1400,
+        900,
         &agent_surface,
     );
     add_modal_close_button(&git_surface, &git_window, "Close Emacs actions");
@@ -1020,6 +1093,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_worktree_choices,
         launch_worktree_completion,
         launch_worktree_completion_items,
+        launch_existing_worktree_radio,
+        launch_new_worktree_radio,
+        launch_existing_worktree_mode,
+        launch_new_worktree_mode,
         launch_name: launch_name.1,
         launch_args: launch_args.1,
         launch_prompt: launch_prompt.1,
@@ -1043,11 +1120,23 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         agent_button,
         agent_window,
         agent_list,
+        agent_project_filter,
+        agent_project_choices,
+        agent_project_values: Rc::new(RefCell::new(vec![None])),
+        agent_filter,
+        agent_count,
         agent_preview,
-        agent_restore_cwd: agent_restore_cwd.1,
-        agent_restore_project: agent_restore_project.1,
-        agent_restore_worktree: agent_restore_worktree.1,
+        agent_restore_destination,
+        agent_restore_destination_choices,
+        agent_restore_destination_values: Rc::new(RefCell::new(vec![
+            agents_ui::AgentRestoreDestination::LastKnown,
+        ])),
+        agent_restore_branch: agent_restore_branch.1,
+        agent_restore_custom_cwd: agent_restore_custom_cwd.1,
         agent_restore_button: agent_restore_button.clone(),
+        agent_sessions: Rc::new(RefCell::new(Vec::new())),
+        hidden_agent_sessions: Rc::new(RefCell::new(HashSet::new())),
+        hidden_agent_sessions_loaded: Rc::new(Cell::new(false)),
         selected_agent: Rc::new(RefCell::new(None)),
         history_button,
         history_list,
@@ -1293,11 +1382,56 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let agent_workspace = workspace.clone();
     agent_refresh.connect_clicked(move |_| agent_workspace.refresh_agent_panel());
     let agent_workspace = workspace.clone();
+    workspace
+        .agent_filter
+        .connect_changed(move |_| agent_workspace.filter_agent_panel());
+    let agent_workspace = workspace.clone();
+    workspace
+        .agent_project_filter
+        .connect_selected_notify(move |_| agent_workspace.filter_agent_panel());
+    let agent_workspace = workspace.clone();
+    workspace
+        .agent_restore_destination
+        .connect_selected_notify(move |_| agent_workspace.update_agent_destination_inputs());
+    let agent_workspace = workspace.clone();
     agent_restore_button.connect_clicked(move |_| agent_workspace.restore_agent_from_panel());
     let agent_workspace = workspace.clone();
     workspace
         .agent_window
         .connect_show(move |_| agent_workspace.refresh_agent_panel());
+    let agent_navigation = gtk::EventControllerKey::new();
+    agent_navigation.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let agent_workspace = workspace.clone();
+    agent_navigation.connect_key_pressed(move |_, key, _, _| {
+        let control_has_focus = agent_workspace.agent_restore_destination.has_focus()
+            || agent_workspace.agent_project_filter.has_focus()
+            || agent_workspace.agent_filter.has_focus()
+            || agent_workspace.agent_restore_branch.has_focus()
+            || agent_workspace.agent_restore_custom_cwd.has_focus();
+        let handled = match key {
+            gtk::gdk::Key::Down if !control_has_focus => {
+                agent_workspace.navigate_agent_selection(1);
+                true
+            }
+            gtk::gdk::Key::Up if !control_has_focus => {
+                agent_workspace.navigate_agent_selection(-1);
+                true
+            }
+            gtk::gdk::Key::Return
+                if !control_has_focus && agent_workspace.agent_restore_button.is_sensitive() =>
+            {
+                agent_workspace.restore_agent_from_panel();
+                true
+            }
+            _ => false,
+        };
+        if handled {
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    workspace.agent_window.add_controller(agent_navigation);
 
     let search_workspace = workspace.clone();
     search_next.connect_clicked(move |_| search_workspace.search_selected(true));
@@ -1601,8 +1735,32 @@ fn build_modal_window<W: IsA<gtk::Widget>>(
         .resizable(true)
         .child(child)
         .build();
+    // Application-owned windows can be registered while the application is
+    // activating. Keep every modal closed until its action explicitly opens it.
+    window.hide();
     window.set_hide_on_close(true);
+    install_modal_escape_handler(&window);
     window
+}
+
+fn install_modal_escape_handler(window: &gtk::Window) {
+    let controller = gtk::EventControllerKey::new();
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let window_ref = window.downgrade();
+    controller.connect_key_pressed(move |_, key, _, _| {
+        if !is_modal_escape_key(key) {
+            return glib::Propagation::Proceed;
+        }
+        if let Some(window) = window_ref.upgrade() {
+            window.hide();
+        }
+        glib::Propagation::Stop
+    });
+    window.add_controller(controller);
+}
+
+fn is_modal_escape_key(key: gtk::gdk::Key) -> bool {
+    key == gtk::gdk::Key::Escape
 }
 
 fn add_modal_close_button(surface: &gtk::Box, window: &gtk::Window, tooltip: &str) {
@@ -1792,4 +1950,15 @@ fn display_name(id: &str) -> String {
     id.strip_prefix("shell-")
         .map(|suffix| format!("Shell {}", suffix.rsplit('-').next().unwrap_or(suffix)))
         .unwrap_or_else(|| id.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_modal_escape_key;
+
+    #[test]
+    fn only_escape_is_a_modal_dismissal_key() {
+        assert!(is_modal_escape_key(gtk::gdk::Key::Escape));
+        assert!(!is_modal_escape_key(gtk::gdk::Key::Return));
+    }
 }

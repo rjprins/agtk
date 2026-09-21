@@ -353,7 +353,91 @@ const TUI_CSS: &str = r#"
   border-radius: 8px;
   background: @background;
 }
-.agent-dialog { min-width: 1140px; }
+.agent-dialog {
+  min-width: 1140px;
+  font-size: @small-font-size;
+}
+.agent-heading, .agent-detail-title { font-size: @font-size; }
+.agent-filter-row { min-height: 34px; }
+.agent-project-filter { min-width: 180px; }
+.agent-filter {
+  min-height: 34px;
+  padding: 4px 9px;
+  border: 1px solid @line;
+  border-radius: 6px;
+  background: @background;
+  color: @text;
+}
+.agent-project-heading {
+  min-height: 24px;
+  padding: 9px 8px 3px 8px;
+  color: @muted;
+  font-size: @small-font-size;
+  font-weight: bold;
+}
+.agent-session-row {
+  min-width: 0;
+  padding: 1px 0;
+}
+.agent-session-row .tui-agent-row {
+  border-radius: 7px;
+  padding: 7px 9px;
+  text-align: left;
+}
+.agent-session-row .tui-agent-row:hover,
+.agent-session-row .tui-agent-row.agent-session-selected {
+  border-color: alpha(@accent, 0.65);
+  background: alpha(@accent, 0.16);
+}
+.agent-card-title { font-weight: 600; }
+.agent-card-chips { min-width: 0; }
+.agent-chip {
+  min-width: 0;
+  padding: 2px 6px;
+  color: @muted;
+  background: alpha(@background, 0.75);
+  border: 1px solid @line;
+  border-radius: 999px;
+  font-size: @small-font-size;
+}
+.agent-session-hide {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  color: @muted;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  opacity: 0;
+}
+.agent-session-row:hover .agent-session-hide,
+.agent-session-hide:focus-visible { opacity: 1; }
+.agent-session-hide:hover { color: @text; background: @hover; }
+.agent-detail-title { font-weight: 600; }
+.agent-preview-label {
+  margin-top: 8px;
+  color: @muted;
+  font-size: @small-font-size;
+  font-weight: bold;
+  letter-spacing: 0.8px;
+}
+.agent-first-prompt {
+  padding: 7px 9px;
+  color: @text;
+  background: alpha(@accent, 0.08);
+  border-left: 2px solid @accent;
+}
+.agent-preview-message {
+  padding: 8px 10px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+}
+.agent-preview-message label { font-size: @small-font-size; }
+.agent-preview-user { background: @background; font-weight: 600; }
+.agent-preview-assistant { background: alpha(@hover, 0.7); }
+.agent-destination-row { min-height: 34px; }
+.agent-destination-row > label { color: @muted; }
+.agent-destination { min-width: 0; }
 .agent-restore-button {
   min-height: 34px;
   padding: 5px 10px;

@@ -2,13 +2,13 @@ use std::path::PathBuf;
 
 use agmux_native::control::SessionKind;
 use agmux_native::launch_model::{
-    NEW_WORKTREE, choice_matches, directory_choices, path_completions, provider_args,
+    DEFAULT_BASE_BRANCH, choice_matches, directory_choices, path_completions, provider_args,
     worktree_choices,
 };
 use serde_json::json;
 
 #[test]
-fn worktree_choices_keep_new_and_current_pinned_then_sort_real_worktrees() {
+fn worktree_choices_keep_current_pinned_then_sort_real_worktrees() {
     let choices = worktree_choices(
         "/work/agmux",
         [
@@ -16,15 +16,12 @@ fn worktree_choices_keep_new_and_current_pinned_then_sort_real_worktrees() {
             ("/work/agmux-alpha".to_owned(), "alpha".to_owned()),
             ("/work/agmux".to_owned(), "agmux".to_owned()),
         ],
-        true,
     );
 
-    assert_eq!(choices[0].value, NEW_WORKTREE);
-    assert_eq!(choices[0].label, "+ New worktree");
-    assert_eq!(choices[1].value, "/work/agmux");
-    assert_eq!(choices[1].label, "Current (agmux)");
-    assert_eq!(choices[2].label, "alpha");
-    assert_eq!(choices[3].label, "zeta");
+    assert_eq!(choices[0].value, "/work/agmux");
+    assert_eq!(choices[0].label, "Current (agmux)");
+    assert_eq!(choices[1].label, "alpha");
+    assert_eq!(choices[2].label, "zeta");
 }
 
 #[test]
@@ -32,7 +29,6 @@ fn worktree_choices_treat_trailing_project_separators_as_the_current_tree() {
     let choices = worktree_choices(
         "/work/agmux/",
         [("/work/agmux".to_owned(), "agmux".to_owned())],
-        true,
     );
 
     assert_eq!(
@@ -40,8 +36,13 @@ fn worktree_choices_treat_trailing_project_separators_as_the_current_tree() {
             .iter()
             .map(|choice| choice.value.as_str())
             .collect::<Vec<_>>(),
-        vec![NEW_WORKTREE, "/work/agmux/"]
+        vec!["/work/agmux/"]
     );
+}
+
+#[test]
+fn new_worktree_uses_origin_main_as_the_default_base_branch() {
+    assert_eq!(DEFAULT_BASE_BRANCH, "origin/main");
 }
 
 #[test]

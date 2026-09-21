@@ -15,7 +15,19 @@ fn main() -> glib::ExitCode {
         .application_id(instance.application_id())
         .build();
     app.connect_activate(move |app| {
-        if let Some(window) = app.active_window() {
+        let mut main_window = None;
+        for window in app.windows() {
+            if window.is::<adw::ApplicationWindow>() {
+                main_window = Some(
+                    window
+                        .downcast::<adw::ApplicationWindow>()
+                        .expect("window type checked before downcast"),
+                );
+            } else {
+                window.set_visible(false);
+            }
+        }
+        if let Some(window) = main_window {
             window.present();
         } else {
             ui::build(app, paths.clone());

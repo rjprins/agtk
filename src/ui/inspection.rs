@@ -113,6 +113,16 @@ impl Workspace {
         let launch_children = if self.launch_window.is_visible() {
             vec![
                 UiNode {
+                    id: "launch-existing-worktree".to_owned(),
+                    role: "radio".to_owned(),
+                    label: Some("Use existing worktree".to_owned()),
+                    is_visible: self.launch_existing_worktree_mode.is_visible(),
+                    is_enabled: self.launch_existing_worktree_radio.is_sensitive(),
+                    is_selected: self.launch_existing_worktree_radio.is_active(),
+                    bounds: widget_bounds(&self.launch_existing_worktree_radio, &self.window),
+                    children: Vec::new(),
+                },
+                UiNode {
                     id: "launch-project-input".to_owned(),
                     role: "textbox".to_owned(),
                     label: Some("Project directory".to_owned()),
@@ -129,7 +139,7 @@ impl Workspace {
                     id: "launch-worktree-input".to_owned(),
                     role: "textbox".to_owned(),
                     label: Some("Worktree".to_owned()),
-                    is_visible: gtk::prelude::WidgetExt::is_visible(&self.launch_worktree),
+                    is_visible: self.launch_existing_worktree_mode.is_visible(),
                     is_enabled: self.launch_worktree.is_sensitive(),
                     is_selected: self.launch_worktree.has_focus(),
                     bounds: widget_bounds(&self.launch_worktree, &self.window),
@@ -137,6 +147,16 @@ impl Workspace {
                         "launch-worktree",
                         &self.launch_worktree_completion_items.borrow(),
                     ),
+                },
+                UiNode {
+                    id: "launch-new-worktree".to_owned(),
+                    role: "radio".to_owned(),
+                    label: Some("New worktree".to_owned()),
+                    is_visible: self.launch_new_worktree_mode.is_visible(),
+                    is_enabled: self.launch_new_worktree_radio.is_sensitive(),
+                    is_selected: self.launch_new_worktree_radio.is_active(),
+                    bounds: widget_bounds(&self.launch_new_worktree_radio, &self.window),
+                    children: Vec::new(),
                 },
                 UiNode {
                     id: "launch-agent".to_owned(),
@@ -174,11 +194,8 @@ impl Workspace {
                 UiNode {
                     id: "launch-branch".to_owned(),
                     role: "textbox".to_owned(),
-                    label: Some("Branch name (optional)".to_owned()),
-                    is_visible: self
-                        .launch_branch
-                        .parent()
-                        .is_some_and(|row| row.is_visible()),
+                    label: Some("New worktree name".to_owned()),
+                    is_visible: self.launch_new_worktree_mode.is_visible(),
                     is_enabled: self.launch_branch.is_sensitive(),
                     is_selected: self.launch_branch.has_focus(),
                     bounds: widget_bounds(&self.launch_branch, &self.window),
@@ -188,10 +205,7 @@ impl Workspace {
                     id: "launch-base-branch".to_owned(),
                     role: "textbox".to_owned(),
                     label: Some("Base branch".to_owned()),
-                    is_visible: self
-                        .launch_base_branch
-                        .parent()
-                        .is_some_and(|row| row.is_visible()),
+                    is_visible: self.launch_new_worktree_mode.is_visible(),
                     is_enabled: self.launch_base_branch.is_sensitive(),
                     is_selected: self.launch_base_branch.has_focus(),
                     bounds: widget_bounds(&self.launch_base_branch, &self.window),

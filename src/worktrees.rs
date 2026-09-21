@@ -82,6 +82,13 @@ pub struct CreatedWorktree {
     pub purpose: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionLocation {
+    pub cwd: PathBuf,
+    pub project_root: PathBuf,
+    pub worktree_path: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DeleteBranch {
@@ -118,6 +125,37 @@ pub struct WorktreeManager {
 impl WorktreeManager {
     pub fn new(attic_root: PathBuf) -> Self {
         Self { attic_root }
+    }
+
+    pub fn repository_root(&self, path: &Path) -> WorktreeResult<PathBuf> {
+        common_repo_root(path)
+    }
+
+    pub fn worktree_root(&self, path: &Path) -> WorktreeResult<PathBuf> {
+        let path = path.canonicalize()?;
+        let root = git_text(&path, ["rev-parse", "--show-toplevel"])?;
+        Ok(PathBuf::from(root.trim()).canonicalize()?)
+    }
+
+    pub fn resolve_session_location(
+        &self,
+        cwd: &Path,
+        known_project_roots: &[PathBuf],
+    ) -> SessionLocation {
+        let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+        let project_root = known_project_roots
+            .iter()
+            .filter(|root| cwd.starts_with(root))
+            .max_by_key(|root| root.components().count())
+            .cloned()
+            .or_else(|| self.repository_root(&cwd).ok())
+            .unwrap_or_else(|| cwd.clone());
+        let worktree_path = self.worktree_root(&cwd).ok();
+        SessionLocation {
+            cwd,
+            project_root,
+            worktree_path,
+        }
     }
 
     /// Return the linked checkout paths without running per-worktree status

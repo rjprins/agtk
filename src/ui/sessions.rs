@@ -176,7 +176,14 @@ impl Workspace {
                     records.push(record);
                 }
                 let mut recovered = Vec::new();
+                let known_project_roots = projects
+                    .projects
+                    .keys()
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>();
+                let manager = crate::worktrees::WorktreeManager::new(paths.attic_dir());
                 for mut record in records {
+                    backfill_restored_session_context(&mut record, &known_project_roots, &manager);
                     let connected = connect_session(&record.socket_path).ok();
                     record.state = if connected.is_some() {
                         if matches!(
@@ -860,4 +867,73 @@ fn connect_session(socket: &Path) -> io::Result<(UnixStream, Attachment)> {
     control.set_write_timeout(Some(Duration::from_millis(300)))?;
     let attachment = receive_attachment(&control)?;
     Ok((control, attachment))
+}
+
+fn backfill_restored_session_context(
+    record: &mut SessionRecord,
+    known_project_roots: &[PathBuf],
+    manager: &crate::worktrees::WorktreeManager,
+) {
+    if record.conversation_id.is_none()
+        || !matches!(record.kind, SessionKind::Codex | SessionKind::Claude)
+        || (record.project_root.is_some() && record.worktree_path.is_some())
+    {
+        return;
+    }
+    let Some(cwd) = record.cwd.as_deref() else {
+        return;
+    };
+    let location = manager.resolve_session_location(cwd, known_project_roots);
+    record.cwd = Some(location.cwd);
+    if record.project_root.is_none() {
+        record.project_root = Some(location.project_root);
+    }
+    if record.worktree_path.is_none() {
+        record.worktree_path = location.worktree_path;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backfill_restored_session_context;
+    use crate::control::SessionKind;
+    use crate::persist::SessionRecord;
+    use crate::worktrees::WorktreeManager;
+    use std::fs;
+    use std::process::Command;
+
+    #[test]
+    fn recovery_backfills_only_restored_agent_session_context() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("project");
+        let nested = root.join("src/deep");
+        fs::create_dir_all(&nested).unwrap();
+        assert!(
+            Command::new("git")
+                .args(["init", "-b", "main"])
+                .current_dir(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let manager = WorktreeManager::new(fixture.path().join("attic"));
+
+        let mut restored = SessionRecord::discovered("restored", fixture.path().join("a.sock"));
+        restored.kind = SessionKind::Codex;
+        restored.cwd = Some(nested.clone());
+        restored.conversation_id = Some("conversation".to_owned());
+        backfill_restored_session_context(&mut restored, &[], &manager);
+
+        assert_eq!(restored.cwd, Some(nested.clone()));
+        assert_eq!(restored.project_root, Some(root.clone()));
+        assert_eq!(restored.worktree_path, Some(root));
+
+        let mut ordinary = SessionRecord::discovered("ordinary", fixture.path().join("b.sock"));
+        ordinary.kind = SessionKind::Codex;
+        ordinary.cwd = Some(nested);
+        backfill_restored_session_context(&mut ordinary, &[], &manager);
+
+        assert_eq!(ordinary.project_root, None);
+        assert_eq!(ordinary.worktree_path, None);
+    }
 }

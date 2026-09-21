@@ -42,6 +42,34 @@ fn linked_worktree_paths_include_every_checkout_without_status_scanning() {
 }
 
 #[test]
+fn worktree_root_resolves_nested_directories_in_linked_checkouts() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let extra = fixture.root().parent().unwrap().join("demo-nested-extra");
+    git(
+        fixture.root(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "nested-work",
+            extra.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let nested = extra.join("src/deep");
+    fs::create_dir_all(&nested).unwrap();
+
+    assert_eq!(manager.worktree_root(&nested).unwrap(), extra);
+    assert_eq!(manager.repository_root(&nested).unwrap(), fixture.root());
+
+    let location = manager.resolve_session_location(&nested, &[]);
+    assert_eq!(location.cwd, nested);
+    assert_eq!(location.project_root, fixture.root());
+    assert_eq!(location.worktree_path, Some(extra));
+}
+
+#[test]
 fn create_records_purpose_and_uses_the_sibling_template() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic());

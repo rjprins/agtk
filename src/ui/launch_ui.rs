@@ -1,7 +1,7 @@
 #![allow(deprecated)]
 
 use super::*;
-use crate::launch_model::{self, NEW_WORKTREE};
+use crate::launch_model::{self, DEFAULT_BASE_BRANCH};
 use crate::worktrees::WorktreeManager;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -10,6 +10,35 @@ const PROJECT_PLACEHOLDER: &str = "Search projects or type a path…";
 const WORKTREE_PLACEHOLDER: &str = "Search worktrees…";
 
 impl Workspace {
+    fn set_launch_worktree_mode(&self, creating: bool) {
+        self.launch_creating_worktree.set(creating);
+        self.launch_existing_worktree_mode.set_visible(!creating);
+        self.launch_new_worktree_mode.set_visible(creating);
+        if creating {
+            self.launch_worktree.set_text("");
+            self.launch_cwd.set_text(self.launch_project.text().trim());
+            if self.launch_branch.text().trim().is_empty() {
+                self.launch_branch.set_text(&generated_branch_name());
+            }
+            if self.launch_base_branch.text().trim().is_empty()
+                || self.launch_base_branch.text() == "main"
+            {
+                self.launch_base_branch.set_text(DEFAULT_BASE_BRANCH);
+            }
+            self.launch_new_worktree_radio.set_active(true);
+        } else {
+            let worktree = self.launch_worktree.text().trim().to_owned();
+            let worktree = if worktree.is_empty() {
+                self.launch_project.text().trim().to_owned()
+            } else {
+                worktree
+            };
+            self.launch_worktree.set_text(&worktree);
+            self.launch_cwd.set_text(&worktree);
+            self.launch_existing_worktree_radio.set_active(true);
+        }
+    }
+
     pub(super) fn prepare_launch_panel(&self) {
         if self.launch_project.text().trim().is_empty()
             && let Some(root) = self.preferred_project_root()
@@ -20,24 +49,7 @@ impl Workspace {
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
         self.refresh_launch_base_branches();
-        let creating = self.launch_creating_worktree.get();
-        if !creating && self.launch_worktree.text().trim().is_empty() {
-            self.launch_cwd.set_text(self.launch_project.text().trim());
-        }
-        if creating {
-            if self.launch_branch.text().trim().is_empty() {
-                self.launch_branch.set_text(&generated_branch_name());
-            }
-            if self.launch_base_branch.text().trim().is_empty() {
-                self.launch_base_branch.set_text("main");
-            }
-        }
-        if let Some(row) = self.launch_branch.parent() {
-            row.set_visible(creating);
-        }
-        if let Some(row) = self.launch_base_branch.parent() {
-            row.set_visible(creating);
-        }
+        self.set_launch_worktree_mode(self.launch_creating_worktree.get());
         self.set_launch_agent(self.quick_launch.borrow().kind);
     }
 
@@ -52,7 +64,7 @@ impl Workspace {
             .set_text(&display_path(preferences.project_root.as_ref()));
         self.launch_worktree
             .set_text(&display_path(preferences.worktree_path.as_ref()));
-        self.launch_creating_worktree.set(false);
+        self.set_launch_worktree_mode(false);
         self.launch_args.set_text(
             &serde_json::to_string(&preferences.args).unwrap_or_else(|_| "[]".to_owned()),
         );
@@ -162,15 +174,9 @@ impl Workspace {
         self.launch_project.set_text(root);
         self.launch_cwd.set_text(root);
         self.launch_worktree.set_text(root);
-        self.launch_creating_worktree.set(false);
+        self.set_launch_worktree_mode(false);
         self.launch_branch.set_text(&generated_branch_name());
-        self.launch_base_branch.set_text("main");
-        if let Some(row) = self.launch_branch.parent() {
-            row.set_visible(false);
-        }
-        if let Some(row) = self.launch_base_branch.parent() {
-            row.set_visible(false);
-        }
+        self.launch_base_branch.set_text(DEFAULT_BASE_BRANCH);
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
         self.launch_window.present();
@@ -182,15 +188,9 @@ impl Workspace {
             .set_text(project_root.to_string_lossy().as_ref());
         self.launch_worktree
             .set_text(worktree.to_string_lossy().as_ref());
-        self.launch_creating_worktree.set(false);
+        self.set_launch_worktree_mode(false);
         self.launch_cwd
             .set_text(worktree.to_string_lossy().as_ref());
-        if let Some(row) = self.launch_branch.parent() {
-            row.set_visible(false);
-        }
-        if let Some(row) = self.launch_base_branch.parent() {
-            row.set_visible(false);
-        }
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
         self.worktree_window.hide();
@@ -261,7 +261,7 @@ impl Workspace {
             return;
         }
         let manager = WorktreeManager::new(self.paths.attic_dir());
-        let initial = launch_model::worktree_choices(&root, [], true);
+        let initial = launch_model::worktree_choices(&root, []);
         let selected_worktree = self.launch_worktree.text().trim().to_owned();
         self.updating_launch_choices.set(true);
         *self.launch_worktree_values.borrow_mut() = initial
@@ -286,9 +286,7 @@ impl Workspace {
         self.set_dropdown_value(
             &self.launch_worktree_dropdown,
             &self.launch_worktree_values.borrow(),
-            if self.launch_creating_worktree.get() {
-                Some(NEW_WORKTREE)
-            } else if selected_worktree.is_empty() {
+            if selected_worktree.is_empty() {
                 Some(root.as_str())
             } else {
                 Some(selected_worktree.as_str())
@@ -315,7 +313,7 @@ impl Workspace {
                         })
                         .collect::<Vec<_>>();
                 }
-                let choices = launch_model::worktree_choices(&root, worktrees, true);
+                let choices = launch_model::worktree_choices(&root, worktrees);
                 let labels = choices
                     .iter()
                     .map(|choice| choice.label.clone())
@@ -338,9 +336,7 @@ impl Workspace {
                 workspace.set_dropdown_value(
                     &workspace.launch_worktree_dropdown,
                     &workspace.launch_worktree_values.borrow(),
-                    if workspace.launch_creating_worktree.get() {
-                        Some(NEW_WORKTREE)
-                    } else if selected.is_empty() {
+                    if selected.is_empty() {
                         Some(root.as_str())
                     } else {
                         Some(selected.as_str())
@@ -352,6 +348,22 @@ impl Workspace {
     }
 
     pub(super) fn connect_launch_path_controls(&self) {
+        let existing_workspace = self.clone();
+        self.launch_existing_worktree_radio
+            .connect_toggled(move |radio| {
+                if radio.is_active() {
+                    existing_workspace.set_launch_worktree_mode(false);
+                }
+            });
+
+        let new_workspace = self.clone();
+        self.launch_new_worktree_radio
+            .connect_toggled(move |radio| {
+                if radio.is_active() {
+                    new_workspace.set_launch_worktree_mode(true);
+                }
+            });
+
         let project_workspace = self.clone();
         self.launch_project_dropdown
             .connect_selected_notify(move |dropdown| {
@@ -368,17 +380,13 @@ impl Workspace {
                 // directory. This keeps the visible worktree control and the
                 // launch target in sync until the user picks another tree.
                 project_workspace.launch_worktree.set_text(&root);
-                project_workspace.launch_creating_worktree.set(false);
+                project_workspace.set_launch_worktree_mode(false);
                 project_workspace
                     .launch_branch
                     .set_text(&generated_branch_name());
-                project_workspace.launch_base_branch.set_text("main");
-                if let Some(row) = project_workspace.launch_branch.parent() {
-                    row.set_visible(false);
-                }
-                if let Some(row) = project_workspace.launch_base_branch.parent() {
-                    row.set_visible(false);
-                }
+                project_workspace
+                    .launch_base_branch
+                    .set_text(DEFAULT_BASE_BRANCH);
                 project_workspace.refresh_launch_worktree_choices();
                 project_workspace.refresh_launch_base_branches();
             });
@@ -392,85 +400,26 @@ impl Workspace {
                 let Some(path) = worktree_workspace.selected_worktree_path(dropdown) else {
                     return;
                 };
-                if path == NEW_WORKTREE {
-                    worktree_workspace.launch_worktree.set_text("");
-                    worktree_workspace.launch_creating_worktree.set(true);
-                    worktree_workspace
-                        .launch_cwd
-                        .set_text(worktree_workspace.launch_project.text().trim());
-                    worktree_workspace
-                        .launch_branch
-                        .set_text(&generated_branch_name());
-                    worktree_workspace.launch_base_branch.set_text("main");
-                    if let Some(row) = worktree_workspace.launch_branch.parent() {
-                        row.set_visible(true);
-                    }
-                    if let Some(row) = worktree_workspace.launch_base_branch.parent() {
-                        row.set_visible(true);
-                    }
-                } else {
-                    worktree_workspace.launch_creating_worktree.set(false);
-                    worktree_workspace.launch_worktree.set_text(&path);
-                    worktree_workspace.launch_cwd.set_text(&path);
-                    if let Some(row) = worktree_workspace.launch_branch.parent() {
-                        row.set_visible(false);
-                    }
-                    if let Some(row) = worktree_workspace.launch_base_branch.parent() {
-                        row.set_visible(false);
-                    }
-                }
+                worktree_workspace.set_launch_worktree_mode(false);
+                worktree_workspace.launch_worktree.set_text(&path);
+                worktree_workspace.launch_cwd.set_text(&path);
             });
 
         let worktree_entry_workspace = self.clone();
         self.launch_worktree.connect_changed(move |entry| {
-            if worktree_entry_workspace.updating_launch_choices.get() {
+            if worktree_entry_workspace.updating_launch_choices.get()
+                || worktree_entry_workspace.launch_creating_worktree.get()
+            {
                 return;
             }
             let value = entry.text().trim().to_owned();
-            if value == NEW_WORKTREE {
-                entry.set_text("");
-                worktree_entry_workspace.launch_creating_worktree.set(true);
-            } else {
-                worktree_entry_workspace.launch_creating_worktree.set(false);
-            }
-            let creating = worktree_entry_workspace.launch_creating_worktree.get();
-            if creating {
-                worktree_entry_workspace
-                    .launch_cwd
-                    .set_text(worktree_entry_workspace.launch_project.text().trim());
-                if worktree_entry_workspace
-                    .launch_branch
-                    .text()
-                    .trim()
-                    .is_empty()
-                {
-                    worktree_entry_workspace
-                        .launch_branch
-                        .set_text(&generated_branch_name());
-                }
-                if worktree_entry_workspace
-                    .launch_base_branch
-                    .text()
-                    .trim()
-                    .is_empty()
-                {
-                    worktree_entry_workspace.launch_base_branch.set_text("main");
-                }
-            } else {
-                worktree_entry_workspace.launch_cwd.set_text(&value);
-            }
-            if let Some(row) = worktree_entry_workspace.launch_branch.parent() {
-                row.set_visible(creating);
-            }
-            if let Some(row) = worktree_entry_workspace.launch_base_branch.parent() {
-                row.set_visible(creating);
-            }
+            worktree_entry_workspace.launch_cwd.set_text(&value);
         });
 
         let project_workspace = self.clone();
         self.launch_project.connect_activate(move |_| {
             project_workspace.launch_project_custom.set(true);
-            project_workspace.launch_creating_worktree.set(false);
+            project_workspace.set_launch_worktree_mode(false);
             let project_root = project_workspace.launch_project.text().trim().to_owned();
             if !project_root.is_empty() {
                 project_workspace.launch_worktree.set_text(&project_root);
@@ -479,12 +428,6 @@ impl Workspace {
             project_workspace.refresh_launch_project_choices();
             project_workspace.refresh_launch_worktree_choices();
             project_workspace.refresh_launch_base_branches();
-            if let Some(row) = project_workspace.launch_branch.parent() {
-                row.set_visible(false);
-            }
-            if let Some(row) = project_workspace.launch_base_branch.parent() {
-                row.set_visible(false);
-            }
         });
 
         let project_completion_workspace = self.clone();
@@ -505,21 +448,13 @@ impl Workspace {
                 .set(false);
             project_completion_workspace.launch_cwd.set_text(&root);
             project_completion_workspace.launch_worktree.set_text(&root);
-            project_completion_workspace
-                .launch_creating_worktree
-                .set(false);
+            project_completion_workspace.set_launch_worktree_mode(false);
             project_completion_workspace
                 .launch_branch
                 .set_text(&generated_branch_name());
             project_completion_workspace
                 .launch_base_branch
-                .set_text("main");
-            if let Some(row) = project_completion_workspace.launch_branch.parent() {
-                row.set_visible(false);
-            }
-            if let Some(row) = project_completion_workspace.launch_base_branch.parent() {
-                row.set_visible(false);
-            }
+                .set_text(DEFAULT_BASE_BRANCH);
             project_completion_workspace.refresh_launch_worktree_choices();
             project_completion_workspace.refresh_launch_base_branches();
         });
@@ -544,7 +479,8 @@ impl Workspace {
         let root = launch_path_text(&self.launch_project).unwrap_or_default();
         if root.is_empty() {
             replace_string_list(&self.launch_base_branch_choices, &[]);
-            self.launch_base_branch.set_placeholder_text(Some("main"));
+            self.launch_base_branch
+                .set_placeholder_text(Some(DEFAULT_BASE_BRANCH));
             replace_completion_items(
                 &self.launch_base_branch_completion,
                 &self.launch_base_branch_completion_items,
@@ -563,7 +499,7 @@ impl Workspace {
                 workspace
                     .launch_base_branch
                     .set_placeholder_text(Some(if branches.is_empty() {
-                        "main"
+                        DEFAULT_BASE_BRANCH
                     } else {
                         "Search branches…"
                     }));
@@ -576,9 +512,7 @@ impl Workspace {
                         .collect(),
                 );
                 if let Some(branch) = branches.first() {
-                    if workspace.launch_base_branch.text().trim().is_empty()
-                        || workspace.launch_base_branch.text() == "main"
-                    {
+                    if workspace.launch_base_branch.text().trim().is_empty() {
                         workspace.launch_base_branch.set_text(branch);
                     }
                     workspace.launch_base_branch_dropdown.set_selected(0);

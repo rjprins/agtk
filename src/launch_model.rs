@@ -10,7 +10,7 @@ pub struct Choice {
     pub label: String,
 }
 
-pub const NEW_WORKTREE: &str = "__new__";
+pub const DEFAULT_BASE_BRANCH: &str = "origin/main";
 
 /// Resolve the directory used when a launch has no explicit worktree.
 ///
@@ -38,15 +38,8 @@ pub fn expand_user_path(value: &str) -> PathBuf {
 pub fn worktree_choices(
     project_root: &str,
     worktrees: impl IntoIterator<Item = (String, String)>,
-    allow_new: bool,
 ) -> Vec<Choice> {
     let mut choices = Vec::new();
-    if allow_new {
-        choices.push(Choice {
-            value: NEW_WORKTREE.to_owned(),
-            label: "+ New worktree".to_owned(),
-        });
-    }
     if !project_root.is_empty() {
         choices.push(Choice {
             value: project_root.to_owned(),
