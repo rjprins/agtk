@@ -386,16 +386,19 @@ impl Workspace {
                 let mut child = match spawn_host(host_plan.command()) {
                     Ok(child) => child,
                     Err(scoped_error) => match fallback.take() {
-                        Some(command) => match spawn_host(command) {
-                            Ok(child) => child,
-                            Err(direct_error) => {
-                                store.remove_session(&id)?;
-                                return Err(io::Error::other(format!(
-                                    "isolated session launch failed: {scoped_error}. Direct launch failed: {direct_error}"
-                                ))
-                                .into());
+                        Some(command) => {
+                            warn_unscoped_session(&id, &scoped_error);
+                            match spawn_host(command) {
+                                Ok(child) => child,
+                                Err(direct_error) => {
+                                    store.remove_session(&id)?;
+                                    return Err(io::Error::other(format!(
+                                        "isolated session launch failed: {scoped_error}. Direct launch failed: {direct_error}"
+                                    ))
+                                    .into());
+                                }
                             }
-                        },
+                        }
                         None => {
                             store.remove_session(&id)?;
                             return Err(scoped_error.into());
@@ -411,6 +414,7 @@ impl Workspace {
                                 if !status.success()
                                     && let Some(command) = fallback.take()
                                 {
+                                    warn_unscoped_session(&id, &status);
                                     child = spawn_host(command)?;
                                     deadline = Instant::now() + Duration::from_secs(2);
                                     continue;
@@ -881,6 +885,13 @@ fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
         glib::Propagation::Stop
     });
     terminal.add_controller(scroll);
+}
+
+// Unscoped hosts share the app's cgroup, so its memory figures include the agents.
+fn warn_unscoped_session(id: &str, reason: &dyn std::fmt::Display) {
+    eprintln!(
+        "agmux-native: systemd-run failed for session {id} ({reason}); launching it inside the app's cgroup"
+    );
 }
 
 /// The alternate screen keeps no scrollback, so its scroll range is one screen tall.
