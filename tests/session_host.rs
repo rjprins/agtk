@@ -122,6 +122,104 @@ fn session_host_escalates_shutdown_for_a_signal_resistant_child() {
     panic!("session host did not escalate shutdown");
 }
 
+#[test]
+fn session_host_ignores_sighup_but_its_child_does_not() {
+    let directory = tempfile::tempdir().expect("create runtime directory");
+    let socket_path = directory.path().join("hup.sock");
+    let script = "printf 'sigign:%s\\n' \"$(grep SigIgn /proc/$$/status)\"; sleep 30";
+    let mut host = spawn_host(&socket_path, script);
+    wait_for_socket(&socket_path, &mut host);
+
+    nix::sys::signal::kill(Pid::from_raw(host.id() as i32), Signal::SIGHUP).unwrap();
+    thread::sleep(Duration::from_millis(200));
+    assert!(host.try_wait().unwrap().is_none(), "host died on SIGHUP");
+
+    let mut control = UnixStream::connect(&socket_path).unwrap();
+    let attachment = receive_attachment(&control).unwrap();
+    let mut output = String::from_utf8_lossy(&attachment.replay).into_owned();
+    let mut pty = File::from(attachment.pty);
+    if !output.contains("sigign:") {
+        output.push_str(&read_until(&mut pty, "sigign:", Duration::from_secs(2)));
+    }
+    let mask = output
+        .lines()
+        .find_map(|line| line.split("SigIgn:").nth(1))
+        .map(str::trim)
+        .and_then(|mask| u64::from_str_radix(mask, 16).ok())
+        .expect("child SigIgn mask");
+    assert_eq!(mask & 1, 0, "child inherited an ignored SIGHUP");
+
+    control.write_all(b"K").unwrap();
+    wait_for_exit(&mut host, Duration::from_secs(2));
+}
+
+#[test]
+fn session_host_recreates_a_deleted_socket() {
+    let directory = tempfile::tempdir().expect("create runtime directory");
+    let socket_path = directory.path().join("gone.sock");
+    let mut host = spawn_host(&socket_path, "printf 'alive\\n'; sleep 30");
+    wait_for_socket(&socket_path, &mut host);
+
+    std::fs::remove_file(&socket_path).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !socket_path.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(socket_path.exists(), "socket was not recreated");
+
+    let mut control = UnixStream::connect(&socket_path).unwrap();
+    let attachment = receive_attachment(&control).unwrap();
+    let mut output = String::from_utf8_lossy(&attachment.replay).into_owned();
+    if !output.contains("alive") {
+        let mut pty = File::from(attachment.pty);
+        output.push_str(&read_until(&mut pty, "alive", Duration::from_secs(2)));
+    }
+    assert!(output.contains("alive"));
+    control.write_all(b"K").unwrap();
+    wait_for_exit(&mut host, Duration::from_secs(2));
+}
+
+#[test]
+fn session_host_drops_a_client_that_stops_reading() {
+    let directory = tempfile::tempdir().expect("create runtime directory");
+    let socket_path = directory.path().join("stuck.sock");
+    // More replay than a socket buffer holds, so the stuck client blocks the send.
+    let script = "head -c 900000 /dev/zero | tr '\\0' x; printf '\\nend\\n'; sleep 30";
+    let mut host = spawn_host(&socket_path, script);
+    wait_for_socket(&socket_path, &mut host);
+    thread::sleep(Duration::from_millis(500));
+
+    let stuck = UnixStream::connect(&socket_path).unwrap();
+    thread::sleep(Duration::from_millis(100));
+
+    let mut control = UnixStream::connect(&socket_path).unwrap();
+    control
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let attachment = receive_attachment(&control).expect("attach after stuck client");
+    assert!(String::from_utf8_lossy(&attachment.replay).contains("end"));
+    drop(stuck);
+    control.write_all(b"K").unwrap();
+    wait_for_exit(&mut host, Duration::from_secs(2));
+}
+
+fn spawn_host(socket_path: &Path, script: &str) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_agmux-session"))
+        .args([
+            "--socket",
+            socket_path.to_str().unwrap(),
+            "--",
+            "/bin/sh",
+            "-c",
+            script,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap()
+}
+
 fn wait_for_socket(path: &Path, host: &mut Child) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {

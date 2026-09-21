@@ -7,6 +7,9 @@ use nix::unistd::setsid;
 fn main() -> ExitCode {
     match parse_args().and_then(|(socket_path, command)| {
         let _ = setsid();
+        // Like a tmux server, a hangup must not take the session down.
+        // SAFETY: installing SIG_IGN before any threads start is sound.
+        unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN) };
         run_session_host(&socket_path, &command)
     }) {
         Ok(()) => ExitCode::SUCCESS,
