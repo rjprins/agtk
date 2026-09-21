@@ -68,7 +68,12 @@ pub fn run_session_host(socket_path: &Path, command: &[String]) -> io::Result<()
                     Err(_) => replay.push(&detached_output),
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
                 drain_output(&master, &mut replay)?;
                 thread::sleep(Duration::from_millis(10));
             }
@@ -157,7 +162,7 @@ fn drain_output(master: &impl AsFd, replay: &mut ReplayBuffer) -> io::Result<()>
         match nix::unistd::read(master, &mut chunk) {
             Ok(0) => return Ok(()),
             Ok(count) => replay.push(&chunk[..count]),
-            Err(Errno::EAGAIN) => return Ok(()),
+            Err(Errno::EAGAIN | Errno::EINTR) => return Ok(()),
             Err(Errno::EIO) => return Ok(()),
             Err(error) => return Err(io::Error::from(error)),
         }
@@ -172,6 +177,8 @@ fn monitor_client(mut client: &UnixStream, child: Pid) -> io::Result<bool> {
             Ok(0) => return Ok(false),
             Ok(_) if command[0] == b'K' => return Ok(true),
             Ok(_) => {}
+            // Suspend freezes the cgroup; thawing interrupts this timed read.
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error)
                 if matches!(
                     error.kind(),
