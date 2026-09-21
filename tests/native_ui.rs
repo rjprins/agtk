@@ -301,7 +301,10 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         .iter()
         .filter_map(|node| node["id"].as_str())
         .collect::<Vec<_>>();
-    assert_eq!(context_ids, ["branch-review", "magit", "context-input"]);
+    assert_eq!(
+        context_ids,
+        ["branch-review", "magit", "context-input", "pr-context"]
+    );
     let context_input_ids = children[1]["children"][0]["children"][2]["children"]
         .as_array()
         .unwrap()
@@ -339,8 +342,10 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
     assert_eq!(
         launch_child_ids,
         [
+            "launch-existing-worktree",
             "launch-project-input",
             "launch-worktree-input",
+            "launch-new-worktree",
             "launch-agent",
             "launch-branch",
             "launch-base-branch",
@@ -348,6 +353,23 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
             "launch-submit"
         ]
     );
+    let launch_child = |id: &str| {
+        launch["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == id)
+            .unwrap()
+    };
+    assert_eq!(launch_child("launch-existing-worktree")["isVisible"], true);
+    assert_eq!(launch_child("launch-existing-worktree")["isSelected"], true);
+    assert_eq!(launch_child("launch-worktree-input")["isEnabled"], true);
+    assert_eq!(launch_child("launch-new-worktree")["isVisible"], true);
+    assert_eq!(launch_child("launch-new-worktree")["isEnabled"], true);
+    assert_eq!(launch_child("launch-branch")["isVisible"], true);
+    assert_eq!(launch_child("launch-branch")["isEnabled"], false);
+    assert_eq!(launch_child("launch-base-branch")["isVisible"], true);
+    assert_eq!(launch_child("launch-base-branch")["isEnabled"], false);
     thread::sleep(Duration::from_millis(50));
     let transient = app.request("ui.capture", json!({}));
     assert!(transient["width"].as_i64().unwrap() < 1280);
@@ -791,6 +813,26 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     assert_eq!(review["name"], "review: PR #42");
     assert_eq!(review["cwd"], project.to_str().unwrap());
     let review_id = review["id"].as_str().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let inspection = app.request("ui.inspect", json!({}));
+        let pr_context = inspection["root"]["children"][1]["children"][0]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == "pr-context")
+            .unwrap();
+        if pr_context["isVisible"] == true {
+            assert_eq!(pr_context["label"], "PR #42: Review feature");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "PR context did not become visible"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
 
     assert_eq!(
         app.request("ui.show", json!({"surface":"pull-requests"}))["shown"],

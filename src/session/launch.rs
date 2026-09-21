@@ -1,8 +1,10 @@
 use std::env;
+use std::ffi::OsString;
 use std::fmt;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::control::{CreateSessionParams, SessionKind};
 
@@ -16,6 +18,13 @@ pub struct SessionLaunchPlan {
     pub initial_input: Option<String>,
     pub project_root: Option<PathBuf>,
     pub worktree_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionHostLaunchPlan {
+    program: PathBuf,
+    args: Vec<OsString>,
+    fallback: Option<(PathBuf, Vec<OsString>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +79,86 @@ impl SessionLaunchPlan {
             project_root,
             worktree_path,
         })
+    }
+}
+
+impl SessionHostLaunchPlan {
+    pub fn detected(
+        host_binary: PathBuf,
+        instance: &str,
+        session_id: &str,
+        socket_path: PathBuf,
+        program: PathBuf,
+        args: Vec<String>,
+    ) -> Self {
+        Self::new(
+            resolve_executable("systemd-run", None),
+            host_binary,
+            instance,
+            session_id,
+            socket_path,
+            program,
+            args,
+        )
+    }
+
+    pub fn new(
+        systemd_run: Option<PathBuf>,
+        host_binary: PathBuf,
+        instance: &str,
+        session_id: &str,
+        socket_path: PathBuf,
+        program: PathBuf,
+        args: Vec<String>,
+    ) -> Self {
+        let mut host_args = vec![
+            OsString::from("--socket"),
+            socket_path.into_os_string(),
+            OsString::from("--"),
+            program.into_os_string(),
+        ];
+        host_args.extend(args.into_iter().map(OsString::from));
+
+        let Some(systemd_run) = systemd_run else {
+            return Self {
+                program: host_binary,
+                args: host_args,
+                fallback: None,
+            };
+        };
+
+        // A transient scope inherits the caller's environment but is managed outside the
+        // desktop application's cgroup. See systemd-run(1):
+        // https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html
+        let mut scoped_args = vec![
+            OsString::from("--user"),
+            OsString::from("--scope"),
+            OsString::from("--quiet"),
+            OsString::from("--collect"),
+            OsString::from("--expand-environment=no"),
+            OsString::from(format!("--unit=agmux-session-{instance}-{session_id}")),
+            OsString::from("--"),
+            host_binary.clone().into_os_string(),
+        ];
+        scoped_args.extend(host_args.iter().cloned());
+        Self {
+            program: systemd_run,
+            args: scoped_args,
+            fallback: Some((host_binary, host_args)),
+        }
+    }
+
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(&self.args);
+        command
+    }
+
+    pub fn fallback_command(&self) -> Option<Command> {
+        let (program, args) = self.fallback.as_ref()?;
+        let mut command = Command::new(program);
+        command.args(args);
+        Some(command)
     }
 }
 

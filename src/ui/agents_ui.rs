@@ -15,12 +15,13 @@ const AGENT_FILTER_MIN_SESSIONS: usize = 6;
 pub(super) struct AgentSessionItem {
     session: ProviderSession,
     project_root: Option<PathBuf>,
+    worktree_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AgentSessionGroup {
     project_root: Option<PathBuf>,
-    sessions: Vec<ProviderSession>,
+    sessions: Vec<AgentSessionItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +41,7 @@ fn filter_agent_sessions(
     sessions
         .iter()
         .filter(|item| {
+            let worktree_name = agent_worktree_name(item);
             project_root.is_none_or(|root| item.project_root.as_deref() == Some(root))
                 && (filter.is_empty()
                     || [
@@ -55,6 +57,7 @@ fn filter_agent_sessions(
                             .as_deref()
                             .and_then(Path::to_str)
                             .unwrap_or(""),
+                        worktree_name.as_deref().unwrap_or(""),
                     ]
                     .into_iter()
                     .any(|field| field.to_lowercase().contains(&filter)))
@@ -70,11 +73,11 @@ fn group_agent_sessions(sessions: &[AgentSessionItem]) -> Vec<AgentSessionGroup>
             .iter_mut()
             .find(|group| group.project_root == item.project_root)
         {
-            group.sessions.push(item.session.clone());
+            group.sessions.push(item.clone());
         } else {
             groups.push(AgentSessionGroup {
                 project_root: item.project_root.clone(),
-                sessions: vec![item.session.clone()],
+                sessions: vec![item.clone()],
             });
         }
     }
@@ -97,23 +100,22 @@ fn classify_agent_sessions(
     known_project_roots: &[PathBuf],
     manager: &crate::worktrees::WorktreeManager,
 ) -> Vec<AgentSessionItem> {
-    let mut resolved = BTreeMap::<PathBuf, PathBuf>::new();
+    let mut resolved = BTreeMap::<PathBuf, crate::worktrees::SessionLocation>::new();
     sessions
         .into_iter()
         .map(|session| {
-            let project_root = session.cwd.as_ref().map(|cwd| {
+            let location = session.cwd.as_ref().map(|cwd| {
                 resolved
                     .entry(cwd.clone())
-                    .or_insert_with(|| {
-                        manager
-                            .resolve_session_location(cwd, known_project_roots)
-                            .project_root
-                    })
+                    .or_insert_with(|| manager.resolve_session_location(cwd, known_project_roots))
                     .clone()
             });
             AgentSessionItem {
                 session,
-                project_root,
+                project_root: location
+                    .as_ref()
+                    .map(|location| location.project_root.clone()),
+                worktree_path: location.and_then(|location| location.worktree_path),
             }
         })
         .collect()
@@ -121,16 +123,20 @@ fn classify_agent_sessions(
 
 fn restore_target_for_location(
     cwd: Option<PathBuf>,
+    project_root: Option<PathBuf>,
     known_project_roots: &[PathBuf],
     manager: &crate::worktrees::WorktreeManager,
 ) -> RestoreTarget {
     let Some(cwd) = cwd else {
-        return RestoreTarget::default();
+        return RestoreTarget {
+            project_root,
+            ..RestoreTarget::default()
+        };
     };
     let location = manager.resolve_session_location(&cwd, known_project_roots);
     RestoreTarget {
         cwd: Some(location.cwd),
-        project_root: Some(location.project_root),
+        project_root: project_root.or(Some(location.project_root)),
         worktree_path: location.worktree_path,
         name: None,
     }
@@ -142,6 +148,15 @@ fn agent_project_name(root: &Path) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| root.to_str().unwrap_or("Other locations"))
         .to_owned()
+}
+
+fn agent_worktree_name(item: &AgentSessionItem) -> Option<String> {
+    item.worktree_path
+        .as_deref()?
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
 }
 
 fn format_agent_elapsed(now: u64, last_seen_at: u64) -> String {
@@ -343,6 +358,12 @@ impl Workspace {
             self.show_error("Select an agent session first");
             return;
         };
+        let project_root = self
+            .agent_sessions
+            .borrow()
+            .iter()
+            .find(|item| same_agent_session(&item.session, &session))
+            .and_then(|item| item.project_root.clone());
         let index = self.agent_restore_destination.selected() as usize;
         let destination = self
             .agent_restore_destination_values
@@ -373,6 +394,7 @@ impl Workspace {
                 };
                 let purpose = format!("Restore agent session {}", session.name);
                 let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
+                let project_root = project_root.clone();
                 self.agent_restore_button.set_sensitive(false);
                 self.agent_restore_button.set_label("Restoring...");
                 self.agent_window.hide();
@@ -383,7 +405,7 @@ impl Workspace {
                         let path = created.path;
                         Ok(session.restore_plan(RestoreTarget {
                             cwd: Some(path.clone()),
-                            project_root: Some(root),
+                            project_root: project_root.or(Some(root)),
                             worktree_path: Some(path),
                             ..RestoreTarget::default()
                         }))
@@ -412,7 +434,8 @@ impl Workspace {
         self.agent_window.hide();
         self.run_io(
             move || {
-                let target = restore_target_for_location(cwd, &known_project_roots, &manager);
+                let target =
+                    restore_target_for_location(cwd, project_root, &known_project_roots, &manager);
                 Ok(session.restore_plan(target))
             },
             |workspace, result| match result {
@@ -575,7 +598,9 @@ impl Workspace {
         }
     }
 
-    fn append_agent_session_row(&self, session: ProviderSession) {
+    fn append_agent_session_row(&self, item: AgentSessionItem) {
+        let worktree_name = agent_worktree_name(&item);
+        let session = item.session;
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
         row.add_css_class("agent-session-row");
         let button = gtk::Button::new();
@@ -607,15 +632,20 @@ impl Workspace {
         content.append(&title_row);
         let chips = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         chips.add_css_class("agent-card-chips");
-        append_agent_chip(&chips, session.provider.command());
         append_agent_chip(
             &chips,
             &short_agent_session_id(&session.provider_session_id),
         );
-        if let Some(cwd) = &session.cwd {
-            append_agent_chip(&chips, &cwd.to_string_lossy());
-        }
         content.append(&chips);
+        if let Some(worktree_name) = worktree_name {
+            let worktree = gtk::Label::new(Some(&format!("Worktree: {worktree_name}")));
+            worktree.set_xalign(0.0);
+            worktree.set_hexpand(true);
+            worktree.set_wrap(true);
+            worktree.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            worktree.add_css_class("agent-worktree-name");
+            content.append(&worktree);
+        }
         button.set_child(Some(&content));
         let preview_workspace = self.clone();
         let selected_session = session.clone();
@@ -981,8 +1011,8 @@ fn append_agent_chip(parent: &gtk::Box, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentSessionItem, classify_agent_sessions, filter_agent_sessions, format_agent_elapsed,
-        group_agent_sessions, restore_target_for_location,
+        AgentSessionItem, agent_worktree_name, classify_agent_sessions, filter_agent_sessions,
+        format_agent_elapsed, group_agent_sessions, restore_target_for_location,
     };
     use crate::providers::{AgentProvider, ProviderSession};
     use crate::worktrees::WorktreeManager;
@@ -1011,6 +1041,7 @@ mod tests {
         AgentSessionItem {
             session: session(name, provider_session_id, cwd),
             project_root: project_root.map(PathBuf::from),
+            worktree_path: Some(PathBuf::from(cwd)),
         }
     }
 
@@ -1039,6 +1070,36 @@ mod tests {
             1
         );
         assert_eq!(filter_agent_sessions(&sessions, None, "missing").len(), 0);
+    }
+
+    #[test]
+    fn worktree_name_is_the_full_directory_name() {
+        let session = item(
+            "Review the launch flow",
+            "codex-review",
+            "/work/agmux-feature-with-a-long-descriptive-name",
+            Some("/work/agmux"),
+        );
+
+        assert_eq!(
+            agent_worktree_name(&session).as_deref(),
+            Some("agmux-feature-with-a-long-descriptive-name")
+        );
+    }
+
+    #[test]
+    fn filtering_matches_the_resolved_worktree_name() {
+        let mut session = item(
+            "Review the launch flow",
+            "codex-review",
+            "/tmp/session-location",
+            Some("/work/agmux"),
+        );
+        session.worktree_path = Some(PathBuf::from("/worktrees/native-session-picker"));
+
+        let filtered = filter_agent_sessions(&[session], None, "session-picker");
+
+        assert_eq!(filtered.len(), 1);
     }
 
     #[test]
@@ -1093,8 +1154,14 @@ mod tests {
 
         assert_eq!(groups.len(), 3);
         assert_eq!(groups[0].project_root, Some(PathBuf::from("/work/agmux")));
-        assert_eq!(groups[0].sessions[0].provider_session_id, "agmux-new");
-        assert_eq!(groups[0].sessions[1].provider_session_id, "agmux-old");
+        assert_eq!(
+            groups[0].sessions[0].session.provider_session_id,
+            "agmux-new"
+        );
+        assert_eq!(
+            groups[0].sessions[1].session.provider_session_id,
+            "agmux-old"
+        );
         assert_eq!(groups[1].project_root, Some(PathBuf::from("/work/other")));
         assert_eq!(groups[2].project_root, None);
     }
@@ -1144,6 +1211,7 @@ mod tests {
 
         let target = restore_target_for_location(
             Some(nested.clone()),
+            None,
             std::slice::from_ref(&root),
             &manager,
         );
@@ -1151,6 +1219,26 @@ mod tests {
         assert_eq!(target.cwd, Some(nested));
         assert_eq!(target.project_root, Some(root.clone()));
         assert_eq!(target.worktree_path, Some(root));
+    }
+
+    #[test]
+    fn restored_sessions_keep_the_project_selected_by_the_dialog() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        let destination = fixture.path().join("external-worktree");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        let manager = WorktreeManager::new(fixture.path().join("attic"));
+
+        let target = restore_target_for_location(
+            Some(destination.clone()),
+            Some(project.clone()),
+            &[],
+            &manager,
+        );
+
+        assert_eq!(target.cwd, Some(destination));
+        assert_eq!(target.project_root, Some(project));
     }
 
     #[test]
@@ -1163,10 +1251,11 @@ mod tests {
 
         let known = restore_target_for_location(
             Some(nested.clone()),
+            None,
             std::slice::from_ref(&root),
             &manager,
         );
-        let standalone = restore_target_for_location(Some(nested.clone()), &[], &manager);
+        let standalone = restore_target_for_location(Some(nested.clone()), None, &[], &manager);
 
         assert_eq!(known.project_root, Some(root));
         assert_eq!(known.worktree_path, None);

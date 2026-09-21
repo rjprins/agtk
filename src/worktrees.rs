@@ -137,6 +137,32 @@ impl WorktreeManager {
         Ok(PathBuf::from(root.trim()).canonicalize()?)
     }
 
+    /// Return the checked-out branch for a worktree. Detached HEADs have no branch.
+    pub fn branch_for_worktree(&self, path: &Path) -> WorktreeResult<Option<String>> {
+        let root = self.worktree_root(path)?;
+        match git_text(&root, ["symbolic-ref", "--quiet", "--short", "HEAD"]) {
+            Ok(branch) => Ok(Some(branch.trim().to_owned())),
+            Err(_) => Ok(None),
+        }
+    }
+
+    pub fn branch_for_path_in_repo(
+        &self,
+        repo_root: &Path,
+        file_path: &Path,
+    ) -> WorktreeResult<Option<String>> {
+        let repo_root = canonical_repo(repo_root)?;
+        let output = git_text(&repo_root, ["worktree", "list", "--porcelain"])?;
+        let file_path = file_path
+            .canonicalize()
+            .unwrap_or_else(|_| file_path.to_path_buf());
+        Ok(parse_worktree_porcelain(&output)
+            .into_iter()
+            .filter(|worktree| file_path.starts_with(&worktree.path))
+            .max_by_key(|worktree| worktree.path.components().count())
+            .and_then(|worktree| worktree.branch))
+    }
+
     pub fn resolve_session_location(
         &self,
         cwd: &Path,

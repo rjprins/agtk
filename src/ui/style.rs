@@ -45,6 +45,10 @@ fn tui_css(palette: ChromePalette, font_size: u8) -> String {
             "@small-font-size",
             &format!("{}px", font_size.saturating_sub(2).max(9)),
         )
+        .replace(
+            "@agent-dialog-font-size",
+            &format!("{}px", font_size.saturating_sub(3).max(9)),
+        )
 }
 
 const TUI_CSS: &str = r#"
@@ -287,6 +291,28 @@ const TUI_CSS: &str = r#"
 }
 .tui-context-action:hover { color: @background; background: @accent; }
 .tui-context-action:disabled { color: @muted; }
+.tui-pr-context {
+  min-height: 30px;
+  padding: 3px 8px;
+  margin: -2px 0 6px 0;
+  color: @text;
+  background: @panel;
+  border: 1px solid @line;
+  border-radius: 6px;
+}
+.tui-pr-link {
+  min-height: 24px;
+  min-width: 0;
+  padding: 1px 4px;
+  color: @accent;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-weight: bold;
+}
+.tui-pr-link:hover { color: @background; background: @accent; }
+.tui-pr-threads { color: @muted; }
 
 .tui-statusbar {
   min-height: 23px;
@@ -355,7 +381,7 @@ const TUI_CSS: &str = r#"
 }
 .agent-dialog {
   min-width: 1140px;
-  font-size: @small-font-size;
+  font-size: @agent-dialog-font-size;
 }
 .agent-heading, .agent-detail-title { font-size: @font-size; }
 .agent-filter-row { min-height: 34px; }
@@ -372,7 +398,7 @@ const TUI_CSS: &str = r#"
   min-height: 24px;
   padding: 9px 8px 3px 8px;
   color: @muted;
-  font-size: @small-font-size;
+  font-size: @agent-dialog-font-size;
   font-weight: bold;
 }
 .agent-session-row {
@@ -382,8 +408,11 @@ const TUI_CSS: &str = r#"
 .agent-session-row .tui-agent-row {
   border-radius: 7px;
   padding: 7px 9px;
+  font-family: sans-serif;
+  font-size: @agent-dialog-font-size;
   text-align: left;
 }
+.agent-list-scroller label { font-family: sans-serif; }
 .agent-session-row .tui-agent-row:hover,
 .agent-session-row .tui-agent-row.agent-session-selected {
   border-color: alpha(@accent, 0.65);
@@ -391,6 +420,7 @@ const TUI_CSS: &str = r#"
 }
 .agent-card-title { font-weight: 600; }
 .agent-card-chips { min-width: 0; }
+.agent-worktree-name { color: @muted; }
 .agent-chip {
   min-width: 0;
   padding: 2px 6px;
@@ -398,7 +428,7 @@ const TUI_CSS: &str = r#"
   background: alpha(@background, 0.75);
   border: 1px solid @line;
   border-radius: 999px;
-  font-size: @small-font-size;
+  font-size: @agent-dialog-font-size;
 }
 .agent-session-hide {
   min-width: 26px;
@@ -417,7 +447,7 @@ const TUI_CSS: &str = r#"
 .agent-preview-label {
   margin-top: 8px;
   color: @muted;
-  font-size: @small-font-size;
+  font-size: @agent-dialog-font-size;
   font-weight: bold;
   letter-spacing: 0.8px;
 }
@@ -430,9 +460,8 @@ const TUI_CSS: &str = r#"
 .agent-preview-message {
   padding: 8px 10px;
   border-radius: 6px;
-  white-space: pre-wrap;
 }
-.agent-preview-message label { font-size: @small-font-size; }
+.agent-preview-message label { font-size: @agent-dialog-font-size; }
 .agent-preview-user { background: @background; font-weight: 600; }
 .agent-preview-assistant { background: alpha(@hover, 0.7); }
 .agent-destination-row { min-height: 34px; }
@@ -495,6 +524,10 @@ const TUI_CSS: &str = r#"
 }
 
 .tui-setting-row { padding: 2px 7px; }
+.tui-worktree-mode {
+  min-height: 29px;
+  padding: 2px 7px;
+}
 .tui-setting-entry {
   min-height: 25px;
   color: @text;
@@ -503,6 +536,12 @@ const TUI_CSS: &str = r#"
   border-radius: 0;
   box-shadow: none;
 }
+.tui-editable-choice .tui-setting-entry { border-right-width: 0; }
+.tui-editable-choice .tui-path-dropdown {
+  min-width: 34px;
+  border-left-width: 0;
+}
+.tui-editable-choice .tui-path-dropdown button { padding: 2px 4px; }
 .tui-path-dropdown {
   min-height: 25px;
   min-width: 220px;
@@ -534,3 +573,16 @@ const TUI_CSS: &str = r#"
   border-radius: 0;
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::tui_css;
+    use crate::appearance::{ThemeKey, theme};
+
+    #[test]
+    fn generated_css_omits_web_only_white_space_property() {
+        let css = tui_css(theme(ThemeKey::Neutral).chrome, 13);
+
+        assert!(!css.contains("white-space:"));
+    }
+}

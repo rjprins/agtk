@@ -8,7 +8,7 @@ use std::io::{self, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::rc::Rc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,7 +18,7 @@ use gtk::pango::FontDescription;
 use vte::prelude::*;
 
 use crate::appearance::{AppearancePreferences, ThemeKey, theme};
-use crate::azure::PrPreferences;
+use crate::azure::{AzurePr, PrContext, PrPreferences};
 use crate::claude_presets::ClaudePresetPreferences;
 use crate::control::{
     AppState, AppearanceSetParams, AppearanceSummary, AttentionSummary, Bounds, ControlCommand,
@@ -33,7 +33,7 @@ use crate::launch_preferences::QuickLaunchPreferences;
 use crate::persist::{PersistResult, SessionRecord, Store};
 use crate::projects::ProjectPreferences;
 use crate::providers::ProviderSession;
-use crate::session::{SessionLaunchPlan, receive_attachment};
+use crate::session::{SessionHostLaunchPlan, SessionLaunchPlan, receive_attachment};
 use crate::shortcuts::{ShortcutAction, ShortcutPreferences};
 use crate::terminal_text::{bounded_terminal_text, copyable_selection};
 
@@ -172,6 +172,11 @@ struct Workspace {
     session_context_bar: gtk::Box,
     context_input: gtk::Box,
     context_last_input: gtk::Label,
+    context_pr: gtk::Box,
+    context_pr_number: gtk::Button,
+    context_pr_title: gtk::Label,
+    context_pr_author: gtk::Label,
+    context_pr_threads: gtk::Label,
     context_branch_review: gtk::Button,
     context_magit: gtk::Button,
     sidebar_panel: gtk::Box,
@@ -196,9 +201,17 @@ struct Workspace {
     projects: Rc<RefCell<ProjectPreferences>>,
     quick_launch: Rc<RefCell<QuickLaunchPreferences>>,
     pr_preferences: Rc<RefCell<PrPreferences>>,
+    pr_context_cache: Rc<RefCell<HashMap<String, PrContext>>>,
     claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
     launch_choice_sequence: Rc<Cell<u64>>,
     updating_launch_choices: Rc<Cell<bool>>,
+    selected_pr: Rc<RefCell<Option<SelectedPrContext>>>,
+}
+
+#[derive(Clone)]
+struct SelectedPrContext {
+    session_id: String,
+    pull_request: AzurePr,
 }
 
 struct SessionView {
@@ -231,6 +244,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::Single);
+    list.set_focus_on_click(false);
     list.add_css_class("tui-session-list");
 
     let sidebar = gtk::ScrolledWindow::builder()
@@ -299,9 +313,29 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     context_input.append(&context_last_input);
     session_context_bar.append(&context_input);
 
+    let context_pr = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    context_pr.add_css_class("tui-pr-context");
+    context_pr.set_visible(false);
+    let context_pr_number = gtk::Button::with_label("PR #0");
+    context_pr_number.add_css_class("tui-pr-link");
+    context_pr_number.set_tooltip_text(Some("Open this pull request in Azure DevOps"));
+    let context_pr_title = gtk::Label::new(None);
+    context_pr_title.set_xalign(0.0);
+    context_pr_title.set_hexpand(true);
+    context_pr_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    let context_pr_author = gtk::Label::new(None);
+    context_pr_author.add_css_class("tui-muted");
+    let context_pr_threads = gtk::Label::new(None);
+    context_pr_threads.add_css_class("tui-pr-threads");
+    context_pr.append(&context_pr_number);
+    context_pr.append(&context_pr_title);
+    context_pr.append(&context_pr_author);
+    context_pr.append(&context_pr_threads);
+
     let main_pane = gtk::Box::new(gtk::Orientation::Vertical, 0);
     main_pane.add_css_class("tui-main-pane");
     main_pane.append(&session_context_bar);
+    main_pane.append(&context_pr);
     main_pane.append(&stack);
 
     let split = gtk::Paned::new(gtk::Orientation::Horizontal);
@@ -538,35 +572,35 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_project_completion_items.clone(),
         true,
     );
-    let launch_worktree = launch_entry("Worktree", "Search worktrees…");
+    let launch_worktree = launch_mode_entry("Existing worktree", "Search worktrees…");
     let launch_worktree_choices = gtk::StringList::new(&[]);
     let launch_worktree_dropdown = searchable_path_dropdown(&launch_worktree_choices);
-    launch_worktree_dropdown.set_visible(true);
-    launch_worktree.0.append(&launch_worktree_dropdown);
     let launch_worktree_completion =
         gtk::ListStore::new(&[String::static_type(), String::static_type()]);
     let launch_worktree_completion_items = Rc::new(RefCell::new(Vec::new()));
     install_choice_completion(
-        &launch_worktree.1,
+        &launch_worktree,
         &launch_worktree_completion,
         launch_worktree_completion_items.clone(),
         true,
     );
-    let launch_existing_worktree_radio = gtk::CheckButton::with_label("Use existing worktree");
+    let launch_worktree_selector = editable_choice_control(
+        &launch_worktree,
+        &launch_worktree_dropdown,
+        "Choose an existing worktree",
+    );
+    let launch_existing_worktree_radio = gtk::CheckButton::with_label("Existing worktree");
     let launch_new_worktree_radio = gtk::CheckButton::with_label("New worktree");
     launch_new_worktree_radio.set_group(Some(&launch_existing_worktree_radio));
     launch_existing_worktree_radio.set_active(true);
-    launch_existing_worktree_radio.set_valign(gtk::Align::Start);
-    launch_new_worktree_radio.set_valign(gtk::Align::Start);
-    launch_worktree.1.set_width_chars(16);
-    launch_worktree.1.set_max_width_chars(18);
-    launch_worktree.1.set_hexpand(false);
-    launch_worktree_dropdown.set_hexpand(true);
-    launch_worktree_dropdown.set_size_request(320, -1);
+    launch_existing_worktree_radio.set_valign(gtk::Align::Center);
+    launch_new_worktree_radio.set_valign(gtk::Align::Center);
+    launch_existing_worktree_radio.set_size_request(155, -1);
+    launch_new_worktree_radio.set_size_request(155, -1);
     let launch_existing_worktree_mode = gtk::Box::new(gtk::Orientation::Horizontal, 5);
     launch_existing_worktree_mode.add_css_class("tui-worktree-mode");
     launch_existing_worktree_mode.append(&launch_existing_worktree_radio);
-    launch_existing_worktree_mode.append(&launch_worktree.0);
+    launch_existing_worktree_mode.append(&launch_worktree_selector);
 
     let launch_name = launch_entry("Name", "session name (optional)");
     let launch_args = launch_entry(
@@ -574,34 +608,31 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         "JSON array, for example [\"--model\",\"opus\"]",
     );
     let launch_prompt = launch_entry("Initial input", "initial prompt (optional)");
-    let launch_branch = launch_entry_with_hint(
-        "New worktree name",
-        "concise-kebab-case",
-        "Used as the branch and worktree name.",
-    );
-    let launch_base_branch = launch_entry("Base branch", "origin/main");
+    let launch_branch = launch_mode_entry("New worktree name", "concise-kebab-case");
+    launch_branch.set_tooltip_text(Some("Used as the branch and worktree name"));
+    let launch_base_branch = launch_mode_entry("Base branch", "origin/main");
+    launch_base_branch.set_text(crate::launch_model::DEFAULT_BASE_BRANCH);
     let launch_base_branch_choices = gtk::StringList::new(&[]);
     let launch_base_branch_dropdown = searchable_path_dropdown(&launch_base_branch_choices);
-    launch_base_branch_dropdown.set_visible(false);
-    launch_base_branch.0.append(&launch_base_branch_dropdown);
     let launch_base_branch_completion =
         gtk::ListStore::new(&[String::static_type(), String::static_type()]);
     let launch_base_branch_completion_items = Rc::new(RefCell::new(Vec::new()));
     install_choice_completion(
-        &launch_base_branch.1,
+        &launch_base_branch,
         &launch_base_branch_completion,
         launch_base_branch_completion_items.clone(),
         false,
     );
-    let new_worktree_fields = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    new_worktree_fields.set_hexpand(true);
-    new_worktree_fields.append(&launch_branch.0);
-    new_worktree_fields.append(&launch_base_branch.0);
+    let launch_base_branch_selector = editable_choice_control(
+        &launch_base_branch,
+        &launch_base_branch_dropdown,
+        "Choose the base branch",
+    );
     let launch_new_worktree_mode = gtk::Box::new(gtk::Orientation::Horizontal, 5);
     launch_new_worktree_mode.add_css_class("tui-worktree-mode");
     launch_new_worktree_mode.append(&launch_new_worktree_radio);
-    launch_new_worktree_mode.append(&new_worktree_fields);
-    launch_new_worktree_mode.set_visible(false);
+    launch_new_worktree_mode.append(&launch_branch);
+    launch_new_worktree_mode.append(&launch_base_branch_selector);
     launch_form.append(&launch_project.0);
     launch_form.append(&launch_existing_worktree_mode);
     launch_form.append(&launch_new_worktree_mode);
@@ -989,6 +1020,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .default_height(800)
         .content(&overlay)
         .build();
+    let close_application = app.clone();
+    window.connect_close_request(move |_| quit_on_main_window_close(|| close_application.quit()));
 
     let git_window = build_modal_window(app, &window, "Emacs actions", 420, 180, &git_surface);
     let claude_model_window = build_modal_window(
@@ -1088,7 +1121,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_project_choices,
         launch_project_completion,
         launch_project_completion_items,
-        launch_worktree: launch_worktree.1,
+        launch_worktree,
         launch_worktree_dropdown,
         launch_worktree_choices,
         launch_worktree_completion,
@@ -1100,8 +1133,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_name: launch_name.1,
         launch_args: launch_args.1,
         launch_prompt: launch_prompt.1,
-        launch_branch: launch_branch.1,
-        launch_base_branch: launch_base_branch.1,
+        launch_branch,
+        launch_base_branch,
         launch_base_branch_dropdown,
         launch_base_branch_choices,
         launch_base_branch_completion,
@@ -1154,6 +1187,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         session_context_bar: session_context_bar.clone(),
         context_input: context_input.clone(),
         context_last_input: context_last_input.clone(),
+        context_pr,
+        context_pr_number,
+        context_pr_title,
+        context_pr_author,
+        context_pr_threads,
         context_branch_review: context_branch_review.clone(),
         context_magit: context_magit.clone(),
         sidebar_panel: sidebar_panel.clone(),
@@ -1178,9 +1216,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         projects: Rc::new(RefCell::new(ProjectPreferences::default())),
         quick_launch: Rc::new(RefCell::new(QuickLaunchPreferences::default())),
         pr_preferences: Rc::new(RefCell::new(PrPreferences::default())),
+        pr_context_cache: Rc::new(RefCell::new(HashMap::new())),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         launch_choice_sequence: Rc::new(Cell::new(0)),
         updating_launch_choices: Rc::new(Cell::new(false)),
+        selected_pr: Rc::new(RefCell::new(None)),
     };
 
     let dialog_workspace = workspace.clone();
@@ -1243,6 +1283,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             );
         }
     });
+    let pr_context_workspace = workspace.clone();
+    workspace.context_pr_number.connect_clicked(move |_| {
+        pr_context_workspace.open_selected_pr_context();
+    });
 
     let selected_workspace = workspace.clone();
     list.connect_row_selected(move |_, row| {
@@ -1259,6 +1303,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         }
         selected_workspace.acknowledge_session(id.as_str());
         selected_workspace.render_history(Some(id.as_str()));
+        selected_workspace.refresh_selected_pr_context(id.as_str());
         selected_workspace.search_button.set_sensitive(true);
         selected_workspace.save_preference("selectedSessionId", serde_json::json!(id.as_str()));
         selected_workspace.update_emacs_actions();
@@ -1543,6 +1588,7 @@ impl Workspace {
                 self.session_context_bar.set_visible(false);
                 self.selected_session.borrow_mut().take();
                 self.render_history(None);
+                self.clear_selected_pr_context();
                 self.search_button.set_sensitive(false);
                 self.update_emacs_actions();
                 self.update_claude_actions();
@@ -1743,6 +1789,11 @@ fn build_modal_window<W: IsA<gtk::Widget>>(
     window
 }
 
+fn quit_on_main_window_close(quit: impl FnOnce()) -> glib::Propagation {
+    quit();
+    glib::Propagation::Proceed
+}
+
 fn install_modal_escape_handler(window: &gtk::Window) {
     let controller = gtk::EventControllerKey::new();
     controller.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -1777,28 +1828,74 @@ fn add_modal_close_button(surface: &gtk::Box, window: &gtk::Window, tooltip: &st
     surface.append(&row);
 }
 
-fn launch_entry_with_hint(label: &str, placeholder: &str, hint: &str) -> (gtk::Box, gtk::Entry) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    row.add_css_class("tui-setting-row");
-    let label = gtk::Label::new(Some(label));
-    label.set_xalign(0.0);
-    label.set_width_chars(18);
-    row.append(&label);
-    let controls = gtk::Box::new(gtk::Orientation::Vertical, 1);
-    controls.set_hexpand(true);
+fn launch_mode_entry(label: &str, placeholder: &str) -> gtk::Entry {
     let entry = gtk::Entry::builder()
         .placeholder_text(placeholder)
-        .width_chars(42)
+        .width_chars(16)
         .hexpand(true)
         .build();
     entry.add_css_class("tui-setting-entry");
-    controls.append(&entry);
-    let hint_label = gtk::Label::new(Some(hint));
-    hint_label.set_xalign(0.0);
-    hint_label.add_css_class("tui-muted");
-    controls.append(&hint_label);
-    row.append(&controls);
-    (row, entry)
+    entry.update_property(&[
+        gtk::accessible::Property::Label(label),
+        gtk::accessible::Property::Autocomplete(gtk::AccessibleAutocomplete::List),
+    ]);
+    entry
+}
+
+fn editable_choice_control(
+    entry: &gtk::Entry,
+    dropdown: &gtk::DropDown,
+    dropdown_label: &str,
+) -> gtk::Box {
+    let selected_factory = gtk::SignalListItemFactory::new();
+    selected_factory.connect_setup(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        item.set_child(Some(&gtk::Label::new(None)));
+    });
+    dropdown.set_factory(Some(&selected_factory));
+
+    let list_factory = gtk::SignalListItemFactory::new();
+    list_factory.connect_setup(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let label = gtk::Label::new(None);
+        label.set_xalign(0.0);
+        item.set_child(Some(&label));
+    });
+    list_factory.connect_bind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(label) = item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Label>().ok())
+        else {
+            return;
+        };
+        let Some(value) = item
+            .item()
+            .and_then(|value| value.downcast::<gtk::StringObject>().ok())
+        else {
+            return;
+        };
+        label.set_label(&value.string());
+    });
+    dropdown.set_list_factory(Some(&list_factory));
+    dropdown.set_hexpand(false);
+    dropdown.set_size_request(34, -1);
+    dropdown.set_tooltip_text(Some(dropdown_label));
+    dropdown.update_property(&[gtk::accessible::Property::Label(dropdown_label)]);
+
+    let control = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    control.add_css_class("linked");
+    control.add_css_class("tui-editable-choice");
+    control.set_hexpand(true);
+    control.append(entry);
+    control.append(dropdown);
+    control
 }
 
 #[allow(deprecated)]
@@ -1954,11 +2051,21 @@ fn display_name(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::is_modal_escape_key;
+    use super::{is_modal_escape_key, quit_on_main_window_close};
 
     #[test]
     fn only_escape_is_a_modal_dismissal_key() {
         assert!(is_modal_escape_key(gtk::gdk::Key::Escape));
         assert!(!is_modal_escape_key(gtk::gdk::Key::Return));
+    }
+
+    #[test]
+    fn closing_the_main_window_requests_application_quit() {
+        let mut quit_requested = false;
+
+        let propagation = quit_on_main_window_close(|| quit_requested = true);
+
+        assert!(quit_requested);
+        assert_eq!(propagation, glib::Propagation::Proceed);
     }
 }

@@ -70,6 +70,58 @@ fn worktree_root_resolves_nested_directories_in_linked_checkouts() {
 }
 
 #[test]
+fn branch_for_worktree_resolves_the_checked_out_branch() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let extra = fixture.root().parent().unwrap().join("demo-branch-extra");
+    git(
+        fixture.root(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "pr-feature",
+            extra.to_str().unwrap(),
+            "main",
+        ],
+    );
+
+    assert_eq!(
+        manager.branch_for_worktree(&extra).unwrap().as_deref(),
+        Some("pr-feature")
+    );
+}
+
+#[test]
+fn branch_for_path_in_repo_resolves_a_file_in_another_worktree() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let extra = fixture.root().parent().unwrap().join("demo-edited-extra");
+    git(
+        fixture.root(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "edited-feature",
+            extra.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let edited = extra.join("src/edited.rs");
+    fs::create_dir_all(edited.parent().unwrap()).unwrap();
+    fs::write(&edited, "changed").unwrap();
+
+    assert_eq!(
+        manager
+            .branch_for_path_in_repo(fixture.root(), &edited)
+            .unwrap()
+            .as_deref(),
+        Some("edited-feature")
+    );
+}
+
+#[test]
 fn create_records_purpose_and_uses_the_sibling_template() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic());

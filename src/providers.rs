@@ -15,6 +15,71 @@ const LOG_HEAD_BYTES: u64 = 1024 * 1024;
 const LOG_PREVIEW_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_MESSAGE_CHARS: usize = 2_000;
 
+pub fn recent_mutated_paths(path: &Path, limit: usize) -> PersistResult<Vec<PathBuf>> {
+    let content = read_tail(path, LOG_PREVIEW_BYTES)?;
+    let entries = content
+        .text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    let mut seen = BTreeSet::new();
+    for entry in entries.iter().rev() {
+        let Some(entry) = entry.as_object() else {
+            continue;
+        };
+        if entry.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(blocks) = entry
+            .get("message")
+            .and_then(Value::as_object)
+            .and_then(|message| message.get("content"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for block in blocks {
+            let Some(block) = block.as_object() else {
+                continue;
+            };
+            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                continue;
+            }
+            let name = block
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !matches!(
+                name.as_str(),
+                "edit" | "write" | "multiedit" | "notebookedit"
+            ) {
+                continue;
+            }
+            let Some(input) = block.get("input").and_then(Value::as_object) else {
+                continue;
+            };
+            let Some(path) = input
+                .get("file_path")
+                .or_else(|| input.get("notebook_path"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            else {
+                continue;
+            };
+            if seen.insert(path.to_owned()) {
+                paths.push(PathBuf::from(path));
+                if paths.len() >= limit.max(1) {
+                    return Ok(paths);
+                }
+            }
+        }
+    }
+    Ok(paths)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentProvider {

@@ -1,12 +1,15 @@
 use super::*;
 use crate::azure::{
-    AzureClient, PrAttention, PrContext, PrItem, PrPreferences, acknowledge_attention,
-    reconcile_attention,
+    AzureClient, AzurePrList, PrAttention, PrContext, PrItem, PrPreferences, PrProjectState,
+    acknowledge_attention, reconcile_attention,
 };
 use crate::control::{
     PrAcknowledgeParams, PrLaunchReviewParams, PrListParams, PrSetAutoReviewParams,
 };
-use crate::worktrees::WorktreeManager;
+use crate::persist::now_millis;
+use crate::providers::{AgentProvider, ProviderDiscovery, recent_mutated_paths};
+use crate::worktrees::{WorktreeInfo, WorktreeManager};
+use std::collections::BTreeSet;
 
 #[derive(Debug)]
 struct LoadedPrContext {
@@ -15,9 +18,169 @@ struct LoadedPrContext {
     changed: Vec<u64>,
 }
 
+struct PreloadedPrContext {
+    selected: Option<SelectedPrContext>,
+    context: PrContext,
+}
+
 impl Workspace {
+    pub(super) fn refresh_selected_pr_context(&self, session_id: &str) {
+        self.clear_selected_pr_context();
+        let Some((project_root, worktree_path, kind, conversation_id, cwd)) =
+            self.sessions.borrow().get(session_id).and_then(|session| {
+                Some((
+                    session.record.project_root.clone(),
+                    session
+                        .record
+                        .worktree_path
+                        .clone()
+                        .or(session.record.cwd.clone())?,
+                    session.record.kind,
+                    session.record.conversation_id.clone(),
+                    session.record.cwd.clone(),
+                ))
+            })
+        else {
+            return;
+        };
+        let session_id = session_id.to_owned();
+        let attic = self.paths.attic_dir();
+        let preferences = self.pr_preferences.borrow().clone();
+        let live_paths = self.live_worktree_paths();
+        self.run_io(
+            move || {
+                let manager = WorktreeManager::new(attic);
+                let project_root = match project_root {
+                    Some(project_root) => project_root,
+                    None => manager.repository_root(&worktree_path)?,
+                };
+                let branch = manager.branch_for_worktree(&worktree_path)?;
+                let Some(list) = AzureClient::from_environment().list_active(&project_root)? else {
+                    return Err("project origin is not an Azure DevOps repository".into());
+                };
+                let root_key = project_root.to_string_lossy().to_string();
+                let state = preferences.project(&root_key);
+                let worktrees = manager
+                    .list(&project_root, &live_paths)
+                    .ok()
+                    .map(|inventory| inventory.worktrees)
+                    .unwrap_or_default();
+                let context = pr_context_from_list(project_root, list, &state, &worktrees);
+                let mut selected = branch.as_deref().and_then(|branch| {
+                    context
+                        .pull_requests
+                        .iter()
+                        .find(|item| item.pull_request.source_branch == branch)
+                        .map(|item| SelectedPrContext {
+                            session_id: session_id.clone(),
+                            pull_request: item.pull_request.clone(),
+                        })
+                });
+
+                if selected.is_none() {
+                    let provider = match kind {
+                        SessionKind::Claude => Some(AgentProvider::Claude),
+                        SessionKind::Codex => Some(AgentProvider::Codex),
+                        _ => None,
+                    };
+                    if let Some(provider) = provider {
+                        let discovered = ProviderDiscovery::from_environment()
+                            .discover(now_millis(), &BTreeSet::new())?;
+                        let agent_session = discovered.into_iter().find(|candidate| {
+                            candidate.provider == provider
+                                && conversation_id.as_ref().map_or_else(
+                                    || paths_match(candidate.cwd.as_deref(), cwd.as_deref()),
+                                    |conversation_id| {
+                                        candidate.provider_session_id == *conversation_id
+                                    },
+                                )
+                        });
+                        if let Some(agent_session) = agent_session {
+                            for path in recent_mutated_paths(&agent_session.log_path, 20)? {
+                                let Some(edit_branch) = manager
+                                    .branch_for_path_in_repo(&context.project_root, &path)?
+                                else {
+                                    continue;
+                                };
+                                if let Some(item) = context
+                                    .pull_requests
+                                    .iter()
+                                    .find(|item| item.pull_request.source_branch == edit_branch)
+                                {
+                                    selected = Some(SelectedPrContext {
+                                        session_id: session_id.clone(),
+                                        pull_request: item.pull_request.clone(),
+                                    });
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(PreloadedPrContext { selected, context })
+            },
+            |workspace, result| {
+                let Ok(loaded) = result else {
+                    return;
+                };
+                workspace.cache_pr_context(&loaded.context);
+                if workspace.pr_window.is_visible()
+                    && pr_cache_key(Path::new(workspace.pr_root.text().trim()))
+                        == pr_cache_key(&loaded.context.project_root)
+                {
+                    workspace.render_pr_context(&loaded.context);
+                }
+                if let Some(selected) = loaded.selected
+                    && workspace.selected_session_id().as_deref()
+                        == Some(selected.session_id.as_str())
+                {
+                    workspace.render_selected_pr_context(selected);
+                }
+            },
+        );
+    }
+
+    pub(super) fn clear_selected_pr_context(&self) {
+        self.selected_pr.borrow_mut().take();
+        self.context_pr.set_visible(false);
+    }
+
+    fn render_selected_pr_context(&self, context: SelectedPrContext) {
+        let pull_request = &context.pull_request;
+        self.context_pr_number
+            .set_label(&format!("PR #{}", pull_request.id));
+        self.context_pr_title.set_text(&pull_request.title);
+        self.context_pr_title
+            .set_tooltip_text(Some(&pull_request.title));
+        self.context_pr_author
+            .set_text(&format!("by {}", pull_request.author));
+        self.context_pr_threads
+            .set_text(&format!("● {} unresolved", pull_request.unresolved_threads));
+        *self.selected_pr.borrow_mut() = Some(context);
+        self.context_pr.set_visible(true);
+    }
+
+    pub(super) fn open_selected_pr_context(&self) {
+        let Some(context) = self.selected_pr.borrow().clone() else {
+            return;
+        };
+        let url = context.pull_request.url;
+        let launcher = gtk::UriLauncher::new(&url);
+        let workspace = self.clone();
+        launcher.launch(
+            Some(&self.window),
+            None::<&gio::Cancellable>,
+            move |result| {
+                if let Err(error) = result {
+                    workspace.show_error(&format!("Could not open PR: {error}"));
+                }
+            },
+        );
+    }
+
     pub(super) fn open_pr_for_project(&self, root: &str) {
         self.pr_root.set_text(root);
+        self.render_cached_pr_context(root);
         if self.pr_window.is_visible() {
             self.refresh_pr_panel(None);
         } else {
@@ -31,6 +194,7 @@ impl Workspace {
         {
             self.pr_root.set_text(&root);
         }
+        self.render_cached_pr_context(self.pr_root.text().trim());
         self.refresh_pr_panel(None);
     }
 
@@ -78,11 +242,15 @@ impl Workspace {
             );
             return;
         };
-        self.pr_loading.set_visible(true);
-        self.pr_spinner.start();
         let preferences = self.pr_preferences.borrow().clone();
         let attic = self.paths.attic_dir();
         let live_paths = self.live_worktree_paths();
+        let requested_key = pr_cache_key(&params.project_root);
+        let had_cached = self.pr_context_cache.borrow().contains_key(&requested_key);
+        self.pr_loading.set_visible(!had_cached);
+        if !had_cached {
+            self.pr_spinner.start();
+        }
         self.run_io(
             move || {
                 let project_root = params.project_root.canonicalize()?;
@@ -149,7 +317,12 @@ impl Workspace {
                         .pr_auto_toggle
                         .set_active(loaded.context.auto_review);
                     workspace.updating_pr_toggle.set(false);
-                    workspace.render_pr_context(&loaded.context);
+                    workspace.cache_pr_context(&loaded.context);
+                    if pr_cache_key(Path::new(workspace.pr_root.text().trim()))
+                        == pr_cache_key(&loaded.context.project_root)
+                    {
+                        workspace.render_pr_context(&loaded.context);
+                    }
 
                     if let Some(pending) = pending {
                         let id = pending.request.id.clone();
@@ -178,7 +351,11 @@ impl Workspace {
                 Err(error) => {
                     workspace.pr_spinner.stop();
                     workspace.pr_loading.set_visible(false);
-                    workspace.render_pr_message(&format!("ERROR  {error}"));
+                    if !had_cached
+                        && pr_cache_key(Path::new(workspace.pr_root.text().trim())) == requested_key
+                    {
+                        workspace.render_pr_message(&format!("ERROR  {error}"));
+                    }
                     workspace.report_failure(
                         pending,
                         ErrorCode::OperationRefused,
@@ -211,6 +388,25 @@ impl Workspace {
         for item in &context.pull_requests {
             self.pr_list.append(&self.pr_row(context, item));
         }
+    }
+
+    fn cache_pr_context(&self, context: &PrContext) {
+        self.pr_context_cache
+            .borrow_mut()
+            .insert(pr_cache_key(&context.project_root), context.clone());
+    }
+
+    fn render_cached_pr_context(&self, root: &str) -> bool {
+        let key = pr_cache_key(Path::new(root));
+        let context = self.pr_context_cache.borrow().get(&key).cloned();
+        let Some(context) = context else {
+            return false;
+        };
+        self.updating_pr_toggle.set(true);
+        self.pr_auto_toggle.set_active(context.auto_review);
+        self.updating_pr_toggle.set(false);
+        self.render_pr_context(&context);
+        true
     }
 
     fn pr_row(&self, context: &PrContext, item: &PrItem) -> gtk::Box {
@@ -542,6 +738,55 @@ impl Workspace {
                 .set_tooltip_text(Some(&format!("{count} pull request attention marker(s)")));
         }
     }
+}
+
+fn paths_match(left: Option<&Path>, right: Option<&Path>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            left.canonicalize().unwrap_or_else(|_| left.to_path_buf())
+                == right.canonicalize().unwrap_or_else(|_| right.to_path_buf())
+        }
+        _ => false,
+    }
+}
+
+fn pr_context_from_list(
+    project_root: PathBuf,
+    list: AzurePrList,
+    state: &PrProjectState,
+    worktrees: &[WorktreeInfo],
+) -> PrContext {
+    let pull_requests = list
+        .pull_requests
+        .into_iter()
+        .map(|pull_request| {
+            let worktree_path = worktrees
+                .iter()
+                .find(|worktree| {
+                    worktree.branch.as_deref() == Some(pull_request.source_branch.as_str())
+                })
+                .map(|worktree| worktree.path.clone());
+            PrItem {
+                attention: state.attention.get(&pull_request.id).copied(),
+                pull_request,
+                worktree_path,
+            }
+        })
+        .collect();
+    PrContext {
+        project_root,
+        repository: list.repository,
+        current_user: list.current_user,
+        auto_review: state.auto_review,
+        pull_requests,
+    }
+}
+
+fn pr_cache_key(root: &Path) -> String {
+    root.canonicalize()
+        .unwrap_or_else(|_| root.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
 }
 
 const fn attention_name(attention: PrAttention) -> &'static str {

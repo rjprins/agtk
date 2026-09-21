@@ -3,6 +3,7 @@ use super::*;
 use crate::persist::now_millis;
 use crate::session::Attachment;
 use std::ffi::OsString;
+use std::process::Command;
 use std::time::Instant;
 
 use crate::agent_hooks::ensure_claude_hook_settings;
@@ -359,39 +360,65 @@ impl Workspace {
                 } else {
                     Vec::new()
                 };
-                let mut command = Command::new(host_binary);
-                command
-                    .arg("--socket")
-                    .arg(&socket)
-                    .arg("--")
-                    .arg(&record.program)
-                    .args(&record.args)
-                    .args(&hook_args)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null());
-                command
-                    .env("AGMUX_INSTANCE", paths.name().as_str())
-                    .env("AGMUX_SESSION_ID", &id)
-                    .env("AGMUX_CONTROL_SOCKET", paths.control_socket());
-                if let Some(cwd) = &record.cwd {
-                    command.current_dir(cwd);
-                }
-                let mut child = match command.spawn() {
+                let host_plan = SessionHostLaunchPlan::detected(
+                    host_binary,
+                    paths.name().as_str(),
+                    &id,
+                    socket.clone(),
+                    record.program.clone(),
+                    record.args.clone(),
+                );
+                let spawn_host = |mut command: Command| {
+                    command
+                        .args(&hook_args)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .env("AGMUX_INSTANCE", paths.name().as_str())
+                        .env("AGMUX_SESSION_ID", &id)
+                        .env("AGMUX_CONTROL_SOCKET", paths.control_socket());
+                    if let Some(cwd) = &record.cwd {
+                        command.current_dir(cwd);
+                    }
+                    command.spawn()
+                };
+                let mut fallback = host_plan.fallback_command();
+                let mut child = match spawn_host(host_plan.command()) {
                     Ok(child) => child,
-                    Err(error) => {
-                        store.remove_session(&id)?;
-                        return Err(error.into());
+                    Err(scoped_error) => match fallback.take() {
+                        Some(command) => match spawn_host(command) {
+                            Ok(child) => child,
+                            Err(direct_error) => {
+                                store.remove_session(&id)?;
+                                return Err(io::Error::other(format!(
+                                    "isolated session launch failed: {scoped_error}. Direct launch failed: {direct_error}"
+                                ))
+                                .into());
+                            }
+                        },
+                        None => {
+                            store.remove_session(&id)?;
+                            return Err(scoped_error.into());
+                        }
                     }
                 };
-                let deadline = Instant::now() + Duration::from_secs(2);
+                let mut deadline = Instant::now() + Duration::from_secs(2);
                 let connected = loop {
                     match connect_session(&socket) {
                         Ok(connected) => break Ok(connected),
-                        Err(error) if Instant::now() >= deadline => break Err(error),
-                        Err(_) => {
-                            if child.try_wait()?.is_some() {
+                        Err(error) => {
+                            if let Some(status) = child.try_wait()? {
+                                if !status.success()
+                                    && let Some(command) = fallback.take()
+                                {
+                                    child = spawn_host(command)?;
+                                    deadline = Instant::now() + Duration::from_secs(2);
+                                    continue;
+                                }
                                 break Err(io::Error::other("session host exited during launch"));
+                            }
+                            if Instant::now() >= deadline {
+                                break Err(error);
                             }
                             thread::sleep(Duration::from_millis(20));
                         }
@@ -673,6 +700,7 @@ impl Workspace {
         };
         let row = gtk::ListBoxRow::new();
         row.set_widget_name(&id);
+        row.set_focus_on_click(false);
         row.add_css_class("tui-session-row");
         focus_terminal_on_row_activation(&row, &terminal);
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
@@ -897,11 +925,7 @@ fn backfill_restored_session_context(
 fn focus_terminal_on_row_activation(row: &gtk::ListBoxRow, terminal: &vte::Terminal) {
     let terminal = terminal.clone();
     row.connect_activate(move |_| {
-        let terminal = terminal.clone();
-        // GtkListBox focuses a clicked row after its activation handlers run.
-        glib::idle_add_local_once(move || {
-            terminal.grab_focus();
-        });
+        terminal.grab_focus();
     });
 }
 
@@ -917,7 +941,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires a private display"]
-    fn activating_a_session_row_focuses_its_terminal_after_click_handling() {
+    fn activating_a_session_row_focuses_its_terminal() {
         gtk::init().unwrap();
         let window = gtk::Window::new();
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -939,11 +963,6 @@ mod tests {
         assert!(!terminal.is_focus());
 
         row.emit_activate();
-        // Model the focus assignment GTK performs as the pointer click completes.
-        gtk::prelude::GtkWindowExt::set_focus(&window, Some(&row));
-        while context.pending() {
-            context.iteration(false);
-        }
 
         assert!(terminal.is_focus());
         window.close();

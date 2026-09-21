@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use agmux_native::control::{CreateSessionParams, SessionKind};
-use agmux_native::session::SessionLaunchPlan;
+use agmux_native::session::{SessionHostLaunchPlan, SessionLaunchPlan};
 
 #[test]
 fn custom_session_plan_preserves_validated_launch_details() {
@@ -120,4 +120,78 @@ fn session_plan_rejects_missing_project_and_nul_arguments() {
             .to_string()
             .contains("NUL")
     );
+}
+
+#[test]
+fn session_host_plan_uses_an_independent_systemd_user_scope() {
+    let plan = SessionHostLaunchPlan::new(
+        Some(PathBuf::from("/usr/bin/systemd-run")),
+        PathBuf::from("/opt/agmux/agmux-session"),
+        "default",
+        "codex-123-0",
+        PathBuf::from("/run/user/1000/agmux-native/default/sessions/codex-123-0.sock"),
+        PathBuf::from("/usr/bin/codex"),
+        vec!["resume".to_owned(), "conversation-id".to_owned()],
+    );
+
+    let command = plan.command();
+    let args = command
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert_eq!(command.get_program(), "/usr/bin/systemd-run");
+    assert_eq!(
+        args,
+        [
+            "--user",
+            "--scope",
+            "--quiet",
+            "--collect",
+            "--expand-environment=no",
+            "--unit=agmux-session-default-codex-123-0",
+            "--",
+            "/opt/agmux/agmux-session",
+            "--socket",
+            "/run/user/1000/agmux-native/default/sessions/codex-123-0.sock",
+            "--",
+            "/usr/bin/codex",
+            "resume",
+            "conversation-id",
+        ]
+    );
+    assert!(plan.fallback_command().is_some());
+}
+
+#[test]
+fn session_host_plan_falls_back_to_direct_launch_without_systemd_run() {
+    let plan = SessionHostLaunchPlan::new(
+        None,
+        PathBuf::from("/opt/agmux/agmux-session"),
+        "test-instance",
+        "claude-456-1",
+        PathBuf::from("/tmp/claude-456-1.sock"),
+        PathBuf::from("/usr/bin/claude"),
+        vec!["--resume".to_owned(), "conversation-id".to_owned()],
+    );
+
+    let command = plan.command();
+    let args = command
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert_eq!(command.get_program(), "/opt/agmux/agmux-session");
+    assert_eq!(
+        args,
+        [
+            "--socket",
+            "/tmp/claude-456-1.sock",
+            "--",
+            "/usr/bin/claude",
+            "--resume",
+            "conversation-id",
+        ]
+    );
+    assert!(plan.fallback_command().is_none());
 }

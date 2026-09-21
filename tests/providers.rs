@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 use std::fs;
 
 use agmux_native::control::SessionKind;
-use agmux_native::providers::{AgentProvider, DiscoveryRoots, ProviderDiscovery, RestoreTarget};
+use agmux_native::providers::{
+    AgentProvider, DiscoveryRoots, ProviderDiscovery, RestoreTarget, recent_mutated_paths,
+};
 
 #[test]
 fn discovery_deduplicates_recent_logs_and_excludes_live_conversations() {
@@ -133,5 +135,27 @@ fn preview_is_bounded_and_restore_uses_provider_specific_direct_arguments() {
     assert_eq!(
         codex.restore_plan(RestoreTarget::default()).params.args,
         ["resume", "codex-9"]
+    );
+}
+
+#[test]
+fn recent_mutated_paths_only_tracks_claude_file_mutations_newest_first() {
+    let fixture = tempfile::tempdir().unwrap();
+    let log = fixture.path().join("session.jsonl");
+    fs::write(
+        &log,
+        concat!(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{\"file_path\":\"/repo/read-only.rs\"}},{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/repo/older.rs\"}}]}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Write\",\"input\":{\"file_path\":\"/repo/newer.rs\"}},{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"/repo/older.rs\"}}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        recent_mutated_paths(&log, 20).unwrap(),
+        [
+            std::path::PathBuf::from("/repo/newer.rs"),
+            std::path::PathBuf::from("/repo/older.rs")
+        ]
     );
 }

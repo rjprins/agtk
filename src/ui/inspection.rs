@@ -115,7 +115,7 @@ impl Workspace {
                 UiNode {
                     id: "launch-existing-worktree".to_owned(),
                     role: "radio".to_owned(),
-                    label: Some("Use existing worktree".to_owned()),
+                    label: Some("Existing worktree".to_owned()),
                     is_visible: self.launch_existing_worktree_mode.is_visible(),
                     is_enabled: self.launch_existing_worktree_radio.is_sensitive(),
                     is_selected: self.launch_existing_worktree_radio.is_active(),
@@ -483,6 +483,21 @@ impl Workspace {
                                             children: Vec::new(),
                                         },
                                     ],
+                                },
+                                UiNode {
+                                    id: "pr-context".to_owned(),
+                                    role: "status".to_owned(),
+                                    label: self.selected_pr.borrow().as_ref().map(|context| {
+                                        format!(
+                                            "PR #{}: {}",
+                                            context.pull_request.id, context.pull_request.title
+                                        )
+                                    }),
+                                    is_visible: self.context_pr.is_visible(),
+                                    is_enabled: true,
+                                    is_selected: false,
+                                    bounds: widget_bounds(&self.context_pr, &self.window),
+                                    children: Vec::new(),
                                 },
                             ],
                         }],

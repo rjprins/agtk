@@ -9,13 +9,42 @@ use std::collections::BTreeMap;
 const PROJECT_PLACEHOLDER: &str = "Search projects or type a path…";
 const WORKTREE_PLACEHOLDER: &str = "Search worktrees…";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorktreeModePresentation {
+    existing_row_visible: bool,
+    new_row_visible: bool,
+    existing_fields_enabled: bool,
+    new_fields_enabled: bool,
+}
+
+const fn worktree_mode_presentation(creating: bool) -> WorktreeModePresentation {
+    WorktreeModePresentation {
+        existing_row_visible: true,
+        new_row_visible: true,
+        existing_fields_enabled: !creating,
+        new_fields_enabled: creating,
+    }
+}
+
 impl Workspace {
     fn set_launch_worktree_mode(&self, creating: bool) {
         self.launch_creating_worktree.set(creating);
-        self.launch_existing_worktree_mode.set_visible(!creating);
-        self.launch_new_worktree_mode.set_visible(creating);
+        let presentation = worktree_mode_presentation(creating);
+        self.launch_existing_worktree_mode
+            .set_visible(presentation.existing_row_visible);
+        self.launch_new_worktree_mode
+            .set_visible(presentation.new_row_visible);
+        self.launch_worktree
+            .set_sensitive(presentation.existing_fields_enabled);
+        self.launch_worktree_dropdown
+            .set_sensitive(presentation.existing_fields_enabled);
+        self.launch_branch
+            .set_sensitive(presentation.new_fields_enabled);
+        self.launch_base_branch
+            .set_sensitive(presentation.new_fields_enabled);
+        self.launch_base_branch_dropdown
+            .set_sensitive(presentation.new_fields_enabled);
         if creating {
-            self.launch_worktree.set_text("");
             self.launch_cwd.set_text(self.launch_project.text().trim());
             if self.launch_branch.text().trim().is_empty() {
                 self.launch_branch.set_text(&generated_branch_name());
@@ -462,6 +491,9 @@ impl Workspace {
         let base_workspace = self.clone();
         self.launch_base_branch_dropdown
             .connect_selected_notify(move |dropdown| {
+                if base_workspace.updating_launch_choices.get() {
+                    return;
+                }
                 let Some(value) = dropdown
                     .selected_item()
                     .and_then(|item| item.downcast::<gtk::StringObject>().ok())
@@ -478,14 +510,21 @@ impl Workspace {
     fn refresh_launch_base_branches(&self) {
         let root = launch_path_text(&self.launch_project).unwrap_or_default();
         if root.is_empty() {
-            replace_string_list(&self.launch_base_branch_choices, &[]);
+            let branches = base_branch_choices(Vec::new());
+            self.updating_launch_choices.set(true);
+            replace_string_list(&self.launch_base_branch_choices, &branches);
             self.launch_base_branch
                 .set_placeholder_text(Some(DEFAULT_BASE_BRANCH));
             replace_completion_items(
                 &self.launch_base_branch_completion,
                 &self.launch_base_branch_completion_items,
-                Vec::new(),
+                branches
+                    .iter()
+                    .map(|branch| (branch.clone(), branch.clone()))
+                    .collect(),
             );
+            self.launch_base_branch_dropdown.set_selected(0);
+            self.updating_launch_choices.set(false);
             return;
         }
         let manager = WorktreeManager::new(self.paths.attic_dir());
@@ -495,6 +534,8 @@ impl Workspace {
                 let Ok(branches) = result else {
                     return;
                 };
+                let branches = base_branch_choices(branches);
+                workspace.updating_launch_choices.set(true);
                 replace_string_list(&workspace.launch_base_branch_choices, &branches);
                 workspace
                     .launch_base_branch
@@ -511,12 +552,16 @@ impl Workspace {
                         .map(|branch| (branch.clone(), branch.clone()))
                         .collect(),
                 );
-                if let Some(branch) = branches.first() {
-                    if workspace.launch_base_branch.text().trim().is_empty() {
-                        workspace.launch_base_branch.set_text(branch);
-                    }
-                    workspace.launch_base_branch_dropdown.set_selected(0);
+                if workspace.launch_base_branch.text().trim().is_empty() {
+                    workspace.launch_base_branch.set_text(DEFAULT_BASE_BRANCH);
                 }
+                let selected = branches
+                    .iter()
+                    .position(|branch| branch == workspace.launch_base_branch.text().trim())
+                    .map(|index| index as u32)
+                    .unwrap_or(gtk::INVALID_LIST_POSITION);
+                workspace.launch_base_branch_dropdown.set_selected(selected);
+                workspace.updating_launch_choices.set(false);
             },
         );
     }
@@ -674,6 +719,12 @@ fn replace_string_list(model: &gtk::StringList, values: &[String]) {
     model.splice(0, model.n_items(), &values);
 }
 
+fn base_branch_choices(mut branches: Vec<String>) -> Vec<String> {
+    branches.retain(|branch| branch != DEFAULT_BASE_BRANCH);
+    branches.insert(0, DEFAULT_BASE_BRANCH.to_owned());
+    branches
+}
+
 fn replace_completion_items(
     model: &gtk::ListStore,
     items: &Rc<RefCell<Vec<(String, String)>>>,
@@ -764,4 +815,32 @@ fn project_name(path: &str) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or(path)
         .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{base_branch_choices, worktree_mode_presentation};
+
+    #[test]
+    fn both_worktree_mode_rows_remain_visible() {
+        let existing = worktree_mode_presentation(false);
+        assert!(existing.existing_row_visible);
+        assert!(existing.new_row_visible);
+        assert!(existing.existing_fields_enabled);
+        assert!(!existing.new_fields_enabled);
+
+        let new = worktree_mode_presentation(true);
+        assert!(new.existing_row_visible);
+        assert!(new.new_row_visible);
+        assert!(!new.existing_fields_enabled);
+        assert!(new.new_fields_enabled);
+    }
+
+    #[test]
+    fn origin_main_is_the_first_base_branch_choice() {
+        assert_eq!(
+            base_branch_choices(vec!["feature/test".to_owned(), "main".to_owned()]),
+            ["origin/main", "feature/test", "main"]
+        );
+    }
 }
