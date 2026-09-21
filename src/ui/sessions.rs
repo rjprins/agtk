@@ -674,6 +674,7 @@ impl Workspace {
         let row = gtk::ListBoxRow::new();
         row.set_widget_name(&id);
         row.add_css_class("tui-session-row");
+        focus_terminal_on_row_activation(&row, &terminal);
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
         content.add_css_class("tui-session-content");
         let mainline = gtk::Box::new(gtk::Orientation::Vertical, 1);
@@ -893,14 +894,60 @@ fn backfill_restored_session_context(
     }
 }
 
+fn focus_terminal_on_row_activation(row: &gtk::ListBoxRow, terminal: &vte::Terminal) {
+    let terminal = terminal.clone();
+    row.connect_activate(move |_| {
+        let terminal = terminal.clone();
+        // GtkListBox focuses a clicked row after its activation handlers run.
+        glib::idle_add_local_once(move || {
+            terminal.grab_focus();
+        });
+    });
+}
+
 #[cfg(test)]
 mod tests {
-    use super::backfill_restored_session_context;
+    use super::{backfill_restored_session_context, focus_terminal_on_row_activation};
     use crate::control::SessionKind;
     use crate::persist::SessionRecord;
     use crate::worktrees::WorktreeManager;
+    use gtk::prelude::*;
     use std::fs;
     use std::process::Command;
+
+    #[test]
+    #[ignore = "requires a private display"]
+    fn activating_a_session_row_focuses_its_terminal_after_click_handling() {
+        gtk::init().unwrap();
+        let window = gtk::Window::new();
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let list = gtk::ListBox::new();
+        let row = gtk::ListBoxRow::new();
+        let terminal = vte::Terminal::new();
+        list.append(&row);
+        content.append(&list);
+        content.append(&terminal);
+        window.set_child(Some(&content));
+        focus_terminal_on_row_activation(&row, &terminal);
+        window.present();
+        let context = glib::MainContext::default();
+        while context.pending() {
+            context.iteration(false);
+        }
+        gtk::prelude::GtkWindowExt::set_focus(&window, Some(&row));
+        assert!(row.is_focus());
+        assert!(!terminal.is_focus());
+
+        row.emit_activate();
+        // Model the focus assignment GTK performs as the pointer click completes.
+        gtk::prelude::GtkWindowExt::set_focus(&window, Some(&row));
+        while context.pending() {
+            context.iteration(false);
+        }
+
+        assert!(terminal.is_focus());
+        window.close();
+    }
 
     #[test]
     fn recovery_backfills_only_restored_agent_session_context() {
