@@ -358,6 +358,14 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .default_height(800)
         .content(&overlay)
         .build();
+    // A half-screen tile gives the terminal the room; the toggle still shows the sidebar.
+    let narrow = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+        adw::BreakpointConditionLengthType::MaxWidth,
+        960.0,
+        adw::LengthUnit::Sp,
+    ));
+    narrow.add_setter(&sidebar_panel, "visible", Some(&false.to_value()));
+    window.add_breakpoint(narrow);
     let close_application = app.clone();
     window.connect_close_request(move |_| quit_on_main_window_close(|| close_application.quit()));
 
