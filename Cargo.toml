@@ -17,6 +17,7 @@ serde_json = "1"
 rusqlite = "0.40.2"
 vte = { package = "vte4", version = "0.10.0", features = ["gtk_v4_18", "v0_84"] }
 regex = "1"
+webkit6 = "=0.6.1"
 
 [dependencies.adw]
 package = "libadwaita"
@@ -25,3 +26,6 @@ features = ["gtk_v4_22", "v1_9"]
 
 [dev-dependencies]
 tempfile = "3.23"
+
+[build-dependencies]
+glib-build-tools = "=0.22.8"
