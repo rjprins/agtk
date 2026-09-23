@@ -572,7 +572,7 @@ impl Workspace {
             .set_text(worktree.to_string_lossy().as_ref());
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
-        self.worktree_window.hide();
+        self.worktrees.modal.hide();
         self.launch.modal.present();
     }
 

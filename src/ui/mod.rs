@@ -89,12 +89,7 @@ struct Workspace {
     launch_button: gtk::Button,
     launch: launch_ui::LaunchDialog,
     worktree_button: gtk::Button,
-    worktree_window: modal::Modal,
-    worktree_root: gtk::Entry,
-    worktree_branch: gtk::Entry,
-    worktree_base: gtk::Entry,
-    worktree_purpose: gtk::Entry,
-    worktree_list: gtk::Box,
+    worktrees: worktrees_ui::WorktreeDialog,
     agent_button: gtk::Button,
     agents: agents_ui::AgentDialog,
     history_button: gtk::Button,
@@ -365,42 +360,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     launch_button.set_tooltip_text(Some("Launch a shell, Codex, Claude, or Gemini session"));
 
-    let worktree_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    worktree_surface.set_margin_top(18);
-    worktree_surface.set_margin_bottom(18);
-    worktree_surface.set_margin_start(18);
-    worktree_surface.set_margin_end(18);
-    let worktree_heading = gtk::Label::new(Some("Worktrees"));
-    worktree_heading.set_xalign(0.0);
-    worktree_heading.add_css_class("heading");
-    worktree_heading.set_visible(false);
-    worktree_surface.append(&worktree_heading);
-    let worktree_root = launch_entry("Project root", "absolute repository root");
-    let worktree_refresh = gtk::Button::builder()
-        .icon_name("view-refresh-symbolic")
-        .build();
-    worktree_refresh.add_css_class("flat");
-    worktree_root.0.append(&worktree_refresh);
-    worktree_surface.append(&worktree_root.0);
-    let worktree_branch = launch_entry("New branch", "concise-kebab-case");
-    let worktree_base = launch_entry("Base", "default branch when empty");
-    let worktree_purpose = launch_entry("Purpose", "why this worktree exists");
-    worktree_surface.append(&worktree_branch.0);
-    worktree_surface.append(&worktree_base.0);
-    worktree_surface.append(&worktree_purpose.0);
-    let worktree_create = gtk::Button::with_label("Create worktree");
-    worktree_create.add_css_class("suggested-action");
-    worktree_create.set_halign(gtk::Align::End);
-    worktree_surface.append(&worktree_create);
-    let worktree_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    let worktree_scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .min_content_width(680)
-        .min_content_height(180)
-        .max_content_height(440)
-        .child(&worktree_list)
-        .build();
-    worktree_surface.append(&worktree_scroller);
     let worktree_button = menu_item("Worktrees");
     worktree_button.set_sensitive(false);
     worktree_button.set_tooltip_text(Some("Inspect, create, and safely reap worktrees"));
@@ -527,7 +486,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         &claude_model_surface,
     );
     let launch = launch_ui::LaunchDialog::build(&window);
-    let worktree_window = modal::Modal::new(&window, "Worktrees", 900, 700, &worktree_surface);
+    let worktrees = worktrees_ui::WorktreeDialog::build(&window);
     let history_window = modal::Modal::new(&window, "Prompt history", 620, 600, &history_surface);
     let search_window = modal::Modal::new(&window, "Search terminal", 650, -1, &search_surface);
     let preferences = preferences_ui::PreferencesDialog::build(&window);
@@ -557,12 +516,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         launch_button,
         launch,
         worktree_button,
-        worktree_window,
-        worktree_root: worktree_root.1,
-        worktree_branch: worktree_branch.1,
-        worktree_base: worktree_base.1,
-        worktree_purpose: worktree_purpose.1,
-        worktree_list,
+        worktrees,
         agent_button,
         agents,
         history_button,
@@ -623,7 +577,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let dialog_workspace = workspace.clone();
     workspace.worktree_button.connect_clicked(move |_| {
         dialog_workspace.prepare_worktree_panel();
-        dialog_workspace.worktree_window.present();
+        dialog_workspace.worktrees.modal.present();
     });
     let dialog_workspace = workspace.clone();
     workspace.agent_button.connect_clicked(move |_| {
@@ -768,14 +722,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             );
         }
     });
-    let worktree_workspace = workspace.clone();
-    worktree_refresh.connect_clicked(move |_| worktree_workspace.refresh_worktree_panel());
-    let worktree_workspace = workspace.clone();
-    worktree_create.connect_clicked(move |_| worktree_workspace.create_worktree_from_panel());
-    let worktree_workspace = workspace.clone();
-    workspace.worktree_window.connect_show(move || {
-        worktree_workspace.prepare_worktree_panel();
-    });
+    workspace.connect_worktrees();
     let pr_workspace = workspace.clone();
     pr_refresh.connect_clicked(move |_| pr_workspace.refresh_pr_panel(None));
     let pr_workspace = workspace.clone();

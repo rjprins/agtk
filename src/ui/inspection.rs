@@ -361,7 +361,7 @@ impl Workspace {
                                         label: Some("Worktrees".to_owned()),
                                         is_visible: self.worktree_button.is_visible(),
                                         is_enabled: self.worktree_button.is_sensitive(),
-                                        is_selected: self.worktree_window.is_visible(),
+                                        is_selected: self.worktrees.modal.is_visible(),
                                         bounds: widget_bounds(&self.worktree_button, &self.window),
                                         children: Vec::new(),
                                     },
