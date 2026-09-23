@@ -59,9 +59,9 @@ pub(super) struct LaunchDialog {
     pub(super) new_worktree_radio: gtk::CheckButton,
     pub(super) existing_worktree_mode: adw::ActionRow,
     pub(super) new_worktree_mode: adw::ActionRow,
-    pub(super) name: gtk::Entry,
-    pub(super) args: gtk::Entry,
-    pub(super) prompt: gtk::Entry,
+    pub(super) name: adw::EntryRow,
+    pub(super) args: adw::EntryRow,
+    pub(super) prompt: adw::EntryRow,
     pub(super) branch: gtk::Entry,
     pub(super) base_branch: gtk::Entry,
     pub(super) base_branch_dropdown: gtk::DropDown,
@@ -261,6 +261,25 @@ impl LaunchDialog {
         location_group.add(&base_row);
         page.add(&location_group);
 
+        let name = adw::EntryRow::builder().title("Session Name").build();
+        let prompt = adw::EntryRow::builder().title("Initial Prompt").build();
+        let args = adw::EntryRow::builder()
+            .title("Extra Arguments (JSON array)")
+            .build();
+        args.set_tooltip_text(Some(
+            "For example [\"--model\", \"opus\"]; remembered per launch",
+        ));
+        let advanced = adw::ExpanderRow::builder()
+            .title("Advanced")
+            .subtitle("Name, initial prompt and extra arguments")
+            .build();
+        advanced.add_row(&name);
+        advanced.add_row(&prompt);
+        advanced.add_row(&args);
+        let advanced_group = adw::PreferencesGroup::new();
+        advanced_group.add(&advanced);
+        page.add(&advanced_group);
+
         let cancel = gtk::Button::with_label("Cancel");
         let submit = gtk::Button::with_label("Launch");
         submit.add_css_class("suggested-action");
@@ -304,9 +323,9 @@ impl LaunchDialog {
             new_worktree_radio,
             existing_worktree_mode,
             new_worktree_mode,
-            name: gtk::Entry::new(),
-            args: gtk::Entry::new(),
-            prompt: gtk::Entry::new(),
+            name,
+            args,
+            prompt,
             branch,
             base_branch,
             base_branch_dropdown,
@@ -441,9 +460,11 @@ impl Workspace {
             .worktree
             .set_text(&display_path(preferences.worktree_path.as_ref()));
         self.set_launch_worktree_mode(false);
-        self.launch.args.set_text(
-            &serde_json::to_string(&preferences.args).unwrap_or_else(|_| "[]".to_owned()),
-        );
+        self.launch.args.set_text(&if preferences.args.is_empty() {
+            String::new()
+        } else {
+            serde_json::to_string(&preferences.args).unwrap_or_default()
+        });
         self.apply_launch_flags(&preferences.flags);
         self.set_launch_agent(preferences.kind);
         self.launch.project_custom.set(false);
@@ -495,6 +516,9 @@ impl Workspace {
         };
         let name = optional_text(&self.launch.name);
         let initial_input = optional_text(&self.launch.prompt);
+        // Name and prompt belong to one launch; arguments are remembered.
+        self.launch.name.set_text("");
+        self.launch.prompt.set_text("");
         if let Ok(value) = serde_json::to_value(&preferences) {
             self.save_preference("quickLaunch", value);
         }
@@ -1107,15 +1131,15 @@ fn replace_completion_items(
     }
 }
 
-fn optional_path(entry: &gtk::Entry) -> Option<PathBuf> {
+fn optional_path(entry: &impl IsA<gtk::Editable>) -> Option<PathBuf> {
     optional_text(entry).map(|path| launch_model::expand_user_path(&path))
 }
 
-fn launch_path_text(entry: &gtk::Entry) -> Option<String> {
+fn launch_path_text(entry: &impl IsA<gtk::Editable>) -> Option<String> {
     optional_path(entry).map(|path| path.to_string_lossy().into_owned())
 }
 
-fn optional_text(entry: &gtk::Entry) -> Option<String> {
+fn optional_text(entry: &impl IsA<gtk::Editable>) -> Option<String> {
     let text = entry.text();
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_owned())
@@ -1126,7 +1150,7 @@ fn display_path(path: Option<&PathBuf>) -> String {
         .unwrap_or_default()
 }
 
-fn parse_arguments(entry: &gtk::Entry) -> Result<Vec<String>, String> {
+fn parse_arguments(entry: &impl IsA<gtk::Editable>) -> Result<Vec<String>, String> {
     let text = entry.text();
     let text = text.trim();
     if text.is_empty() {
