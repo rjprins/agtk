@@ -51,16 +51,19 @@ impl Workspace {
                 .unwrap_or("(none yet)"),
         );
         for input in session.history.iter().rev() {
-            let button = gtk::Button::with_label(input);
-            button.add_css_class("flat");
-            button.set_halign(gtk::Align::Fill);
-            button.set_tooltip_text(Some("Scroll the terminal to this prompt"));
+            let row = adw::ActionRow::builder()
+                .title(glib::markup_escape_text(input))
+                .title_lines(2)
+                .activatable(true)
+                .build();
+            row.set_tooltip_text(Some("Scroll the terminal to this prompt"));
+            row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
 
             let terminal = session.terminal.clone();
             let window = self.history_window.clone();
             let overlay = self.overlay.clone();
             let input = input.clone();
-            button.connect_clicked(move |_| {
+            row.connect_activated(move |_| {
                 let needle = history_needle(&input, 60);
                 let Ok(regex) = vte::Regex::for_search(&needle, PCRE2_UTF | PCRE2_LITERAL) else {
                     overlay.add_toast(adw::Toast::new("Could not search terminal scrollback"));
@@ -74,7 +77,7 @@ impl Workspace {
                 window.hide();
                 terminal.grab_focus();
             });
-            self.history_list.append(&button);
+            self.history_list.append(&row);
         }
     }
 }

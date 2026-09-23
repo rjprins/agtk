@@ -1,6 +1,25 @@
 use super::*;
 
 impl Workspace {
+    pub(super) fn open_search(&self) {
+        self.search_bar.set_search_mode(true);
+        self.search_entry.grab_focus();
+    }
+
+    /// Escape leaves the search and hands the keyboard back to the terminal.
+    pub(super) fn close_search(&self) {
+        self.search_bar.set_search_mode(false);
+        let terminal = self.selected_session_id().and_then(|id| {
+            self.sessions
+                .borrow()
+                .get(&id)
+                .map(|session| session.terminal.clone())
+        });
+        if let Some(terminal) = terminal {
+            terminal.grab_focus();
+        }
+    }
+
     pub(super) fn search_selected(&self, forward: bool) {
         let query = self.search_entry.text();
         if query.is_empty() {

@@ -165,8 +165,7 @@ impl Workspace {
                     }
                     UiSurface::History => false,
                     UiSurface::Search if self.search_button.is_sensitive() => {
-                        self.search_window.present();
-                        self.search_entry.grab_focus();
+                        self.open_search();
                         true
                     }
                     UiSurface::Search => false,

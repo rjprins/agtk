@@ -76,7 +76,7 @@ struct Workspace {
     git_button: gtk::MenuButton,
     claude_model_button: gtk::Button,
     claude_model_window: modal::Modal,
-    claude_model_list: gtk::Box,
+    claude_model_list: gtk::ListBox,
     selected_claude_preset: Rc<Cell<i32>>,
     pr_button: gtk::Button,
     prs: azure_ui::PrDialog,
@@ -87,11 +87,11 @@ struct Workspace {
     agent_button: gtk::Button,
     agents: agents_ui::AgentDialog,
     history_button: gtk::Button,
-    history_list: gtk::Box,
+    history_list: gtk::ListBox,
     history_window: modal::Modal,
     search_button: gtk::Button,
-    search_window: modal::Modal,
-    search_entry: gtk::Entry,
+    search_bar: gtk::SearchBar,
+    search_entry: gtk::SearchEntry,
     theme_button: gtk::Button,
     preferences: preferences_ui::PreferencesDialog,
     shortcut_button: gtk::Button,
@@ -282,13 +282,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     git_button.set_tooltip_text(Some("Open the selected worktree in Emacs"));
 
-    let claude_model_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
-    let claude_model_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    claude_model_surface.set_margin_top(18);
-    claude_model_surface.set_margin_bottom(18);
-    claude_model_surface.set_margin_start(18);
-    claude_model_surface.set_margin_end(18);
-    claude_model_surface.append(&claude_model_list);
+    let claude_model_list = boxed_list();
+    let claude_model_surface = dialog_page(
+        &claude_model_list,
+        "Ctrl+Shift+M moves to the next preset and Enter applies it.",
+    );
     let claude_model_button = gtk::Button::builder()
         .icon_name("power-profile-performance-symbolic")
         .sensitive(false)
@@ -316,41 +314,41 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     agent_button.set_sensitive(false);
     agent_button.set_tooltip_text(Some("Preview and restore recent Codex and Claude sessions"));
 
-    let history_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    let history_scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .min_content_width(360)
-        .max_content_height(420)
-        .child(&history_list)
-        .build();
-    let history_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    history_surface.set_margin_top(18);
-    history_surface.set_margin_bottom(18);
-    history_surface.set_margin_start(18);
-    history_surface.set_margin_end(18);
-    history_surface.append(&history_scroller);
+    let history_list = boxed_list();
+    let history_surface = dialog_page(
+        &history_list,
+        "Select a prompt to scroll the terminal back to it.",
+    );
     let history_button = gtk::Button::builder()
         .label("History (0)")
         .sensitive(false)
         .build();
     history_button.set_tooltip_text(Some("Scroll to a submitted prompt"));
 
-    let search_surface = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    search_surface.set_margin_top(18);
-    search_surface.set_margin_bottom(18);
-    search_surface.set_margin_start(18);
-    search_surface.set_margin_end(18);
-    let search_entry = gtk::Entry::builder()
-        .placeholder_text("Find literal text")
-        .width_chars(36)
+    let search_entry = gtk::SearchEntry::builder()
+        .placeholder_text("Find in terminal")
+        .width_chars(32)
         .build();
-    search_surface.append(&search_entry);
-    let search_previous = gtk::Button::builder().icon_name("go-up-symbolic").build();
-    search_previous.add_css_class("flat");
-    search_surface.append(&search_previous);
-    let search_next = gtk::Button::builder().icon_name("go-down-symbolic").build();
-    search_next.add_css_class("flat");
-    search_surface.append(&search_next);
+    let search_previous = gtk::Button::builder()
+        .icon_name("go-up-symbolic")
+        .tooltip_text("Previous match (Shift+Ctrl+G)")
+        .build();
+    let search_next = gtk::Button::builder()
+        .icon_name("go-down-symbolic")
+        .tooltip_text("Next match (Ctrl+G)")
+        .build();
+    let search_controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    search_controls.add_css_class("linked");
+    search_controls.append(&search_entry);
+    search_controls.append(&search_previous);
+    search_controls.append(&search_next);
+    // An inline bar like GNOME Console's, so the terminal stays visible while searching.
+    let search_bar = gtk::SearchBar::builder()
+        .child(&search_controls)
+        .show_close_button(true)
+        .build();
+    search_bar.connect_entry(&search_entry);
+    main_pane.add_top_bar(&search_bar);
     let search_button = gtk::Button::builder()
         .icon_name("edit-find-symbolic")
         .sensitive(false)
@@ -426,17 +424,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let close_application = app.clone();
     window.connect_close_request(move |_| quit_on_main_window_close(|| close_application.quit()));
 
-    let claude_model_window = modal::Modal::new(
-        &window,
-        "Claude model presets",
-        620,
-        520,
-        &claude_model_surface,
-    );
+    let claude_model_window =
+        modal::Modal::new(&window, "Claude Model", 520, 340, &claude_model_surface);
     let launch = launch_ui::LaunchDialog::build(&window);
     let worktrees = worktrees_ui::WorktreeDialog::build(&window);
-    let history_window = modal::Modal::new(&window, "Prompt history", 620, 600, &history_surface);
-    let search_window = modal::Modal::new(&window, "Search terminal", 650, -1, &search_surface);
+    let history_window = modal::Modal::new(&window, "Prompt History", 620, 560, &history_surface);
     let preferences = preferences_ui::PreferencesDialog::build(&window);
     let prs = azure_ui::PrDialog::build(&window);
     let agents = agents_ui::AgentDialog::build(&window);
@@ -465,7 +457,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         history_list,
         history_window,
         search_button,
-        search_window,
+        search_bar: search_bar.clone(),
         search_entry: search_entry.clone(),
         theme_button,
         preferences,
@@ -543,8 +535,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     });
     let dialog_workspace = workspace.clone();
     workspace.search_button.connect_clicked(move |_| {
-        if dialog_workspace.search_button.is_sensitive() {
-            dialog_workspace.search_window.present();
+        let open = !dialog_workspace.search_bar.is_search_mode();
+        dialog_workspace.search_bar.set_search_mode(open);
+        if open {
             dialog_workspace.search_entry.grab_focus();
         }
     });
@@ -674,6 +667,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     search_previous.connect_clicked(move |_| search_workspace.search_selected(false));
     let search_workspace = workspace.clone();
     search_entry.connect_activate(move |_| search_workspace.search_selected(true));
+    let search_workspace = workspace.clone();
+    search_entry.connect_next_match(move |_| search_workspace.search_selected(true));
+    let search_workspace = workspace.clone();
+    search_entry.connect_previous_match(move |_| search_workspace.search_selected(false));
+    let search_workspace = workspace.clone();
+    search_entry.connect_stop_search(move |_| search_workspace.close_search());
 
     let system_style_workspace = workspace.clone();
     style_manager.connect_dark_notify(move |_| system_style_workspace.apply_appearance());
@@ -714,6 +713,7 @@ impl Workspace {
                 self.render_history(None);
                 self.clear_selected_pr_context();
                 self.search_button.set_sensitive(false);
+                self.search_bar.set_search_mode(false);
                 self.update_emacs_actions();
                 self.update_claude_actions();
                 self.save_preference("selectedSessionId", serde_json::Value::Null);
@@ -885,6 +885,24 @@ fn sibling_binary(name: &str) -> PathBuf {
 fn quit_on_main_window_close(quit: impl FnOnce()) -> glib::Propagation {
     quit();
     glib::Propagation::Proceed
+}
+
+fn boxed_list() -> gtk::ListBox {
+    let list = gtk::ListBox::new();
+    list.add_css_class("boxed-list");
+    list.set_selection_mode(gtk::SelectionMode::None);
+    list
+}
+
+/// A scrolling libadwaita page with one described group around `list`.
+fn dialog_page(list: &gtk::ListBox, description: &str) -> adw::PreferencesPage {
+    let group = adw::PreferencesGroup::builder()
+        .description(description)
+        .build();
+    group.add(list);
+    let page = adw::PreferencesPage::new();
+    page.add(&group);
+    page
 }
 
 /// A flat, left-aligned text button that reads as a menu entry inside a popover.

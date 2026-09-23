@@ -219,16 +219,18 @@ impl Workspace {
             self.claude_model_list.remove(&child);
         }
         for preset in self.claude_presets.borrow().presets.clone() {
-            let button = gtk::Button::with_label(&format!(
-                "[{}]  {} / {}",
-                preset.name,
-                preset.model,
-                preset.effort.as_str()
-            ));
-            button.set_halign(gtk::Align::Fill);
+            let row = adw::ActionRow::builder()
+                .title(glib::markup_escape_text(&preset.name))
+                .subtitle(format!(
+                    "{} · {} effort",
+                    preset.model,
+                    preset.effort.as_str()
+                ))
+                .activatable(true)
+                .build();
             let workspace = self.clone();
             let preset_id = preset.id;
-            button.connect_clicked(move |_| {
+            row.connect_activated(move |_| {
                 let Some(session_id) = workspace.selected_session_id() else {
                     return;
                 };
@@ -241,7 +243,7 @@ impl Workspace {
                     None,
                 );
             });
-            self.claude_model_list.append(&button);
+            self.claude_model_list.append(&row);
         }
     }
 
@@ -249,17 +251,9 @@ impl Workspace {
         if !self.claude_model_window.is_visible() {
             return;
         }
-        let index = self.selected_claude_preset.get().max(0) as usize;
-        if let Some(button) = nth_child(&self.claude_model_list, index) {
-            button.grab_focus();
+        let index = self.selected_claude_preset.get().max(0);
+        if let Some(row) = self.claude_model_list.row_at_index(index) {
+            row.grab_focus();
         }
     }
-}
-
-fn nth_child(container: &gtk::Box, index: usize) -> Option<gtk::Widget> {
-    let mut child = container.first_child()?;
-    for _ in 0..=index {
-        child = child.next_sibling()?;
-    }
-    Some(child)
 }

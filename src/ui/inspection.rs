@@ -404,7 +404,7 @@ impl Workspace {
                                         label: Some("Search terminal".to_owned()),
                                         is_visible: self.search_button.is_visible(),
                                         is_enabled: self.search_button.is_sensitive(),
-                                        is_selected: self.search_window.is_visible(),
+                                        is_selected: self.search_bar.is_search_mode(),
                                         bounds: widget_bounds(&self.search_button, &self.window),
                                         children: Vec::new(),
                                     },

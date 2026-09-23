@@ -87,8 +87,7 @@ impl Workspace {
         });
         self.add_action("search", true, |workspace| {
             if workspace.selected_session_id().is_some() {
-                workspace.search_window.present();
-                workspace.search_entry.grab_focus();
+                workspace.open_search();
             }
         });
 
