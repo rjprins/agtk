@@ -15,6 +15,13 @@ pub struct BoundedOutput {
     pub stderr: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundedByteOutput {
+    pub status: ExitStatus,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub enum CommandError {
     Io(io::Error),
@@ -51,10 +58,23 @@ impl From<io::Error> for CommandError {
 }
 
 pub fn run_bounded(
-    mut command: Command,
+    command: Command,
     timeout: Duration,
     output_limit: usize,
 ) -> Result<BoundedOutput, CommandError> {
+    let output = run_bounded_bytes(command, timeout, output_limit)?;
+    Ok(BoundedOutput {
+        status: output.status,
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+pub fn run_bounded_bytes(
+    mut command: Command,
+    timeout: Duration,
+    output_limit: usize,
+) -> Result<BoundedByteOutput, CommandError> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -93,10 +113,10 @@ pub fn run_bounded(
     if stdout.exceeded || stderr.exceeded {
         return Err(CommandError::OutputExceeded(output_limit));
     }
-    Ok(BoundedOutput {
+    Ok(BoundedByteOutput {
         status,
-        stdout: String::from_utf8_lossy(&stdout.bytes).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr.bytes).into_owned(),
+        stdout: stdout.bytes,
+        stderr: stderr.bytes,
     })
 }
 
