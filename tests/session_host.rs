@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsFd;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -12,6 +12,59 @@ use agmux_native::session::receive_attachment;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
+
+#[test]
+fn session_host_preserves_x11_clipboard_access_on_wayland() {
+    let directory = tempfile::tempdir().expect("create runtime directory");
+    let wayland_socket = directory.path().join("wayland-test");
+    let _wayland = UnixListener::bind(&wayland_socket).expect("bind Wayland socket");
+    let authority = directory.path().join("xauthority");
+
+    for display in [Path::new("wayland-test"), wayland_socket.as_path()] {
+        let socket_path = directory.path().join("session.sock");
+        let script = concat!(
+            "printf 'x11:%s:%s\\n' \"${DISPLAY-unset}\" \"${XAUTHORITY-unset}\"; ",
+            "printf 'wayland:%s:%s\\n' \"$WAYLAND_DISPLAY\" \"$XDG_RUNTIME_DIR\"; ",
+            "printf 'ready\\n'; sleep 30"
+        );
+        let mut host = Command::new(env!("CARGO_BIN_EXE_agmux-session"))
+            .args(["--socket", socket_path.to_str().unwrap()])
+            .args(["--", "/bin/sh", "-c", script])
+            .env("DISPLAY", ":99")
+            .env("XAUTHORITY", &authority)
+            .env("WAYLAND_DISPLAY", display)
+            .env("XDG_RUNTIME_DIR", directory.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start session host");
+
+        wait_for_socket(&socket_path, &mut host);
+        let mut control = UnixStream::connect(&socket_path).expect("connect client");
+        let attachment = receive_attachment(&control).expect("attach client");
+        let mut output = String::from_utf8_lossy(&attachment.replay).into_owned();
+        let mut pty = File::from(attachment.pty);
+        if !output.contains("ready") {
+            output.push_str(&read_until(&mut pty, "ready", Duration::from_secs(2)));
+        }
+        control.write_all(b"K").expect("request shutdown");
+        wait_for_exit(&mut host, Duration::from_secs(2));
+
+        assert!(
+            output.contains(&format!("x11::99:{}", authority.display())),
+            "X11 clipboard environment was lost: {output:?}"
+        );
+        assert!(
+            output.contains(&format!(
+                "wayland:{}:{}",
+                display.display(),
+                directory.path().display()
+            )),
+            "Wayland clipboard environment was lost: {output:?}"
+        );
+    }
+}
 
 #[test]
 fn session_host_survives_disconnect_and_accepts_reattachment() {
