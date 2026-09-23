@@ -59,8 +59,27 @@ impl EmacsIntegration {
             EmacsAction::Magit => build_magit_eval(&path),
             EmacsAction::BranchReview => build_branch_review_eval(&path, base_branch.as_deref()),
         };
+        self.eval(&form)?;
+        Ok(EmacsOpenResult {
+            action,
+            path,
+            base_branch,
+        })
+    }
+
+    /// Visits `path` in a raised Emacs frame, at `line` and `column` when given.
+    pub fn open_file(
+        &self,
+        path: &Path,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> EmacsResult<()> {
+        self.eval(&build_open_file_eval(path, line, column))
+    }
+
+    fn eval(&self, form: &str) -> EmacsResult<()> {
         let mut command = Command::new(&self.command);
-        command.args(["-n", "-a", "", "--eval", &form]);
+        command.args(["-n", "-a", "", "--eval", form]);
         if let Some(display) =
             std::env::var_os("AGMUX_EMACS_DISPLAY").filter(|value| !value.is_empty())
         {
@@ -80,18 +99,29 @@ impl EmacsIntegration {
             )
             .into());
         }
-        Ok(EmacsOpenResult {
-            action,
-            path,
-            base_branch,
-        })
+        Ok(())
     }
+}
+
+pub fn build_open_file_eval(path: &Path, line: Option<u32>, column: Option<u32>) -> String {
+    let mut body = vec![format!(
+        "    (find-file {})",
+        elisp_string(&path.to_string_lossy())
+    )];
+    if let Some(line) = line.filter(|line| *line > 0) {
+        body.push("    (goto-char (point-min))".to_owned());
+        body.push(format!("    (forward-line {})", line - 1));
+        if let Some(column) = column.filter(|column| *column > 0) {
+            body.push(format!("    (move-to-column {})", column - 1));
+        }
+    }
+    wrap_raised_frame(None, &body)
 }
 
 pub fn build_magit_eval(worktree_path: &Path) -> String {
     let path = elisp_string(&worktree_path.to_string_lossy());
     wrap_raised_frame(
-        "magit",
+        Some("magit"),
         &[
             format!("    (let ((default-directory (file-name-as-directory {path})))"),
             "      (call-interactively 'magit-status))".to_owned(),
@@ -116,20 +146,22 @@ pub fn build_branch_review_eval(worktree_path: &Path, base_branch: Option<&str>)
     } else {
         body.push("      (call-interactively 'branch-review))".to_owned());
     }
-    wrap_raised_frame("branch-review", &body)
+    wrap_raised_frame(Some("branch-review"), &body)
 }
 
-fn wrap_raised_frame(package: &str, body: &[String]) -> String {
-    let mut lines = vec![
-        "(progn".to_owned(),
-        format!("  (require '{package} nil t)"),
+fn wrap_raised_frame(package: Option<&str>, body: &[String]) -> String {
+    let mut lines = vec!["(progn".to_owned()];
+    if let Some(package) = package {
+        lines.push(format!("  (require '{package} nil t)"));
+    }
+    lines.extend([
         "  (let ((frame (or (car (filtered-frame-list #'display-graphic-p))".to_owned(),
         "                   (let ((d (or (getenv \"DISPLAY\") (getenv \"WAYLAND_DISPLAY\"))))"
             .to_owned(),
         "                     (and d (ignore-errors (make-frame-on-display d))))".to_owned(),
         "                   (selected-frame))))".to_owned(),
         "    (select-frame frame)".to_owned(),
-    ];
+    ]);
     lines.extend_from_slice(body);
     lines.extend([
         "    (make-frame-visible frame)".to_owned(),

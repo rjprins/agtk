@@ -9,6 +9,7 @@ pub mod claude_presets;
 pub mod command_runner;
 pub mod control;
 pub mod emacs;
+pub mod file_links;
 pub mod history;
 pub mod instance;
 pub mod io_worker;

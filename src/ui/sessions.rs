@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use crate::agent_hooks::ensure_claude_hook_settings;
 use crate::agent_status::ScreenTracker;
+use crate::emacs::EmacsIntegration;
 use crate::session_names::next_worktree_session_name;
 
 // Matches the original agmux, which sent 3 events for a browser wheel notch.
@@ -615,13 +616,20 @@ impl Workspace {
 
     fn enable_terminal_links(&self, terminal: &vte::Terminal) {
         terminal.set_allow_hyperlink(true);
-        match vte::Regex::for_match(URL_PATTERN, PCRE2_UTF | PCRE2_MULTILINE) {
-            Ok(regex) => {
-                let tag = terminal.match_add_regex(&regex, 0);
-                terminal.match_set_cursor_name(tag, "pointer");
-            }
-            Err(error) => eprintln!("agmux-native: invalid URL pattern: {error}"),
-        }
+        let add_pattern =
+            |pattern: &str| match vte::Regex::for_match(pattern, PCRE2_UTF | PCRE2_MULTILINE) {
+                Ok(regex) => {
+                    let tag = terminal.match_add_regex(&regex, 0);
+                    terminal.match_set_cursor_name(tag, "pointer");
+                    tag
+                }
+                Err(error) => {
+                    eprintln!("agmux-native: invalid link pattern: {error}");
+                    -1
+                }
+            };
+        let url_tag = add_pattern(URL_PATTERN);
+        let file_tag = add_pattern(crate::file_links::TERMINAL_PATTERN);
 
         // Ctrl+click, because agent TUIs usually grab plain mouse clicks.
         let click = gtk::GestureClick::new();
@@ -638,25 +646,100 @@ impl Workspace {
             let Some(terminal) = gesture.widget().and_downcast::<vte::Terminal>() else {
                 return;
             };
-            let Some(url) = terminal
-                .check_hyperlink_at(x, y)
-                .or_else(|| terminal.check_match_at(x, y).0)
-            else {
+            let target = match terminal.check_hyperlink_at(x, y) {
+                Some(uri) => Some((uri.to_string(), url_tag)),
+                None => match terminal.check_match_at(x, y) {
+                    (Some(text), tag) if tag == url_tag || tag == file_tag => {
+                        Some((text.to_string(), tag))
+                    }
+                    _ => None,
+                },
+            };
+            let Some((text, tag)) = target else {
                 return;
             };
             gesture.set_state(gtk::EventSequenceState::Claimed);
-            let launch_workspace = workspace.clone();
-            gtk::UriLauncher::new(&url).launch(
-                Some(&workspace.window),
-                None::<&gio::Cancellable>,
-                move |result| {
-                    if let Err(error) = result {
-                        launch_workspace.show_error(&format!("Could not open link: {error}"));
-                    }
-                },
-            );
+            if tag == file_tag {
+                workspace.open_terminal_file(&terminal, &text);
+            } else if let Some(path) = text
+                .starts_with("file://")
+                .then(|| gio::File::for_uri(&text).path())
+                .flatten()
+            {
+                workspace.open_file_in_emacs(path, None, None);
+            } else {
+                let launch_workspace = workspace.clone();
+                gtk::UriLauncher::new(&text).launch(
+                    Some(&workspace.window),
+                    None::<&gio::Cancellable>,
+                    move |result| {
+                        if let Err(error) = result {
+                            launch_workspace.show_error(&format!("Could not open link: {error}"));
+                        }
+                    },
+                );
+            }
         });
         terminal.add_controller(click);
+    }
+
+    /// Opens a path printed in the terminal, resolved against where that terminal runs.
+    fn open_terminal_file(&self, terminal: &vte::Terminal, text: &str) {
+        let Some(link) = crate::file_links::parse_link(text) else {
+            return;
+        };
+        // The shell's live directory (OSC 7) first, then where the session started.
+        let mut bases = terminal
+            .current_directory_uri()
+            .and_then(|uri| gio::File::for_uri(&uri).path())
+            .into_iter()
+            .collect::<Vec<_>>();
+        bases.extend(
+            self.sessions
+                .borrow()
+                .values()
+                .find(|session| &session.terminal == terminal)
+                .and_then(|session| {
+                    session
+                        .record
+                        .cwd
+                        .clone()
+                        .or_else(|| session.record.worktree_path.clone())
+                }),
+        );
+        let home = glib::home_dir();
+        self.run_io(
+            move || {
+                // Agents usually print paths from the repository root.
+                for base in bases.clone() {
+                    if let Ok(root) = crate::emacs::resolve_worktree_root(&base)
+                        && !bases.contains(&root)
+                    {
+                        bases.push(root);
+                    }
+                }
+                let path = crate::file_links::resolve(&link.path, &bases, &home)
+                    .ok_or_else(|| format!("no file named {} here", link.path))?;
+                EmacsIntegration::from_environment().open_file(&path, link.line, link.column)?;
+                Ok(())
+            },
+            |workspace, result| {
+                if let Err(error) = result {
+                    workspace.show_error(&format!("Could not open file: {error}"));
+                }
+            },
+        );
+    }
+
+    fn open_file_in_emacs(&self, path: PathBuf, line: Option<u32>, column: Option<u32>) {
+        self.run_io(
+            move || EmacsIntegration::from_environment().open_file(&path, line, column),
+            |workspace, result| {
+                if let Err(error) = result {
+                    workspace.show_error(&format!("Could not open file: {error}"));
+                }
+            },
+        );
     }
 
     pub(super) fn attach(
@@ -941,6 +1024,43 @@ fn focus_terminal_on_row_activation(row: &gtk::ListBoxRow, terminal: &vte::Termi
 
 #[cfg(test)]
 mod tests {
+    /// Wraps every match of the terminal file pattern in brackets, using VTE's own PCRE2.
+    fn bracket_file_links(text: &str) -> String {
+        const PCRE2_SUBSTITUTE_GLOBAL: u32 = 0x0000_0100;
+        vte::Regex::for_match(
+            crate::file_links::TERMINAL_PATTERN,
+            super::PCRE2_UTF | super::PCRE2_MULTILINE,
+        )
+        .expect("file link pattern compiles in PCRE2")
+        .substitute(text, "[$0]", PCRE2_SUBSTITUTE_GLOBAL)
+        .unwrap()
+        .to_string()
+    }
+
+    #[test]
+    fn terminal_file_pattern_finds_paths_but_not_words_or_urls() {
+        assert_eq!(
+            bracket_file_links("edited src/ui/mod.rs:42:7 and README.md."),
+            "edited [src/ui/mod.rs:42:7] and [README.md]."
+        );
+        assert_eq!(
+            bracket_file_links("  File \"/app/x.py\", line 9, in main"),
+            "  File \"[/app/x.py\", line 9], in main"
+        );
+        assert_eq!(
+            bracket_file_links("see ./run.sh and ~/notes"),
+            "see [./run.sh] and [~/notes]"
+        );
+        assert_eq!(
+            bracket_file_links("plain words, version 1.2.3"),
+            "plain words, version 1.2.3"
+        );
+        assert_eq!(
+            bracket_file_links("https://example.org/a/b"),
+            "https://example.org/a/b"
+        );
+    }
+
     use super::{backfill_restored_session_context, focus_terminal_on_row_activation};
     use crate::control::SessionKind;
     use crate::persist::SessionRecord;

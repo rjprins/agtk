@@ -25,6 +25,7 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Recent Codex and Claude conversation discovery, preview, direct restore, and busy, waiting, ready, and idle agent states from Claude hooks and screen reading
 - Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
 - Emacs Magit and branch-review integration for the selected session
+- Ctrl+click a file path in terminal output, such as `src/main.rs:42:7`, to open it in Emacs at that line. Paths resolve against the shell's current directory and the repository root.
 - Azure DevOps PR attention, exact acknowledgement, source-worktree matching, manual review launch, and per-project opt-in auto-review
 - App-only PNG capture and structural UI inspection for isolated agent-driven testing
 - Local CLI and MCP control without exposing a network listener

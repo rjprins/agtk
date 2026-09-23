@@ -71,3 +71,25 @@ fn run_git(cwd: &std::path::Path, args: &[&str]) {
         .unwrap();
     assert!(status.success(), "git {args:?} failed");
 }
+
+#[test]
+fn open_file_form_visits_the_file_at_its_line_and_column() {
+    let form = agmux_native::emacs::build_open_file_eval(
+        std::path::Path::new("/work/src/main.rs"),
+        Some(42),
+        Some(7),
+    );
+    assert!(form.contains("(find-file \"/work/src/main.rs\")"));
+    assert!(form.contains("(forward-line 41)"));
+    assert!(form.contains("(move-to-column 6)"));
+    assert!(form.contains("(raise-frame frame)"));
+    assert!(!form.contains("(require '"));
+
+    let plain = agmux_native::emacs::build_open_file_eval(
+        std::path::Path::new("/work/a.rs"),
+        None,
+        Some(3),
+    );
+    assert!(!plain.contains("forward-line"));
+    assert!(!plain.contains("move-to-column"));
+}
