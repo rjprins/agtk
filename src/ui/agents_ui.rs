@@ -177,10 +177,202 @@ fn format_agent_elapsed(now: u64, last_seen_at: u64) -> String {
     }
 }
 
+/// The recent agent sessions dialog and what it remembers between openings.
+#[derive(Clone)]
+pub(super) struct AgentDialog {
+    pub(super) modal: modal::Modal,
+    pub(super) list: gtk::ListBox,
+    pub(super) project_filter: gtk::DropDown,
+    pub(super) project_choices: gtk::StringList,
+    pub(super) project_values: Rc<RefCell<Vec<Option<PathBuf>>>>,
+    pub(super) filter: gtk::SearchEntry,
+    pub(super) count: adw::WindowTitle,
+    pub(super) refresh: gtk::Button,
+    pub(super) preview: gtk::Box,
+    pub(super) restore_destination: adw::ComboRow,
+    pub(super) restore_destination_choices: gtk::StringList,
+    pub(super) restore_destination_values: Rc<RefCell<Vec<AgentRestoreDestination>>>,
+    pub(super) restore_branch: adw::EntryRow,
+    pub(super) restore_custom_cwd: adw::EntryRow,
+    pub(super) restore_button: gtk::Button,
+    pub(super) sessions: Rc<RefCell<Vec<AgentSessionItem>>>,
+    pub(super) hidden: Rc<RefCell<HashSet<String>>>,
+    pub(super) hidden_loaded: Rc<Cell<bool>>,
+    pub(super) selected: Rc<RefCell<Option<ProviderSession>>>,
+}
+
+impl AgentDialog {
+    pub(super) fn build(parent: &adw::ApplicationWindow) -> Self {
+        let project_choices = gtk::StringList::new(&["All projects"]);
+        let project_filter =
+            gtk::DropDown::new(Some(project_choices.clone()), None::<&gtk::Expression>);
+        project_filter.set_tooltip_text(Some("Filter recent sessions by project"));
+        let filter = gtk::SearchEntry::builder()
+            .placeholder_text("Filter sessions")
+            .margin_start(6)
+            .margin_end(6)
+            .margin_top(6)
+            .build();
+        filter.set_visible(false);
+        let list = gtk::ListBox::new();
+        list.add_css_class("navigation-sidebar");
+        let list_scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&list)
+            .build();
+        let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        sidebar.add_css_class("sidebar-pane");
+        sidebar.set_size_request(340, -1);
+        sidebar.append(&filter);
+        sidebar.append(&list_scroller);
+
+        let preview = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        preview.set_margin_top(18);
+        preview.set_margin_bottom(18);
+        preview.set_margin_start(24);
+        preview.set_margin_end(24);
+        let preview_scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&preview)
+            .build();
+        let restore_destination_choices = gtk::StringList::new(&["Last known location"]);
+        let restore_destination = adw::ComboRow::builder()
+            .title("Resume In")
+            .model(&restore_destination_choices)
+            .build();
+        let restore_branch = adw::EntryRow::builder().title("Branch Name").build();
+        restore_branch.set_visible(false);
+        let restore_custom_cwd = adw::EntryRow::builder().title("Directory").build();
+        restore_custom_cwd.set_visible(false);
+        let destination = gtk::ListBox::new();
+        destination.add_css_class("boxed-list");
+        destination.set_selection_mode(gtk::SelectionMode::None);
+        destination.append(&restore_destination);
+        destination.append(&restore_branch);
+        destination.append(&restore_custom_cwd);
+        destination.set_margin_start(24);
+        destination.set_margin_end(24);
+        destination.set_margin_bottom(18);
+        let detail = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        detail.set_hexpand(true);
+        detail.append(&preview_scroller);
+        detail.append(&destination);
+
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        content.append(&sidebar);
+        content.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+        content.append(&detail);
+
+        let count = adw::WindowTitle::new("Recent Sessions", "");
+        let refresh = gtk::Button::builder()
+            .icon_name("view-refresh-symbolic")
+            .tooltip_text("Refresh recent agent sessions")
+            .build();
+        let restore_button = gtk::Button::with_label("Restore");
+        restore_button.add_css_class("suggested-action");
+        restore_button.set_sensitive(false);
+        let modal = modal::Modal::new(parent, "Recent Sessions", 1100, 720, &content);
+        let header = modal.header();
+        header.set_title_widget(Some(&count));
+        header.pack_start(&project_filter);
+        header.pack_start(&refresh);
+        header.pack_end(&restore_button);
+
+        Self {
+            modal,
+            list,
+            project_filter,
+            project_choices,
+            project_values: Rc::new(RefCell::new(vec![None])),
+            filter,
+            count,
+            refresh,
+            preview,
+            restore_destination,
+            restore_destination_choices,
+            restore_destination_values: Rc::new(RefCell::new(vec![
+                AgentRestoreDestination::LastKnown,
+            ])),
+            restore_branch,
+            restore_custom_cwd,
+            restore_button,
+            sessions: Rc::new(RefCell::new(Vec::new())),
+            hidden: Rc::new(RefCell::new(HashSet::new())),
+            hidden_loaded: Rc::new(Cell::new(false)),
+            selected: Rc::new(RefCell::new(None)),
+        }
+    }
+}
+
+impl Workspace {
+    pub(super) fn connect_agents(&self) {
+        let agent_workspace = self.clone();
+        self.agents
+            .refresh
+            .connect_clicked(move |_| agent_workspace.refresh_agent_panel());
+        let agent_workspace = self.clone();
+        self.agents
+            .filter
+            .connect_changed(move |_| agent_workspace.filter_agent_panel());
+        let agent_workspace = self.clone();
+        self.agents
+            .project_filter
+            .connect_selected_notify(move |_| agent_workspace.filter_agent_panel());
+        let agent_workspace = self.clone();
+        self.agents
+            .restore_destination
+            .connect_selected_notify(move |_| agent_workspace.update_agent_destination_inputs());
+        let agent_workspace = self.clone();
+        self.agents
+            .restore_button
+            .connect_clicked(move |_| agent_workspace.restore_agent_from_panel());
+        let agent_workspace = self.clone();
+        self.agents
+            .modal
+            .connect_show(move || agent_workspace.refresh_agent_panel());
+        let agent_navigation = gtk::EventControllerKey::new();
+        agent_navigation.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let agent_workspace = self.clone();
+        agent_navigation.connect_key_pressed(move |_, key, _, _| {
+            let control_has_focus = agent_workspace.agents.restore_destination.has_focus()
+                || agent_workspace.agents.project_filter.has_focus()
+                || agent_workspace.agents.filter.has_focus()
+                || agent_workspace.agents.restore_branch.has_focus()
+                || agent_workspace.agents.restore_custom_cwd.has_focus();
+            let handled = match key {
+                gtk::gdk::Key::Down if !control_has_focus => {
+                    agent_workspace.navigate_agent_selection(1);
+                    true
+                }
+                gtk::gdk::Key::Up if !control_has_focus => {
+                    agent_workspace.navigate_agent_selection(-1);
+                    true
+                }
+                gtk::gdk::Key::Return
+                    if !control_has_focus
+                        && agent_workspace.agents.restore_button.is_sensitive() =>
+                {
+                    agent_workspace.restore_agent_from_panel();
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        self.agents.modal.add_controller(agent_navigation);
+    }
+}
+
 impl Workspace {
     pub(super) fn filter_agent_panel(&self) {
         let sessions = self.visible_agent_sessions();
-        let selected = self.selected_agent.borrow().clone();
+        let selected = self.agents.selected.borrow().clone();
         if selected.as_ref().is_none_or(|current| {
             !sessions
                 .iter()
@@ -189,8 +381,8 @@ impl Workspace {
             if let Some(session) = sessions.first() {
                 self.preview_agent_for_panel(session.clone());
             } else {
-                self.selected_agent.borrow_mut().take();
-                self.agent_restore_button.set_sensitive(false);
+                self.agents.selected.borrow_mut().take();
+                self.agents.restore_button.set_sensitive(false);
                 self.render_agent_preview_message("Select a Codex or Claude session");
                 self.render_agent_sessions();
             }
@@ -204,7 +396,7 @@ impl Workspace {
         if sessions.is_empty() {
             return;
         }
-        let current = self.selected_agent.borrow().clone();
+        let current = self.agents.selected.borrow().clone();
         let index = current
             .as_ref()
             .and_then(|selected| {
@@ -221,12 +413,14 @@ impl Workspace {
 
     fn visible_agent_sessions(&self) -> Vec<ProviderSession> {
         let sessions = self
-            .agent_sessions
+            .agents
+            .sessions
             .borrow()
             .iter()
             .filter(|item| {
                 !self
-                    .hidden_agent_sessions
+                    .agents
+                    .hidden
                     .borrow()
                     .contains(&agent_session_key(&item.session))
             })
@@ -235,7 +429,7 @@ impl Workspace {
         filter_agent_sessions(
             &sessions,
             self.selected_agent_project().as_deref(),
-            self.agent_filter.text().as_str(),
+            self.agents.filter.text().as_str(),
         )
         .into_iter()
         .map(|item| item.session)
@@ -243,19 +437,20 @@ impl Workspace {
     }
 
     pub(super) fn open_agent_for_project(&self, root: &str) {
-        self.agent_filter.set_text("");
+        self.agents.filter.set_text("");
         self.set_agent_project_filter(Some(PathBuf::from(root)));
-        if !self.agent_window.is_visible() {
-            self.agent_window.present();
+        if !self.agents.modal.is_visible() {
+            self.agents.modal.present();
         } else {
             self.refresh_agent_panel();
         }
     }
 
     fn selected_agent_project(&self) -> Option<PathBuf> {
-        self.agent_project_values
+        self.agents
+            .project_values
             .borrow()
-            .get(self.agent_project_filter.selected() as usize)
+            .get(self.agents.project_filter.selected() as usize)
             .cloned()
             .flatten()
     }
@@ -273,7 +468,8 @@ impl Workspace {
     fn rebuild_agent_project_choices(&self, selected: Option<PathBuf>) {
         let mut seen = BTreeSet::<PathBuf>::new();
         let mut roots = self
-            .agent_sessions
+            .agents
+            .sessions
             .borrow()
             .iter()
             .filter_map(|item| item.project_root.clone())
@@ -294,8 +490,9 @@ impl Workspace {
         let mut labels = vec!["All projects".to_owned()];
         labels.extend(roots.iter().map(|root| agent_project_name(root)));
         let labels = labels.iter().map(String::as_str).collect::<Vec<_>>();
-        self.agent_project_choices
-            .splice(0, self.agent_project_choices.n_items(), &labels);
+        self.agents
+            .project_choices
+            .splice(0, self.agents.project_choices.n_items(), &labels);
 
         let mut values = vec![None];
         values.extend(roots.into_iter().map(Some));
@@ -307,20 +504,21 @@ impl Workspace {
                     .position(|value| value.as_ref() == Some(selected))
             })
             .unwrap_or(0);
-        *self.agent_project_values.borrow_mut() = values;
-        self.agent_project_filter
+        *self.agents.project_values.borrow_mut() = values;
+        self.agents
+            .project_filter
             .set_selected(selected_index as u32);
     }
 
     pub(super) fn refresh_agent_panel(&self) {
         self.load_hidden_agent_sessions();
-        self.render_agent_list_message("SCANNING LOCAL PROVIDER LOGS...");
+        self.render_agent_list_message("Scanning local provider logs…");
         self.render_agent_preview_message("Select a Codex or Claude session");
-        self.agent_count.set_text("Scanning...");
-        self.agent_restore_button.set_sensitive(false);
-        self.agent_restore_button.set_label("Restore session");
-        self.selected_agent.borrow_mut().take();
-        self.agent_sessions.borrow_mut().clear();
+        self.agents.count.set_subtitle("Scanning…");
+        self.agents.restore_button.set_sensitive(false);
+        self.agents.restore_button.set_label("Restore session");
+        self.agents.selected.borrow_mut().take();
+        self.agents.sessions.borrow_mut().clear();
         let discovery = ProviderDiscovery::from_environment();
         let live = self.live_provider_sessions();
         let known_project_roots = self
@@ -337,7 +535,7 @@ impl Workspace {
             },
             |workspace, result| match result {
                 Ok(sessions) => {
-                    workspace.agent_sessions.replace(sessions);
+                    workspace.agents.sessions.replace(sessions);
                     workspace.refresh_agent_project_choices();
                     workspace.render_agent_sessions();
                     if let Some(first) = workspace.visible_agent_sessions().first().cloned() {
@@ -345,8 +543,9 @@ impl Workspace {
                     }
                 }
                 Err(error) => {
-                    workspace.render_agent_list_message(&format!("ERROR  {error}"));
-                    workspace.agent_count.set_text("Error");
+                    workspace
+                        .render_agent_list_message(&format!("Could not load the preview: {error}"));
+                    workspace.agents.count.set_subtitle("Could not scan");
                     workspace.show_error(&format!("Could not discover agent sessions: {error}"));
                 }
             },
@@ -354,19 +553,21 @@ impl Workspace {
     }
 
     pub(super) fn restore_agent_from_panel(&self) {
-        let Some(session) = self.selected_agent.borrow().clone() else {
+        let Some(session) = self.agents.selected.borrow().clone() else {
             self.show_error("Select an agent session first");
             return;
         };
         let project_root = self
-            .agent_sessions
+            .agents
+            .sessions
             .borrow()
             .iter()
             .find(|item| same_agent_session(&item.session, &session))
             .and_then(|item| item.project_root.clone());
-        let index = self.agent_restore_destination.selected() as usize;
+        let index = self.agents.restore_destination.selected() as usize;
         let destination = self
-            .agent_restore_destination_values
+            .agents
+            .restore_destination_values
             .borrow()
             .get(index)
             .cloned()
@@ -375,7 +576,7 @@ impl Workspace {
             AgentRestoreDestination::LastKnown => session.cwd.clone(),
             AgentRestoreDestination::ExistingWorktree(path) => Some(path),
             AgentRestoreDestination::CustomDirectory => {
-                let Some(cwd) = entry_path(&self.agent_restore_custom_cwd) else {
+                let Some(cwd) = entry_path(&self.agents.restore_custom_cwd) else {
                     self.show_error("Enter a custom directory first");
                     return;
                 };
@@ -386,7 +587,7 @@ impl Workspace {
                     self.show_error("This session has no known location for a new worktree");
                     return;
                 };
-                let branch = self.agent_restore_branch.text().trim().to_owned();
+                let branch = self.agents.restore_branch.text().trim().to_owned();
                 let branch = if branch.is_empty() {
                     format!("restore-{}", now_millis())
                 } else {
@@ -395,9 +596,9 @@ impl Workspace {
                 let purpose = format!("Restore agent session {}", session.name);
                 let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
                 let project_root = project_root.clone();
-                self.agent_restore_button.set_sensitive(false);
-                self.agent_restore_button.set_label("Restoring...");
-                self.agent_window.hide();
+                self.agents.restore_button.set_sensitive(false);
+                self.agents.restore_button.set_label("Restoring...");
+                self.agents.modal.hide();
                 self.run_io(
                     move || {
                         let root = manager.repository_root(&cwd)?;
@@ -429,9 +630,9 @@ impl Workspace {
             .map(|project| PathBuf::from(project.root))
             .collect::<Vec<_>>();
         let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
-        self.agent_restore_button.set_sensitive(false);
-        self.agent_restore_button.set_label("Restoring...");
-        self.agent_window.hide();
+        self.agents.restore_button.set_sensitive(false);
+        self.agents.restore_button.set_label("Restoring...");
+        self.agents.modal.hide();
         self.run_io(
             move || {
                 let target =
@@ -538,16 +739,18 @@ impl Workspace {
     }
 
     fn render_agent_sessions(&self) {
-        while let Some(child) = self.agent_list.first_child() {
-            self.agent_list.remove(&child);
+        while let Some(child) = self.agents.list.first_child() {
+            self.agents.list.remove(&child);
         }
         let all_sessions = self
-            .agent_sessions
+            .agents
+            .sessions
             .borrow()
             .iter()
             .filter(|item| {
                 !self
-                    .hidden_agent_sessions
+                    .agents
+                    .hidden
                     .borrow()
                     .contains(&agent_session_key(&item.session))
             })
@@ -556,24 +759,24 @@ impl Workspace {
         let sessions = filter_agent_sessions(
             &all_sessions,
             self.selected_agent_project().as_deref(),
-            self.agent_filter.text().as_str(),
+            self.agents.filter.text().as_str(),
         );
-        self.agent_count
-            .set_text(&format!("{} available", sessions.len()));
-        self.agent_filter.set_visible(
-            self.agent_sessions.borrow().len() >= AGENT_FILTER_MIN_SESSIONS
-                || !self.agent_filter.text().is_empty(),
+        self.agents
+            .count
+            .set_subtitle(&format!("{} available", sessions.len()));
+        self.agents.filter.set_visible(
+            self.agents.sessions.borrow().len() >= AGENT_FILTER_MIN_SESSIONS
+                || !self.agents.filter.text().is_empty(),
         );
         if sessions.is_empty() {
             self.render_agent_list_message(if all_sessions.is_empty() {
-                "NO RECENT CODEX OR CLAUDE SESSIONS"
+                "No recent Codex or Claude sessions"
             } else {
-                "NO SESSIONS MATCH THE FILTER"
+                "No sessions match the filter"
             });
             return;
         }
         for group in group_agent_sessions(&sessions) {
-            let heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             let name = group
                 .project_root
                 .as_deref()
@@ -581,16 +784,19 @@ impl Workspace {
                 .unwrap_or_else(|| "Other locations".to_owned());
             let label = gtk::Label::new(Some(&name));
             label.set_xalign(0.0);
-            label.set_hexpand(true);
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            label.add_css_class("heading");
+            label.add_css_class("dim-label");
+            label.set_margin_top(6);
             if let Some(root) = group.project_root.as_ref() {
                 label.set_tooltip_text(Some(&root.to_string_lossy()));
             }
-            heading.append(&label);
-            let count = gtk::Label::new(Some(&group.sessions.len().to_string()));
-            count.add_css_class("dim-label");
-            heading.append(&count);
-            self.agent_list.append(&heading);
+            let heading = gtk::ListBoxRow::builder()
+                .child(&label)
+                .selectable(false)
+                .activatable(false)
+                .build();
+            self.agents.list.append(&heading);
             for session in group.sessions {
                 self.append_agent_session_row(session);
             }
@@ -600,83 +806,86 @@ impl Workspace {
     fn append_agent_session_row(&self, item: AgentSessionItem) {
         let worktree_name = agent_worktree_name(&item);
         let session = item.session;
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        let button = gtk::Button::new();
-        // Only the selected card keeps a button background.
-        if !self
-            .selected_agent
-            .borrow()
-            .as_ref()
-            .is_some_and(|selected| same_agent_session(selected, &session))
-        {
-            button.add_css_class("flat");
-        }
-        button.set_hexpand(true);
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-        title_row.append(&provider_icons::agent_icon(session.provider));
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        let icon = provider_icons::agent_icon(session.provider);
+        icon.set_valign(gtk::Align::Center);
+        content.append(&icon);
+        let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        text.set_hexpand(true);
         let title = gtk::Label::new(Some(&session.name));
         title.set_xalign(0.0);
-        title.set_hexpand(true);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        title_row.append(&title);
+        text.append(&title);
+        let mut details = vec![short_agent_session_id(&session.provider_session_id)];
+        details.extend(worktree_name);
+        let subtitle = gtk::Label::new(Some(&details.join(" · ")));
+        subtitle.set_xalign(0.0);
+        subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        subtitle.add_css_class("caption");
+        subtitle.add_css_class("dim-label");
+        text.append(&subtitle);
+        content.append(&text);
         let elapsed = gtk::Label::new(Some(&format_agent_elapsed(
             now_millis(),
             session.last_seen_at,
         )));
+        elapsed.add_css_class("caption");
         elapsed.add_css_class("dim-label");
-        title_row.append(&elapsed);
-        content.append(&title_row);
-        let chips = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        append_agent_chip(
-            &chips,
-            &short_agent_session_id(&session.provider_session_id),
-        );
-        content.append(&chips);
-        if let Some(worktree_name) = worktree_name {
-            let worktree = gtk::Label::new(Some(&format!("Worktree: {worktree_name}")));
-            worktree.set_xalign(0.0);
-            worktree.set_hexpand(true);
-            worktree.set_wrap(true);
-            worktree.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            content.append(&worktree);
-        }
-        button.set_child(Some(&content));
-        let preview_workspace = self.clone();
-        let selected_session = session.clone();
-        button.connect_clicked(move |_| {
-            preview_workspace.preview_agent_for_panel(selected_session.clone())
-        });
-        row.append(&button);
+        elapsed.add_css_class("numeric");
+        elapsed.set_valign(gtk::Align::Center);
+        content.append(&elapsed);
 
-        let hide = gtk::Button::with_label("×");
-        hide.set_tooltip_text(Some("Hide this session from the list"));
+        let hide = gtk::Button::builder()
+            .icon_name("window-close-symbolic")
+            .valign(gtk::Align::Center)
+            .tooltip_text("Hide this session from the list")
+            .build();
+        hide.add_css_class("flat");
+        hide.add_css_class("circular");
         let hide_workspace = self.clone();
-        let hidden_session = session;
+        let hidden_session = session.clone();
         hide.connect_clicked(move |_| {
             hide_workspace
-                .hidden_agent_sessions
+                .agents
+                .hidden
                 .borrow_mut()
                 .insert(agent_session_key(&hidden_session));
             hide_workspace.save_hidden_agent_sessions();
             if hide_workspace
-                .selected_agent
+                .agents
+                .selected
                 .borrow()
                 .as_ref()
                 .is_some_and(|selected| same_agent_session(selected, &hidden_session))
             {
-                hide_workspace.selected_agent.borrow_mut().take();
+                hide_workspace.agents.selected.borrow_mut().take();
                 hide_workspace.render_agent_preview_message("Select a Codex or Claude session");
-                hide_workspace.agent_restore_button.set_sensitive(false);
+                hide_workspace.agents.restore_button.set_sensitive(false);
             }
             hide_workspace.render_agent_sessions();
         });
-        row.append(&hide);
-        self.agent_list.append(&row);
+        content.append(&hide);
+
+        let row = gtk::ListBoxRow::builder().child(&content).build();
+        let preview_workspace = self.clone();
+        let selected_session = session.clone();
+        row.connect_activate(move |_| {
+            preview_workspace.preview_agent_for_panel(selected_session.clone())
+        });
+        self.agents.list.append(&row);
+        if self
+            .agents
+            .selected
+            .borrow()
+            .as_ref()
+            .is_some_and(|selected| same_agent_session(selected, &session))
+        {
+            self.agents.list.select_row(Some(&row));
+        }
     }
 
     fn load_hidden_agent_sessions(&self) {
-        if self.hidden_agent_sessions_loaded.replace(true) {
+        if self.agents.hidden_loaded.replace(true) {
             return;
         }
         let Some(store) = self.store.borrow().clone() else {
@@ -691,7 +900,7 @@ impl Workspace {
                 let Some(values) = value.as_array() else {
                     return;
                 };
-                workspace.hidden_agent_sessions.borrow_mut().extend(
+                workspace.agents.hidden.borrow_mut().extend(
                     values
                         .iter()
                         .filter_map(|value| value.as_str().map(str::to_owned)),
@@ -703,7 +912,8 @@ impl Workspace {
 
     fn save_hidden_agent_sessions(&self) {
         let mut values = self
-            .hidden_agent_sessions
+            .agents
+            .hidden
             .borrow()
             .iter()
             .cloned()
@@ -713,10 +923,11 @@ impl Workspace {
     }
 
     fn preview_agent_for_panel(&self, session: ProviderSession) {
-        self.selected_agent.borrow_mut().replace(session.clone());
-        self.agent_restore_branch
+        self.agents.selected.borrow_mut().replace(session.clone());
+        self.agents
+            .restore_branch
             .set_text(&format!("restore-{}", now_millis()));
-        self.agent_restore_custom_cwd.set_text(
+        self.agents.restore_custom_cwd.set_text(
             session
                 .cwd
                 .as_ref()
@@ -726,8 +937,8 @@ impl Workspace {
         );
         self.reset_agent_destinations(&session);
         self.render_agent_sessions();
-        self.agent_restore_button.set_sensitive(false);
-        self.render_agent_preview_message("LOADING TRUSTED CONVERSATION PREVIEW...");
+        self.agents.restore_button.set_sensitive(false);
+        self.render_agent_preview_message("Loading conversation preview…");
         let discovery = ProviderDiscovery::from_environment();
         let provider = session.provider;
         let provider_session_id = session.provider_session_id.clone();
@@ -736,7 +947,9 @@ impl Workspace {
             |workspace, result| match result {
                 Ok(preview) => workspace.render_agent_preview(preview),
                 Err(error) => {
-                    workspace.render_agent_preview_message(&format!("ERROR  {error}"));
+                    workspace.render_agent_preview_message(&format!(
+                        "Could not load the preview: {error}"
+                    ));
                     workspace.show_error(&format!("Could not preview agent session: {error}"));
                 }
             },
@@ -746,7 +959,8 @@ impl Workspace {
 
     fn render_agent_preview(&self, preview: ProviderPreview) {
         let is_current = self
-            .selected_agent
+            .agents
+            .selected
             .borrow()
             .as_ref()
             .is_some_and(|session| {
@@ -756,8 +970,8 @@ impl Workspace {
         if !is_current {
             return;
         }
-        while let Some(child) = self.agent_preview.first_child() {
-            self.agent_preview.remove(&child);
+        while let Some(child) = self.agents.preview.first_child() {
+            self.agents.preview.remove(&child);
         }
         let elapsed = format_agent_elapsed(now_millis(), preview.session.last_seen_at);
         let title = gtk::Label::new(Some(&preview.session.name));
@@ -765,86 +979,99 @@ impl Workspace {
         title.add_css_class("title-4");
         title.set_wrap(true);
         title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        self.agent_preview.append(&title);
+        self.agents.preview.append(&title);
         let heading = gtk::Label::new(Some(&format!(
-            "{}  {}{}{}",
+            "{} · {}{}{}",
             preview.session.provider.command(),
             short_agent_session_id(&preview.session.provider_session_id),
             if elapsed.is_empty() {
                 "".to_owned()
             } else {
-                format!("  {elapsed} ago")
+                format!(" · {elapsed} ago")
             },
             if preview.is_truncated {
-                "  [bounded]"
+                " · shortened"
             } else {
                 ""
             }
         )));
         heading.set_xalign(0.0);
         heading.add_css_class("dim-label");
-        self.agent_preview.append(&heading);
+        self.agents.preview.append(&heading);
         if preview.is_truncated {
             let first_prompt =
                 gtk::Label::new(Some(&format!("First prompt\n{}", preview.session.name)));
             first_prompt.set_xalign(0.0);
             first_prompt.set_wrap(true);
             first_prompt.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            self.agent_preview.append(&first_prompt);
+            self.agents.preview.append(&first_prompt);
         }
         let preview_heading = gtk::Label::new(Some("Recent conversation"));
         preview_heading.set_xalign(0.0);
         preview_heading.add_css_class("heading");
-        self.agent_preview.append(&preview_heading);
+        self.agents.preview.append(&preview_heading);
         if preview.messages.is_empty() {
             let empty = gtk::Label::new(Some("No user or assistant messages found"));
             empty.set_xalign(0.0);
-            self.agent_preview.append(&empty);
+            self.agents.preview.append(&empty);
         }
         for message in preview.messages {
-            let prefix = match message.role {
-                ConversationRole::User => "YOU",
-                ConversationRole::Assistant => "AGENT",
-            };
-            let label = gtk::Label::new(Some(&format!("{prefix}\n{}", message.text)));
-            label.set_xalign(0.0);
-            label.set_wrap(true);
-            label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            label.set_selectable(true);
-            label.add_css_class(match message.role {
-                ConversationRole::User => "agent-preview-user",
-                ConversationRole::Assistant => "agent-preview-assistant",
-            });
-            self.agent_preview.append(&label);
+            let role = gtk::Label::new(Some(match message.role {
+                ConversationRole::User => "You",
+                ConversationRole::Assistant => "Agent",
+            }));
+            role.set_xalign(0.0);
+            role.add_css_class("caption-heading");
+            if message.role == ConversationRole::User {
+                role.add_css_class("accent");
+            } else {
+                role.add_css_class("dim-label");
+            }
+            let text = gtk::Label::new(Some(&message.text));
+            text.set_xalign(0.0);
+            text.set_wrap(true);
+            text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            text.set_selectable(true);
+            let entry = gtk::Box::new(gtk::Orientation::Vertical, 2);
+            entry.append(&role);
+            entry.append(&text);
+            self.agents.preview.append(&entry);
         }
-        self.agent_restore_button.set_sensitive(true);
+        self.agents.restore_button.set_sensitive(true);
     }
 
     fn reset_agent_destinations(&self, session: &ProviderSession) {
-        let item_count = self.agent_restore_destination_choices.n_items();
-        self.agent_restore_destination_choices
+        let item_count = self.agents.restore_destination_choices.n_items();
+        self.agents
+            .restore_destination_choices
             .splice(0, item_count, &[]);
-        self.agent_restore_destination_values.borrow_mut().clear();
+        self.agents.restore_destination_values.borrow_mut().clear();
         let last_known = session
             .cwd
             .as_ref()
             .map(|path| format!("Last location — {}", compact_agent_path(path)));
-        self.agent_restore_destination_choices
+        self.agents
+            .restore_destination_choices
             .append(last_known.as_deref().unwrap_or("Last known location"));
-        self.agent_restore_destination_values
+        self.agents
+            .restore_destination_values
             .borrow_mut()
             .push(AgentRestoreDestination::LastKnown);
-        self.agent_restore_destination_choices
+        self.agents
+            .restore_destination_choices
             .append("Create a new worktree...");
-        self.agent_restore_destination_values
+        self.agents
+            .restore_destination_values
             .borrow_mut()
             .push(AgentRestoreDestination::NewWorktree);
-        self.agent_restore_destination_choices
+        self.agents
+            .restore_destination_choices
             .append("Choose a custom directory...");
-        self.agent_restore_destination_values
+        self.agents
+            .restore_destination_values
             .borrow_mut()
             .push(AgentRestoreDestination::CustomDirectory);
-        self.agent_restore_destination.set_selected(0);
+        self.agents.restore_destination.set_selected(0);
         self.update_agent_destination_inputs();
     }
 
@@ -859,7 +1086,7 @@ impl Workspace {
                 manager.linked_paths(&root)
             },
             move |workspace, result| {
-                let Some(selected) = workspace.selected_agent.borrow().clone() else {
+                let Some(selected) = workspace.agents.selected.borrow().clone() else {
                     return;
                 };
                 if !same_agent_session(&selected, &session) {
@@ -881,10 +1108,12 @@ impl Workspace {
                     .collect::<Vec<_>>();
                 let labels = labels.iter().map(String::as_str).collect::<Vec<_>>();
                 workspace
-                    .agent_restore_destination_choices
+                    .agents
+                    .restore_destination_choices
                     .splice(1, 0, &labels);
                 workspace
-                    .agent_restore_destination_values
+                    .agents
+                    .restore_destination_values
                     .borrow_mut()
                     .splice(
                         1..1,
@@ -898,39 +1127,36 @@ impl Workspace {
 
     pub(super) fn update_agent_destination_inputs(&self) {
         let destination = self
-            .agent_restore_destination_values
+            .agents
+            .restore_destination_values
             .borrow()
-            .get(self.agent_restore_destination.selected() as usize)
+            .get(self.agents.restore_destination.selected() as usize)
             .cloned()
             .unwrap_or(AgentRestoreDestination::LastKnown);
         let show_branch = matches!(destination, AgentRestoreDestination::NewWorktree);
         let show_custom = matches!(destination, AgentRestoreDestination::CustomDirectory);
-        if let Some(row) = self.agent_restore_branch.parent() {
-            row.set_visible(show_branch);
-        }
-        if let Some(row) = self.agent_restore_custom_cwd.parent() {
-            row.set_visible(show_custom);
-        }
+        self.agents.restore_branch.set_visible(show_branch);
+        self.agents.restore_custom_cwd.set_visible(show_custom);
     }
 
     fn render_agent_list_message(&self, text: &str) {
-        while let Some(child) = self.agent_list.first_child() {
-            self.agent_list.remove(&child);
+        while let Some(child) = self.agents.list.first_child() {
+            self.agents.list.remove(&child);
         }
         let label = gtk::Label::new(Some(text));
         label.set_xalign(0.0);
         label.add_css_class("dim-label");
-        self.agent_list.append(&label);
+        self.agents.list.append(&label);
     }
 
     fn render_agent_preview_message(&self, text: &str) {
-        while let Some(child) = self.agent_preview.first_child() {
-            self.agent_preview.remove(&child);
+        while let Some(child) = self.agents.preview.first_child() {
+            self.agents.preview.remove(&child);
         }
         let label = gtk::Label::new(Some(text));
         label.set_xalign(0.0);
         label.add_css_class("dim-label");
-        self.agent_preview.append(&label);
+        self.agents.preview.append(&label);
     }
 
     fn respond_agent_result<T: serde::Serialize>(
@@ -954,7 +1180,7 @@ impl Workspace {
     }
 }
 
-fn entry_path(entry: &gtk::Entry) -> Option<PathBuf> {
+fn entry_path(entry: &adw::EntryRow) -> Option<PathBuf> {
     let text = entry.text();
     let text = text.trim();
     (!text.is_empty()).then(|| PathBuf::from(text))
@@ -990,15 +1216,6 @@ fn compact_agent_path(path: &Path) -> String {
         .rev()
         .collect::<String>();
     format!("…{suffix}")
-}
-
-fn append_agent_chip(parent: &gtk::Box, text: &str) {
-    let chip = gtk::Label::new(Some(text));
-    chip.add_css_class("caption");
-    chip.add_css_class("dim-label");
-    chip.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    chip.set_max_width_chars(24);
-    parent.append(&chip);
 }
 
 #[cfg(test)]

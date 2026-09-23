@@ -32,7 +32,6 @@ use crate::io_worker::IoWorker;
 use crate::launch_preferences::QuickLaunchPreferences;
 use crate::persist::{PersistResult, SessionRecord, Store};
 use crate::projects::ProjectPreferences;
-use crate::providers::ProviderSession;
 use crate::session::{SessionHostLaunchPlan, SessionLaunchPlan, receive_attachment};
 use crate::shortcuts::{ShortcutAction, ShortcutPreferences};
 use crate::terminal_text::{bounded_terminal_text, copyable_selection};
@@ -97,24 +96,7 @@ struct Workspace {
     worktree_purpose: gtk::Entry,
     worktree_list: gtk::Box,
     agent_button: gtk::Button,
-    agent_window: modal::Modal,
-    agent_list: gtk::Box,
-    agent_project_filter: gtk::DropDown,
-    agent_project_choices: gtk::StringList,
-    agent_project_values: Rc<RefCell<Vec<Option<PathBuf>>>>,
-    agent_filter: gtk::SearchEntry,
-    agent_count: gtk::Label,
-    agent_preview: gtk::Box,
-    agent_restore_destination: gtk::DropDown,
-    agent_restore_destination_choices: gtk::StringList,
-    agent_restore_destination_values: Rc<RefCell<Vec<agents_ui::AgentRestoreDestination>>>,
-    agent_restore_branch: gtk::Entry,
-    agent_restore_custom_cwd: gtk::Entry,
-    agent_restore_button: gtk::Button,
-    agent_sessions: Rc<RefCell<Vec<agents_ui::AgentSessionItem>>>,
-    hidden_agent_sessions: Rc<RefCell<HashSet<String>>>,
-    hidden_agent_sessions_loaded: Rc<Cell<bool>>,
-    selected_agent: Rc<RefCell<Option<ProviderSession>>>,
+    agents: agents_ui::AgentDialog,
     history_button: gtk::Button,
     history_list: gtk::Box,
     history_window: modal::Modal,
@@ -423,98 +405,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     worktree_button.set_sensitive(false);
     worktree_button.set_tooltip_text(Some("Inspect, create, and safely reap worktrees"));
 
-    let agent_surface = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    agent_surface.set_margin_top(18);
-    agent_surface.set_margin_bottom(18);
-    agent_surface.set_margin_start(18);
-    agent_surface.set_margin_end(18);
-    let agent_heading_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let agent_heading = gtk::Label::new(Some("Recent agent sessions"));
-    agent_heading.set_xalign(0.0);
-    agent_heading.set_hexpand(true);
-    agent_heading.add_css_class("heading");
-    agent_heading.set_visible(false);
-    agent_heading_row.append(&agent_heading);
-    let agent_count = gtk::Label::new(None);
-    agent_count.set_xalign(1.0);
-    agent_count.set_hexpand(true);
-    agent_count.add_css_class("dim-label");
-    agent_heading_row.append(&agent_count);
-    let agent_refresh = gtk::Button::builder()
-        .icon_name("view-refresh-symbolic")
-        .build();
-    agent_refresh.add_css_class("flat");
-    agent_refresh.set_tooltip_text(Some("Refresh recent agent sessions"));
-    agent_heading_row.append(&agent_refresh);
-    agent_surface.append(&agent_heading_row);
-    let agent_filter_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let agent_project_label = gtk::Label::new(Some("Project"));
-    agent_project_label.set_xalign(0.0);
-    agent_project_label.add_css_class("dim-label");
-    agent_filter_row.append(&agent_project_label);
-    let agent_project_choices = gtk::StringList::new(&["All projects"]);
-    let agent_project_filter = gtk::DropDown::new(
-        Some(agent_project_choices.clone()),
-        None::<&gtk::Expression>,
-    );
-    agent_project_filter.set_tooltip_text(Some("Filter recent sessions by project"));
-    agent_filter_row.append(&agent_project_filter);
-    let agent_filter = gtk::SearchEntry::builder()
-        .placeholder_text("Filter sessions...")
-        .hexpand(true)
-        .build();
-    agent_filter.set_visible(false);
-    agent_filter_row.append(&agent_filter);
-    agent_surface.append(&agent_filter_row);
-    let agent_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    let agent_list_scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .min_content_width(380)
-        .min_content_height(540)
-        .child(&agent_list)
-        .build();
-    let agent_detail = gtk::Box::new(gtk::Orientation::Vertical, 3);
-    let agent_preview = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    let agent_preview_scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .min_content_width(680)
-        .min_content_height(300)
-        .vexpand(true)
-        .child(&agent_preview)
-        .build();
-    agent_detail.append(&agent_preview_scroller);
-    let agent_destination_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let agent_destination_label = gtk::Label::new(Some("Resume in"));
-    agent_destination_label.set_xalign(0.0);
-    agent_destination_label.add_css_class("dim-label");
-    agent_destination_row.append(&agent_destination_label);
-    let agent_restore_destination_choices = gtk::StringList::new(&["Last known location"]);
-    let agent_restore_destination = gtk::DropDown::new(
-        Some(agent_restore_destination_choices.clone()),
-        None::<&gtk::Expression>,
-    );
-    agent_restore_destination.set_hexpand(true);
-    agent_destination_row.append(&agent_restore_destination);
-    agent_detail.append(&agent_destination_row);
-    let agent_restore_branch = launch_entry("Branch name", "restore-branch-name");
-    agent_restore_branch.0.set_visible(false);
-    agent_detail.append(&agent_restore_branch.0);
-    let agent_restore_custom_cwd = launch_entry("Custom directory", "/path/to/directory");
-    agent_restore_custom_cwd.0.set_visible(false);
-    agent_detail.append(&agent_restore_custom_cwd.0);
-    let agent_restore_button = gtk::Button::builder()
-        .icon_name("document-revert-symbolic")
-        .label("Restore session")
-        .build();
-    agent_restore_button.set_sensitive(false);
-    agent_detail.append(&agent_restore_button);
-    let agent_split = gtk::Paned::new(gtk::Orientation::Horizontal);
-    agent_split.set_start_child(Some(&agent_list_scroller));
-    agent_split.set_end_child(Some(&agent_detail));
-    agent_split.set_resize_start_child(false);
-    agent_split.set_shrink_start_child(false);
-    agent_split.set_position(320);
-    agent_surface.append(&agent_split);
     let agent_button = menu_item("Recent agent sessions");
     agent_button.set_sensitive(false);
     agent_button.set_tooltip_text(Some("Preview and restore recent Codex and Claude sessions"));
@@ -642,8 +532,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let search_window = modal::Modal::new(&window, "Search terminal", 650, -1, &search_surface);
     let preferences = preferences_ui::PreferencesDialog::build(&window);
     let pr_window = modal::Modal::new(&window, "Azure pull requests", 1120, 760, &pr_surface);
-    let agent_window =
-        modal::Modal::new(&window, "Recent agent sessions", 1400, 900, &agent_surface);
+    let agents = agents_ui::AgentDialog::build(&window);
     let workspace = Workspace {
         application: app.clone(),
         window: window.clone(),
@@ -675,26 +564,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         worktree_purpose: worktree_purpose.1,
         worktree_list,
         agent_button,
-        agent_window,
-        agent_list,
-        agent_project_filter,
-        agent_project_choices,
-        agent_project_values: Rc::new(RefCell::new(vec![None])),
-        agent_filter,
-        agent_count,
-        agent_preview,
-        agent_restore_destination,
-        agent_restore_destination_choices,
-        agent_restore_destination_values: Rc::new(RefCell::new(vec![
-            agents_ui::AgentRestoreDestination::LastKnown,
-        ])),
-        agent_restore_branch: agent_restore_branch.1,
-        agent_restore_custom_cwd: agent_restore_custom_cwd.1,
-        agent_restore_button: agent_restore_button.clone(),
-        agent_sessions: Rc::new(RefCell::new(Vec::new())),
-        hidden_agent_sessions: Rc::new(RefCell::new(HashSet::new())),
-        hidden_agent_sessions_loaded: Rc::new(Cell::new(false)),
-        selected_agent: Rc::new(RefCell::new(None)),
+        agents,
         history_button,
         history_list,
         history_window,
@@ -760,7 +630,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         if let Some(root) = dialog_workspace.preferred_project_root() {
             dialog_workspace.open_agent_for_project(&root);
         } else {
-            dialog_workspace.agent_window.present();
+            dialog_workspace.agents.modal.present();
         }
     });
     let dialog_workspace = workspace.clone();
@@ -930,59 +800,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             None,
         );
     });
-    let agent_workspace = workspace.clone();
-    agent_refresh.connect_clicked(move |_| agent_workspace.refresh_agent_panel());
-    let agent_workspace = workspace.clone();
-    workspace
-        .agent_filter
-        .connect_changed(move |_| agent_workspace.filter_agent_panel());
-    let agent_workspace = workspace.clone();
-    workspace
-        .agent_project_filter
-        .connect_selected_notify(move |_| agent_workspace.filter_agent_panel());
-    let agent_workspace = workspace.clone();
-    workspace
-        .agent_restore_destination
-        .connect_selected_notify(move |_| agent_workspace.update_agent_destination_inputs());
-    let agent_workspace = workspace.clone();
-    agent_restore_button.connect_clicked(move |_| agent_workspace.restore_agent_from_panel());
-    let agent_workspace = workspace.clone();
-    workspace
-        .agent_window
-        .connect_show(move || agent_workspace.refresh_agent_panel());
-    let agent_navigation = gtk::EventControllerKey::new();
-    agent_navigation.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let agent_workspace = workspace.clone();
-    agent_navigation.connect_key_pressed(move |_, key, _, _| {
-        let control_has_focus = agent_workspace.agent_restore_destination.has_focus()
-            || agent_workspace.agent_project_filter.has_focus()
-            || agent_workspace.agent_filter.has_focus()
-            || agent_workspace.agent_restore_branch.has_focus()
-            || agent_workspace.agent_restore_custom_cwd.has_focus();
-        let handled = match key {
-            gtk::gdk::Key::Down if !control_has_focus => {
-                agent_workspace.navigate_agent_selection(1);
-                true
-            }
-            gtk::gdk::Key::Up if !control_has_focus => {
-                agent_workspace.navigate_agent_selection(-1);
-                true
-            }
-            gtk::gdk::Key::Return
-                if !control_has_focus && agent_workspace.agent_restore_button.is_sensitive() =>
-            {
-                agent_workspace.restore_agent_from_panel();
-                true
-            }
-            _ => false,
-        };
-        if handled {
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    workspace.agent_window.add_controller(agent_navigation);
+    workspace.connect_agents();
 
     let search_workspace = workspace.clone();
     search_next.connect_clicked(move |_| search_workspace.search_selected(true));

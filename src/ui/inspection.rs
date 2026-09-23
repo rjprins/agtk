@@ -371,7 +371,7 @@ impl Workspace {
                                         label: Some("Recent agent sessions".to_owned()),
                                         is_visible: self.agent_button.is_visible(),
                                         is_enabled: self.agent_button.is_sensitive(),
-                                        is_selected: self.agent_window.is_visible(),
+                                        is_selected: self.agents.modal.is_visible(),
                                         bounds: widget_bounds(&self.agent_button, &self.window),
                                         children: Vec::new(),
                                     },

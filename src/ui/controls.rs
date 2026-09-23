@@ -179,7 +179,7 @@ impl Workspace {
                         }
                     }
                     UiSurface::Agents => {
-                        self.agent_window.present();
+                        self.agents.modal.present();
                         true
                     }
                     UiSurface::PullRequests => {
