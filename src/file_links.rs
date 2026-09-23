@@ -140,7 +140,7 @@ mod tests {
         );
         assert_eq!(resolve("missing.rs", &bases, home), None);
         // Directories are not files to open.
-        assert_eq!(resolve("sub", &[root.clone()], home), None);
+        assert_eq!(resolve("sub", std::slice::from_ref(&root), home), None);
         assert_eq!(
             resolve(&root.to_string_lossy(), &bases, home),
             None::<PathBuf>
