@@ -100,6 +100,17 @@ The launch surface follows the original agmux launch behavior. It keeps project 
 
 The Claude preset shortcut opens the chooser for a selected live Claude session. Repeating the shortcut cycles its focused preset, Enter applies it, and Escape cancels. Presets are editable as a validated JSON array in `[keys]`. Applying one assumes Claude is at an empty prompt.
 
+## UI preview
+
+Render the UI without touching the live instance or the desktop:
+
+```sh
+scripts/ui-preview.sh              # capture the main window and every dialog
+scripts/ui-preview.sh --dark launch
+```
+
+The script starts a private headless mutter compositor and an isolated instance with demo sessions, a demo repository, fake providers, and a fake Azure CLI. It prints the PNG paths. `--keep` leaves the instance running for `agmuxctl`. The same compositor can run the UI test suite through `AGMUX_TEST_DISPLAY`.
+
 ## Local control
 
 `agmuxctl` prints JSON to stdout. It accepts `--instance NAME` before the command, which keeps automated instances separate from the live `default` instance.
