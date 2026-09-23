@@ -127,6 +127,9 @@ main_id=$(id_of demo-service)
 ctl session input "$main_id" --text "Make the orders endpoint use cursor pagination" >/dev/null
 ctl session select "$main_id" >/dev/null
 [[ -n $font_size ]] && ctl appearance set --ui-font-size "$font_size" >/dev/null
+# Open the launch dialog on Codex, the agent with the most options.
+sqlite3 "$work/state/agmux-native/preview/agmux.db" \
+  "insert or replace into preferences(key, data) values ('quickLaunch', '{\"kind\":\"codex\",\"cwd\":\"$project\",\"projectRoot\":\"$project\",\"worktreePath\":\"$project\"}')"
 sleep 1
 
 capture() {

@@ -148,7 +148,7 @@ impl Workspace {
                 let shown = match params.surface {
                     UiSurface::Launch => {
                         self.prepare_launch_panel();
-                        self.launch_window.present();
+                        self.launch.modal.present();
                         true
                     }
                     UiSurface::Appearance => {

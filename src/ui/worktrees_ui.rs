@@ -125,13 +125,16 @@ impl Workspace {
             move |workspace, result| {
                 if let Ok(created) = &result {
                     workspace
-                        .launch_project
+                        .launch
+                        .project
                         .set_text(created.repo_root.to_string_lossy().as_ref());
                     workspace
-                        .launch_worktree
+                        .launch
+                        .worktree
                         .set_text(created.path.to_string_lossy().as_ref());
                     workspace
-                        .launch_cwd
+                        .launch
+                        .cwd
                         .set_text(created.path.to_string_lossy().as_ref());
                 }
                 workspace.respond_worktree_result(pending, "Could not create worktree", result);

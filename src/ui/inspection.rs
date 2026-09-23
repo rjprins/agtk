@@ -110,52 +110,52 @@ impl Workspace {
             })
             .collect();
 
-        let launch_children = if self.launch_window.is_visible() {
+        let launch_children = if self.launch.modal.is_visible() {
             vec![
                 UiNode {
                     id: "launch-existing-worktree".to_owned(),
                     role: "radio".to_owned(),
                     label: Some("Existing worktree".to_owned()),
-                    is_visible: self.launch_existing_worktree_mode.is_visible(),
-                    is_enabled: self.launch_existing_worktree_radio.is_sensitive(),
-                    is_selected: self.launch_existing_worktree_radio.is_active(),
-                    bounds: widget_bounds(&self.launch_existing_worktree_radio, &self.window),
+                    is_visible: self.launch.existing_worktree_mode.is_visible(),
+                    is_enabled: self.launch.existing_worktree_radio.is_sensitive(),
+                    is_selected: self.launch.existing_worktree_radio.is_active(),
+                    bounds: widget_bounds(&self.launch.existing_worktree_radio, &self.window),
                     children: Vec::new(),
                 },
                 UiNode {
                     id: "launch-project-input".to_owned(),
                     role: "textbox".to_owned(),
                     label: Some("Project directory".to_owned()),
-                    is_visible: gtk::prelude::WidgetExt::is_visible(&self.launch_project),
-                    is_enabled: self.launch_project.is_sensitive(),
-                    is_selected: self.launch_project.has_focus(),
-                    bounds: widget_bounds(&self.launch_project, &self.window),
+                    is_visible: gtk::prelude::WidgetExt::is_visible(&self.launch.project),
+                    is_enabled: self.launch.project.is_sensitive(),
+                    is_selected: self.launch.project.has_focus(),
+                    bounds: widget_bounds(&self.launch.project, &self.window),
                     children: completion_nodes(
                         "launch-project",
-                        &self.launch_project_completion_items.borrow(),
+                        &self.launch.project_completion_items.borrow(),
                     ),
                 },
                 UiNode {
                     id: "launch-worktree-input".to_owned(),
                     role: "textbox".to_owned(),
                     label: Some("Worktree".to_owned()),
-                    is_visible: self.launch_existing_worktree_mode.is_visible(),
-                    is_enabled: self.launch_worktree.is_sensitive(),
-                    is_selected: self.launch_worktree.has_focus(),
-                    bounds: widget_bounds(&self.launch_worktree, &self.window),
+                    is_visible: self.launch.existing_worktree_mode.is_visible(),
+                    is_enabled: self.launch.worktree.is_sensitive(),
+                    is_selected: self.launch.worktree.has_focus(),
+                    bounds: widget_bounds(&self.launch.worktree, &self.window),
                     children: completion_nodes(
                         "launch-worktree",
-                        &self.launch_worktree_completion_items.borrow(),
+                        &self.launch.worktree_completion_items.borrow(),
                     ),
                 },
                 UiNode {
                     id: "launch-new-worktree".to_owned(),
                     role: "radio".to_owned(),
                     label: Some("New worktree".to_owned()),
-                    is_visible: self.launch_new_worktree_mode.is_visible(),
-                    is_enabled: self.launch_new_worktree_radio.is_sensitive(),
-                    is_selected: self.launch_new_worktree_radio.is_active(),
-                    bounds: widget_bounds(&self.launch_new_worktree_radio, &self.window),
+                    is_visible: self.launch.new_worktree_mode.is_visible(),
+                    is_enabled: self.launch.new_worktree_radio.is_sensitive(),
+                    is_selected: self.launch.new_worktree_radio.is_active(),
+                    bounds: widget_bounds(&self.launch.new_worktree_radio, &self.window),
                     children: Vec::new(),
                 },
                 UiNode {
@@ -163,21 +163,25 @@ impl Workspace {
                     role: "group".to_owned(),
                     label: Some("Agent provider".to_owned()),
                     is_visible: self
-                        .launch_agent_buttons
+                        .launch
+                        .agent_buttons
                         .first()
                         .is_some_and(|(_, button)| button.is_visible()),
                     is_enabled: self
-                        .launch_agent_buttons
+                        .launch
+                        .agent_buttons
                         .first()
                         .is_some_and(|(_, button)| button.is_sensitive()),
                     is_selected: false,
                     bounds: self
-                        .launch_agent_buttons
+                        .launch
+                        .agent_buttons
                         .first()
                         .map(|(_, button)| widget_bounds(button, &self.window))
                         .unwrap_or_default(),
                     children: self
-                        .launch_agent_buttons
+                        .launch
+                        .agent_buttons
                         .iter()
                         .map(|(kind, button)| UiNode {
                             id: format!("launch-agent-{}", session_kind_name(*kind)),
@@ -195,40 +199,40 @@ impl Workspace {
                     id: "launch-branch".to_owned(),
                     role: "textbox".to_owned(),
                     label: Some("New worktree name".to_owned()),
-                    is_visible: self.launch_new_worktree_mode.is_visible(),
-                    is_enabled: self.launch_branch.is_sensitive(),
-                    is_selected: self.launch_branch.has_focus(),
-                    bounds: widget_bounds(&self.launch_branch, &self.window),
+                    is_visible: self.launch.new_worktree_mode.is_visible(),
+                    is_enabled: self.launch.branch.is_sensitive(),
+                    is_selected: self.launch.branch.has_focus(),
+                    bounds: widget_bounds(&self.launch.branch, &self.window),
                     children: Vec::new(),
                 },
                 UiNode {
                     id: "launch-base-branch".to_owned(),
                     role: "textbox".to_owned(),
                     label: Some("Base branch".to_owned()),
-                    is_visible: self.launch_new_worktree_mode.is_visible(),
-                    is_enabled: self.launch_base_branch.is_sensitive(),
-                    is_selected: self.launch_base_branch.has_focus(),
-                    bounds: widget_bounds(&self.launch_base_branch, &self.window),
+                    is_visible: self.launch.new_worktree_mode.is_visible(),
+                    is_enabled: self.launch.base_branch.is_sensitive(),
+                    is_selected: self.launch.base_branch.has_focus(),
+                    bounds: widget_bounds(&self.launch.base_branch, &self.window),
                     children: Vec::new(),
                 },
                 UiNode {
                     id: "launch-cancel".to_owned(),
                     role: "button".to_owned(),
                     label: Some("Cancel".to_owned()),
-                    is_visible: self.launch_cancel.is_visible(),
-                    is_enabled: self.launch_cancel.is_sensitive(),
+                    is_visible: self.launch.cancel.is_visible(),
+                    is_enabled: self.launch.cancel.is_sensitive(),
                     is_selected: false,
-                    bounds: widget_bounds(&self.launch_cancel, &self.window),
+                    bounds: widget_bounds(&self.launch.cancel, &self.window),
                     children: Vec::new(),
                 },
                 UiNode {
                     id: "launch-submit".to_owned(),
                     role: "button".to_owned(),
                     label: Some("Launch".to_owned()),
-                    is_visible: self.launch_submit.is_visible(),
-                    is_enabled: self.launch_submit.is_sensitive(),
+                    is_visible: self.launch.submit.is_visible(),
+                    is_enabled: self.launch.submit.is_sensitive(),
                     is_selected: false,
-                    bounds: widget_bounds(&self.launch_submit, &self.window),
+                    bounds: widget_bounds(&self.launch.submit, &self.window),
                     children: Vec::new(),
                 },
             ]
@@ -315,7 +319,7 @@ impl Workspace {
                                         label: Some("New".to_owned()),
                                         is_visible: self.launch_button.is_visible(),
                                         is_enabled: self.launch_button.is_sensitive(),
-                                        is_selected: self.launch_window.is_visible(),
+                                        is_selected: self.launch.modal.is_visible(),
                                         bounds: widget_bounds(&self.launch_button, &self.window),
                                         children: launch_children,
                                     },
