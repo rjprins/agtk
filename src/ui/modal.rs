@@ -8,8 +8,7 @@ use adw::prelude::*;
 pub(super) struct Modal {
     dialog: adw::Dialog,
     parent: adw::ApplicationWindow,
-    header: adw::HeaderBar,
-    toolbar: adw::ToolbarView,
+    header: Option<adw::HeaderBar>,
     open: Rc<Cell<bool>>,
 }
 
@@ -31,6 +30,16 @@ impl Modal {
             .content_height(height)
             .child(&toolbar)
             .build();
+        Self::wrap(parent, &dialog, Some(header))
+    }
+
+    /// Wraps a ready-made dialog, such as a preferences dialog, that brings its own header.
+    pub(super) fn wrap(
+        parent: &adw::ApplicationWindow,
+        dialog: &impl IsA<adw::Dialog>,
+        header: Option<adw::HeaderBar>,
+    ) -> Self {
+        let dialog = dialog.clone().upcast::<adw::Dialog>();
         let open = Rc::new(Cell::new(false));
         let closed = open.clone();
         dialog.connect_closed(move |_| closed.set(false));
@@ -38,7 +47,6 @@ impl Modal {
             dialog,
             parent: parent.clone(),
             header,
-            toolbar,
             open,
         }
     }
@@ -74,18 +82,12 @@ impl Modal {
     }
 
     pub(super) fn header(&self) -> &adw::HeaderBar {
-        &self.header
-    }
-
-    pub(super) fn add_bottom_bar(&self, bar: &impl IsA<gtk::Widget>) {
-        self.toolbar.add_bottom_bar(bar);
+        self.header
+            .as_ref()
+            .expect("only Modal::new dialogs have their own header")
     }
 
     pub(super) fn set_default_widget(&self, widget: &impl IsA<gtk::Widget>) {
         self.dialog.set_default_widget(Some(widget));
-    }
-
-    pub(super) fn set_focus(&self, widget: &impl IsA<gtk::Widget>) {
-        self.dialog.set_focus(Some(widget));
     }
 }

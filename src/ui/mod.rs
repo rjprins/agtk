@@ -48,6 +48,7 @@ mod history_ui;
 mod inspection;
 mod launch_ui;
 mod modal;
+mod preferences_ui;
 mod projects_ui;
 mod provider_icons;
 mod search_ui;
@@ -78,7 +79,6 @@ struct Workspace {
     claude_model_window: modal::Modal,
     claude_model_list: gtk::Box,
     selected_claude_preset: Rc<Cell<i32>>,
-    claude_presets_entry: gtk::Entry,
     pr_button: gtk::Button,
     pr_window: modal::Modal,
     pr_root: gtk::Entry,
@@ -122,12 +122,8 @@ struct Workspace {
     search_window: modal::Modal,
     search_entry: gtk::Entry,
     theme_button: gtk::Button,
-    theme_window: modal::Modal,
-    follow_system_toggle: gtk::CheckButton,
-    font_entry: gtk::Entry,
+    preferences: preferences_ui::PreferencesDialog,
     shortcut_button: gtk::Button,
-    shortcut_window: modal::Modal,
-    shortcut_entries: Rc<Vec<(ShortcutAction, gtk::Entry)>>,
     session_context_bar: gtk::Box,
     context_input: gtk::Box,
     context_last_input: gtk::Label,
@@ -564,104 +560,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     search_button.set_tooltip_text(Some("Search selected terminal scrollback"));
 
-    let theme_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
-    theme_list.set_margin_top(18);
-    theme_list.set_margin_bottom(18);
-    theme_list.set_margin_start(18);
-    theme_list.set_margin_end(18);
-    let theme_heading = gtk::Label::new(Some("Terminal appearance"));
-    theme_heading.set_xalign(0.0);
-    theme_heading.add_css_class("heading");
-    theme_heading.set_visible(false);
-    theme_list.append(&theme_heading);
-    let mut theme_buttons = Vec::new();
-    for key in ThemeKey::ALL {
-        let choice = gtk::Button::with_label(theme(key).name);
-        choice.add_css_class("flat");
-        choice.set_tooltip_text(Some(&format!(
-            "Use the {} terminal palette",
-            theme(key).name
-        )));
-        theme_list.append(&choice);
-        theme_buttons.push((key, choice));
-    }
-    let follow_system_toggle = gtk::CheckButton::with_label("Follow system light/dark");
-    follow_system_toggle.set_tooltip_text(Some(
-        "Resolve the selected terminal palette to its light or dark partner",
-    ));
-    theme_list.append(&follow_system_toggle);
-    let font_entry = gtk::Entry::builder()
-        .text("Monospace 11")
-        .placeholder_text("Terminal font")
-        .build();
-    font_entry.set_tooltip_text(Some("Pango terminal font description"));
-    theme_list.append(&font_entry);
-    let apply_font = gtk::Button::with_label("Apply font");
-    apply_font.set_halign(gtk::Align::End);
-    theme_list.append(&apply_font);
-    let theme_button = menu_item("Terminal appearance");
+    let theme_button = menu_item("Preferences");
     theme_button.set_sensitive(false);
-    theme_button.set_tooltip_text(Some("Choose terminal colors and font"));
+    theme_button.set_tooltip_text(Some("Terminal appearance and Claude presets"));
 
-    let shortcut_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    shortcut_list.set_margin_top(18);
-    shortcut_list.set_margin_bottom(18);
-    shortcut_list.set_margin_start(18);
-    shortcut_list.set_margin_end(18);
-    let shortcut_heading = gtk::Label::new(Some("Application shortcuts"));
-    shortcut_heading.set_xalign(0.0);
-    shortcut_heading.add_css_class("heading");
-    shortcut_heading.set_visible(false);
-    shortcut_list.append(&shortcut_heading);
-    let shortcut_hint = gtk::Label::new(Some(
-        "Click a field, then press a shortcut containing Ctrl, Alt, or Meta. It is saved right away.",
-    ));
-    shortcut_hint.set_xalign(0.0);
-    shortcut_hint.add_css_class("dim-label");
-    shortcut_list.append(&shortcut_hint);
-    let mut shortcut_entries = Vec::new();
-    let mut shortcut_controls = Vec::new();
-    for action in ShortcutAction::ALL {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        let label = gtk::Label::new(Some(action.label()));
-        label.set_xalign(0.0);
-        label.set_width_chars(24);
-        row.append(&label);
-        let entry = gtk::Entry::builder()
-            .text(shortcuts_ui::accelerator_label(
-                action.default_accelerator(),
-            ))
-            .editable(false)
-            .width_chars(25)
-            .build();
-        entry.set_tooltip_text(Some(&format!(
-            "Click, then press the new shortcut for {}",
-            action.label()
-        )));
-        row.append(&entry);
-        let reset = gtk::Button::with_label("Reset");
-        reset.add_css_class("flat");
-        reset.set_tooltip_text(Some(&format!("Reset shortcut for {}", action.label())));
-        row.append(&reset);
-        shortcut_list.append(&row);
-        shortcut_entries.push((action, entry.clone()));
-        shortcut_controls.push((action, entry, reset));
-    }
-    let claude_presets_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let claude_presets_label = gtk::Label::new(Some("Claude presets JSON"));
-    claude_presets_label.set_xalign(0.0);
-    claude_presets_label.set_width_chars(24);
-    claude_presets_row.append(&claude_presets_label);
-    let claude_presets_entry = gtk::Entry::builder()
-        .placeholder_text("JSON array of named model and effort presets")
-        .width_chars(48)
-        .hexpand(true)
-        .build();
-    claude_presets_row.append(&claude_presets_entry);
-    let apply_claude_presets = gtk::Button::with_label("Apply");
-    claude_presets_row.append(&apply_claude_presets);
-    shortcut_list.append(&claude_presets_row);
-    let shortcut_button = menu_item("Keyboard shortcuts");
+    let shortcut_button = menu_item("Keyboard Shortcuts");
     shortcut_button.set_sensitive(false);
     shortcut_button.set_tooltip_text(Some("Configure application shortcuts"));
 
@@ -737,9 +640,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let worktree_window = modal::Modal::new(&window, "Worktrees", 900, 700, &worktree_surface);
     let history_window = modal::Modal::new(&window, "Prompt history", 620, 600, &history_surface);
     let search_window = modal::Modal::new(&window, "Search terminal", 650, -1, &search_surface);
-    let theme_window = modal::Modal::new(&window, "Terminal appearance", 520, 650, &theme_list);
-    let shortcut_window =
-        modal::Modal::new(&window, "Application shortcuts", 900, 820, &shortcut_list);
+    let preferences = preferences_ui::PreferencesDialog::build(&window);
     let pr_window = modal::Modal::new(&window, "Azure pull requests", 1120, 760, &pr_surface);
     let agent_window =
         modal::Modal::new(&window, "Recent agent sessions", 1400, 900, &agent_surface);
@@ -756,7 +657,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         claude_model_window,
         claude_model_list,
         selected_claude_preset: Rc::new(Cell::new(0)),
-        claude_presets_entry: claude_presets_entry.clone(),
         pr_button,
         pr_window,
         pr_root: pr_root.1,
@@ -802,12 +702,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         search_window,
         search_entry: search_entry.clone(),
         theme_button,
-        theme_window,
-        follow_system_toggle: follow_system_toggle.clone(),
-        font_entry: font_entry.clone(),
+        preferences,
         shortcut_button,
-        shortcut_window,
-        shortcut_entries: Rc::new(shortcut_entries),
         session_context_bar: session_context_bar.clone(),
         context_input: context_input.clone(),
         context_last_input: context_last_input.clone(),
@@ -888,11 +784,15 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     });
     let dialog_workspace = workspace.clone();
     workspace.theme_button.connect_clicked(move |_| {
-        dialog_workspace.theme_window.present();
+        dialog_workspace
+            .preferences
+            .open(preferences_ui::APPEARANCE_PAGE);
     });
     let dialog_workspace = workspace.clone();
     workspace.shortcut_button.connect_clicked(move |_| {
-        dialog_workspace.shortcut_window.present();
+        dialog_workspace
+            .preferences
+            .open(preferences_ui::SHORTCUTS_PAGE);
     });
 
     let sidebar_width_workspace = workspace.clone();
@@ -998,13 +898,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             );
         }
     });
-    let preset_workspace = workspace.clone();
-    apply_claude_presets
-        .connect_clicked(move |_| preset_workspace.apply_claude_presets_from_entry());
-    let preset_workspace = workspace.clone();
-    claude_presets_entry
-        .connect_activate(move |_| preset_workspace.apply_claude_presets_from_entry());
-
     let worktree_workspace = workspace.clone();
     worktree_refresh.connect_clicked(move |_| worktree_workspace.refresh_worktree_panel());
     let worktree_workspace = workspace.clone();
@@ -1098,77 +991,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let search_workspace = workspace.clone();
     search_entry.connect_activate(move |_| search_workspace.search_selected(true));
 
-    for (key, choice) in theme_buttons {
-        let appearance_workspace = workspace.clone();
-        choice.connect_clicked(move |_| {
-            appearance_workspace.set_appearance(
-                AppearanceSetParams {
-                    theme: Some(key),
-                    follow_system: None,
-                    font: None,
-                    ui_font_size: None,
-                },
-                None,
-            );
-        });
-    }
-
-    let system_workspace = workspace.clone();
-    follow_system_toggle.connect_toggled(move |toggle| {
-        system_workspace.set_appearance(
-            AppearanceSetParams {
-                theme: None,
-                follow_system: Some(toggle.is_active()),
-                font: None,
-                ui_font_size: None,
-            },
-            None,
-        );
-    });
-
-    let font_workspace = workspace.clone();
-    apply_font.connect_clicked(move |_| {
-        font_workspace.set_appearance(
-            AppearanceSetParams {
-                theme: None,
-                follow_system: None,
-                font: Some(font_workspace.font_entry.text().to_string()),
-                ui_font_size: None,
-            },
-            None,
-        );
-    });
-    let font_workspace = workspace.clone();
-    font_entry.connect_activate(move |_| {
-        font_workspace.set_appearance(
-            AppearanceSetParams {
-                theme: None,
-                follow_system: None,
-                font: Some(font_workspace.font_entry.text().to_string()),
-                ui_font_size: None,
-            },
-            None,
-        );
-    });
-
     let system_style_workspace = workspace.clone();
     style_manager.connect_dark_notify(move |_| system_style_workspace.apply_appearance());
 
-    for (action, entry, reset) in shortcut_controls {
-        workspace.install_shortcut_capture(action, &entry);
-        let shortcut_workspace = workspace.clone();
-        reset.connect_clicked(move |_| {
-            shortcut_workspace.set_shortcut(
-                ShortcutSetParams {
-                    action,
-                    accelerator: None,
-                    reset: true,
-                },
-                None,
-            );
-        });
-    }
-
+    workspace.connect_preferences();
     workspace.install_status_timers();
     workspace.install_shortcut_actions();
     workspace.discover_sessions();

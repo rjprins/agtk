@@ -76,7 +76,6 @@ impl Workspace {
             move |workspace, result| match result {
                 Ok(()) => {
                     workspace.load_appearance(preferences);
-                    workspace.theme_window.hide();
                     if let Some(pending) = pending {
                         let id = pending.request.id.clone();
                         match serde_json::to_value(workspace.appearance_summary()) {
@@ -121,13 +120,7 @@ impl Workspace {
             "Terminal appearance: {}",
             effective.as_str()
         )));
-        if self.follow_system_toggle.is_active() != preferences.follow_system {
-            self.follow_system_toggle
-                .set_active(preferences.follow_system);
-        }
-        if self.font_entry.text().as_str() != preferences.font {
-            self.font_entry.set_text(&preferences.font);
-        }
+        self.preferences.show_appearance(&preferences);
         let terminals = self
             .sessions
             .borrow()

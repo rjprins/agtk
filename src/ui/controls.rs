@@ -152,11 +152,11 @@ impl Workspace {
                         true
                     }
                     UiSurface::Appearance => {
-                        self.theme_window.present();
+                        self.preferences.open(preferences_ui::APPEARANCE_PAGE);
                         true
                     }
                     UiSurface::Shortcuts => {
-                        self.shortcut_window.present();
+                        self.preferences.open(preferences_ui::SHORTCUTS_PAGE);
                         true
                     }
                     UiSurface::History if self.history_button.is_sensitive() => {

@@ -94,7 +94,8 @@ impl Workspace {
 
         self.apply_shortcuts();
         let workspace = self.clone();
-        self.shortcut_window
+        self.preferences
+            .modal
             .connect_hide(move || workspace.apply_shortcuts());
     }
 
@@ -102,7 +103,7 @@ impl Workspace {
         *self.shortcuts.borrow_mut() = preferences;
         self.apply_shortcuts();
         let preferences = self.shortcuts.borrow();
-        for (action, entry) in self.shortcut_entries.iter() {
+        for (action, entry) in self.preferences.shortcut_entries.iter() {
             entry.set_text(&accelerator_label(preferences.binding(*action)));
         }
     }

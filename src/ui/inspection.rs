@@ -299,7 +299,9 @@ impl Workspace {
                                         label: Some("Application shortcuts".to_owned()),
                                         is_visible: self.shortcut_button.is_visible(),
                                         is_enabled: self.shortcut_button.is_sensitive(),
-                                        is_selected: self.shortcut_window.is_visible(),
+                                        is_selected: self
+                                            .preferences
+                                            .is_showing(preferences_ui::SHORTCUTS_PAGE),
                                         bounds: widget_bounds(&self.shortcut_button, &self.window),
                                         children: Vec::new(),
                                     },
@@ -309,7 +311,9 @@ impl Workspace {
                                         label: Some("Terminal appearance".to_owned()),
                                         is_visible: self.theme_button.is_visible(),
                                         is_enabled: self.theme_button.is_sensitive(),
-                                        is_selected: self.theme_window.is_visible(),
+                                        is_selected: self
+                                            .preferences
+                                            .is_showing(preferences_ui::APPEARANCE_PAGE),
                                         bounds: widget_bounds(&self.theme_button, &self.window),
                                         children: Vec::new(),
                                     },

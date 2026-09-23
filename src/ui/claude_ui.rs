@@ -19,7 +19,8 @@ impl Workspace {
         *self.claude_presets.borrow_mut() = preferences;
         self.selected_claude_preset.set(0);
         let presets = &self.claude_presets.borrow().presets;
-        self.claude_presets_entry
+        self.preferences
+            .claude_presets
             .set_text(&serde_json::to_string(presets).unwrap_or_else(|_| "[]".to_owned()));
         self.render_claude_preset_menu();
         self.update_claude_actions();
@@ -149,7 +150,7 @@ impl Workspace {
 
     pub(super) fn apply_claude_presets_from_entry(&self) {
         let presets = match serde_json::from_str::<Vec<ClaudeModelPreset>>(
-            self.claude_presets_entry.text().as_str(),
+            self.preferences.claude_presets.text().as_str(),
         ) {
             Ok(presets) => presets,
             Err(error) => {

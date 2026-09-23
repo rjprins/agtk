@@ -132,7 +132,7 @@ pub struct CloseSessionParams {
     pub allow_missing: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppearanceSetParams {
     pub theme: Option<ThemeKey>,
