@@ -23,6 +23,103 @@ struct PreloadedPrContext {
     context: PrContext,
 }
 
+/// The pull request dialog for one Azure DevOps project.
+#[derive(Clone)]
+pub(super) struct PrDialog {
+    pub(super) modal: modal::Modal,
+    pub(super) root: adw::EntryRow,
+    pub(super) auto_review: adw::SwitchRow,
+    pub(super) list: gtk::ListBox,
+    pub(super) loading: gtk::Box,
+    pub(super) updating_toggle: Rc<Cell<bool>>,
+    refresh: gtk::Button,
+}
+
+impl PrDialog {
+    pub(super) fn build(parent: &adw::ApplicationWindow) -> Self {
+        let root = adw::EntryRow::builder()
+            .title("Project Root")
+            .show_apply_button(true)
+            .build();
+        let auto_review = adw::SwitchRow::builder()
+            .title("Auto-Review New Attention")
+            .subtitle("Launch a Codex review when a colleague's PR needs attention")
+            .build();
+        let project = adw::PreferencesGroup::new();
+        project.add(&root);
+        project.add(&auto_review);
+
+        let loading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        loading.append(&adw::Spinner::new());
+        let loading_label = gtk::Label::new(Some("Loading active pull requests…"));
+        loading_label.add_css_class("dim-label");
+        loading.append(&loading_label);
+        loading.set_visible(false);
+        let list = gtk::ListBox::new();
+        list.add_css_class("boxed-list");
+        list.set_selection_mode(gtk::SelectionMode::None);
+        let active = adw::PreferencesGroup::builder()
+            .title("Active Pull Requests")
+            .build();
+        active.set_header_suffix(Some(&loading));
+        active.add(&list);
+
+        let page = adw::PreferencesPage::new();
+        page.add(&project);
+        page.add(&active);
+        let refresh = gtk::Button::builder()
+            .icon_name("view-refresh-symbolic")
+            .tooltip_text("Refresh active pull requests")
+            .build();
+        let modal = modal::Modal::new(parent, "Pull Requests", 900, 720, &page);
+        modal.header().pack_start(&refresh);
+        Self {
+            modal,
+            root,
+            auto_review,
+            list,
+            loading,
+            updating_toggle: Rc::new(Cell::new(false)),
+            refresh,
+        }
+    }
+}
+
+impl Workspace {
+    pub(super) fn connect_prs(&self) {
+        let workspace = self.clone();
+        self.prs
+            .refresh
+            .connect_clicked(move |_| workspace.refresh_pr_panel(None));
+        let workspace = self.clone();
+        self.prs
+            .root
+            .connect_apply(move |_| workspace.refresh_pr_panel(None));
+        let workspace = self.clone();
+        self.prs
+            .modal
+            .connect_show(move || workspace.prepare_pr_panel());
+        let workspace = self.clone();
+        self.prs.auto_review.connect_active_notify(move |row| {
+            if workspace.prs.updating_toggle.get() {
+                return;
+            }
+            let root = workspace.prs.root.text().trim().to_owned();
+            if root.is_empty() {
+                workspace.show_error("Select a project before changing auto-review");
+                return;
+            }
+            workspace.set_auto_review(
+                crate::control::PrSetAutoReviewParams {
+                    project_root: PathBuf::from(root),
+                    enabled: row.is_active(),
+                },
+                None,
+            );
+        });
+    }
+}
+
 impl Workspace {
     pub(super) fn refresh_selected_pr_context(&self, session_id: &str) {
         self.clear_selected_pr_context();
@@ -124,8 +221,8 @@ impl Workspace {
                     return;
                 };
                 workspace.cache_pr_context(&loaded.context);
-                if workspace.pr_window.is_visible()
-                    && pr_cache_key(Path::new(workspace.pr_root.text().trim()))
+                if workspace.prs.modal.is_visible()
+                    && pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                         == pr_cache_key(&loaded.context.project_root)
                 {
                     workspace.render_pr_context(&loaded.context);
@@ -179,22 +276,22 @@ impl Workspace {
     }
 
     pub(super) fn open_pr_for_project(&self, root: &str) {
-        self.pr_root.set_text(root);
+        self.prs.root.set_text(root);
         self.render_cached_pr_context(root);
-        if self.pr_window.is_visible() {
+        if self.prs.modal.is_visible() {
             self.refresh_pr_panel(None);
         } else {
-            self.pr_window.present();
+            self.prs.modal.present();
         }
     }
 
     pub(super) fn prepare_pr_panel(&self) {
-        if self.pr_root.text().trim().is_empty()
+        if self.prs.root.text().trim().is_empty()
             && let Some(root) = self.preferred_project_root()
         {
-            self.pr_root.set_text(&root);
+            self.prs.root.set_text(&root);
         }
-        self.render_cached_pr_context(self.pr_root.text().trim());
+        self.render_cached_pr_context(self.prs.root.text().trim());
         self.refresh_pr_panel(None);
     }
 
@@ -211,7 +308,7 @@ impl Workspace {
     }
 
     pub(super) fn refresh_pr_panel(&self, pending: Option<PendingRequest>) {
-        let root = self.pr_root.text().trim().to_owned();
+        let root = self.prs.root.text().trim().to_owned();
         if root.is_empty() {
             self.render_pr_message("SELECT A PROJECT WITH AN AZURE DEVOPS ORIGIN");
             if let Some(pending) = pending {
@@ -247,10 +344,7 @@ impl Workspace {
         let live_paths = self.live_worktree_paths();
         let requested_key = pr_cache_key(&params.project_root);
         let had_cached = self.pr_context_cache.borrow().contains_key(&requested_key);
-        self.pr_loading.set_visible(!had_cached);
-        if !had_cached {
-            self.pr_spinner.start();
-        }
+        self.prs.loading.set_visible(!had_cached);
         self.run_io(
             move || {
                 let project_root = params.project_root.canonicalize()?;
@@ -308,17 +402,17 @@ impl Workspace {
             },
             move |workspace, result| match result {
                 Ok(loaded) => {
-                    workspace.pr_spinner.stop();
-                    workspace.pr_loading.set_visible(false);
+                    workspace.prs.loading.set_visible(false);
                     *workspace.pr_preferences.borrow_mut() = loaded.preferences;
                     workspace.update_pr_indicator();
-                    workspace.updating_pr_toggle.set(true);
+                    workspace.prs.updating_toggle.set(true);
                     workspace
-                        .pr_auto_toggle
+                        .prs
+                        .auto_review
                         .set_active(loaded.context.auto_review);
-                    workspace.updating_pr_toggle.set(false);
+                    workspace.prs.updating_toggle.set(false);
                     workspace.cache_pr_context(&loaded.context);
-                    if pr_cache_key(Path::new(workspace.pr_root.text().trim()))
+                    if pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                         == pr_cache_key(&loaded.context.project_root)
                     {
                         workspace.render_pr_context(&loaded.context);
@@ -349,10 +443,10 @@ impl Workspace {
                     }
                 }
                 Err(error) => {
-                    workspace.pr_spinner.stop();
-                    workspace.pr_loading.set_visible(false);
+                    workspace.prs.loading.set_visible(false);
                     if !had_cached
-                        && pr_cache_key(Path::new(workspace.pr_root.text().trim())) == requested_key
+                        && pr_cache_key(Path::new(workspace.prs.root.text().trim()))
+                            == requested_key
                     {
                         workspace.render_pr_message(&format!("ERROR  {error}"));
                     }
@@ -368,25 +462,24 @@ impl Workspace {
     }
 
     fn render_pr_message(&self, text: &str) {
-        while let Some(child) = self.pr_list.first_child() {
-            self.pr_list.remove(&child);
+        while let Some(child) = self.prs.list.first_child() {
+            self.prs.list.remove(&child);
         }
-        let label = gtk::Label::new(Some(text));
-        label.set_xalign(0.0);
-        label.add_css_class("dim-label");
-        self.pr_list.append(&label);
+        let row = adw::ActionRow::builder().title(text).build();
+        row.add_css_class("dim-label");
+        self.prs.list.append(&row);
     }
 
     fn render_pr_context(&self, context: &PrContext) {
-        while let Some(child) = self.pr_list.first_child() {
-            self.pr_list.remove(&child);
+        while let Some(child) = self.prs.list.first_child() {
+            self.prs.list.remove(&child);
         }
         if context.pull_requests.is_empty() {
-            self.render_pr_message("NO ACTIVE PULL REQUESTS");
+            self.render_pr_message("No active pull requests");
             return;
         }
         for item in &context.pull_requests {
-            self.pr_list.append(&self.pr_row(context, item));
+            self.prs.list.append(&self.pr_row(context, item));
         }
     }
 
@@ -402,146 +495,99 @@ impl Workspace {
         let Some(context) = context else {
             return false;
         };
-        self.updating_pr_toggle.set(true);
-        self.pr_auto_toggle.set_active(context.auto_review);
-        self.updating_pr_toggle.set(false);
+        self.prs.updating_toggle.set(true);
+        self.prs.auto_review.set_active(context.auto_review);
+        self.prs.updating_toggle.set(false);
         self.render_pr_context(&context);
         true
     }
 
-    fn pr_row(&self, context: &PrContext, item: &PrItem) -> gtk::Box {
-        let row = gtk::Box::new(gtk::Orientation::Vertical, 1);
-        let headline = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        let marker = item
-            .attention
-            .map(|attention| format!("[{}] ", attention_name(attention)))
-            .unwrap_or_default();
-        let draft = if item.pull_request.is_draft {
-            " [draft]"
-        } else {
-            ""
+    fn pr_row(&self, context: &PrContext, item: &PrItem) -> adw::ActionRow {
+        let pull_request = &item.pull_request;
+        let location = item
+            .worktree_path
+            .as_ref()
+            .map_or("project root".to_owned(), |path| path.display().to_string());
+        let row = adw::ActionRow::builder()
+            .title(glib::markup_escape_text(&pull_request.title))
+            .subtitle(glib::markup_escape_text(&format!(
+                "{} · {} → {} · {} unresolved",
+                pull_request.author,
+                pull_request.source_branch,
+                pull_request.target_branch,
+                pull_request.unresolved_threads
+            )))
+            .subtitle_lines(1)
+            .build();
+        row.set_tooltip_text(Some(&format!("{}\nRuns in {location}", pull_request.title)));
+
+        let open = {
+            let workspace = self.clone();
+            let url = pull_request.url.clone();
+            let project_root = context.project_root.clone();
+            let pull_request_id = pull_request.id;
+            let attention = item.attention;
+            move || {
+                let launcher = gtk::UriLauncher::new(&url);
+                let launch_workspace = workspace.clone();
+                launcher.launch(
+                    Some(&workspace.window),
+                    None::<&gio::Cancellable>,
+                    move |result| {
+                        if let Err(error) = result {
+                            launch_workspace.show_error(&format!("Could not open PR: {error}"));
+                        }
+                    },
+                );
+                if let Some(marker) = attention {
+                    workspace.acknowledge_pr(
+                        PrAcknowledgeParams {
+                            project_root: project_root.clone(),
+                            pull_request_id,
+                            marker,
+                        },
+                        None,
+                    );
+                }
+            }
         };
-        let number = gtk::Button::with_label(&format!("#{}", item.pull_request.id));
+        let number = gtk::Button::with_label(&format!("#{}", pull_request.id));
         number.add_css_class("flat");
         number.add_css_class("accent");
-        number.set_tooltip_text(Some("Open this pull request in Azure DevOps"));
-        let number_workspace = self.clone();
-        let number_url = item.pull_request.url.clone();
-        let number_project_root = context.project_root.clone();
-        let number_pull_request_id = item.pull_request.id;
-        let number_attention = item.attention;
-        number.connect_clicked(move |_| {
-            let launcher = gtk::UriLauncher::new(&number_url);
-            let launch_workspace = number_workspace.clone();
-            launcher.launch(
-                Some(&number_workspace.window),
-                None::<&gio::Cancellable>,
-                move |result| {
-                    if let Err(error) = result {
-                        launch_workspace.show_error(&format!("Could not open PR: {error}"));
-                    }
-                },
-            );
-            if let Some(marker) = number_attention {
-                number_workspace.acknowledge_pr(
-                    PrAcknowledgeParams {
-                        project_root: number_project_root.clone(),
-                        pull_request_id: number_pull_request_id,
-                        marker,
-                    },
-                    None,
-                );
-            }
-        });
+        number.set_valign(gtk::Align::Center);
+        number.set_tooltip_text(Some(
+            "Open in Azure DevOps and mark current attention viewed",
+        ));
+        let open_number = open.clone();
+        number.connect_clicked(move |_| open_number());
+        row.add_prefix(&number);
 
-        let title = gtk::Label::new(Some(&format!("{marker}{}{draft}", item.pull_request.title)));
-        title.set_xalign(0.0);
-        title.set_hexpand(true);
-        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        title.set_tooltip_text(Some(&item.pull_request.title));
-        headline.append(&number);
-        headline.append(&title);
-
+        if let Some(attention) = item.attention {
+            row.add_suffix(&badge(attention_name(attention), "accent"));
+        }
+        if pull_request.is_draft {
+            row.add_suffix(&badge("draft", "dim-label"));
+        }
         let view = gtk::Button::builder()
-            .icon_name("web-browser-symbolic")
+            .icon_name("adw-external-link-symbolic")
+            .valign(gtk::Align::Center)
+            .tooltip_text("Open in the browser and mark current attention viewed")
             .build();
         view.add_css_class("flat");
-        view.set_tooltip_text(Some(
-            "Open in the browser and mark current attention viewed",
-        ));
-        let view_workspace = self.clone();
-        let url = item.pull_request.url.clone();
-        let project_root = context.project_root.clone();
-        let pull_request_id = item.pull_request.id;
-        let attention = item.attention;
-        view.connect_clicked(move |_| {
-            let launcher = gtk::UriLauncher::new(&url);
-            let launch_workspace = view_workspace.clone();
-            launcher.launch(
-                Some(&view_workspace.window),
-                None::<&gio::Cancellable>,
-                move |result| {
-                    if let Err(error) = result {
-                        launch_workspace.show_error(&format!("Could not open PR: {error}"));
-                    }
-                },
-            );
-            if let Some(marker) = attention {
-                view_workspace.acknowledge_pr(
-                    PrAcknowledgeParams {
-                        project_root: project_root.clone(),
-                        pull_request_id,
-                        marker,
-                    },
-                    None,
-                );
-            }
-        });
-        headline.append(&view);
-
+        view.connect_clicked(move |_| open());
+        row.add_suffix(&view);
         let review = gtk::Button::builder()
-            .icon_name("document-edit-symbolic")
+            .label("Review")
+            .valign(gtk::Align::Center)
+            .tooltip_text("Launch Codex with the review-pr workflow")
             .build();
-        review.add_css_class("flat");
-        review.set_tooltip_text(Some("Launch Codex with the review-pr workflow"));
         let review_workspace = self.clone();
         let review_root = context.project_root.clone();
         let review_item = item.clone();
         review.connect_clicked(move |_| {
             review_workspace.launch_pr_review(&review_root, &review_item, None)
         });
-        headline.append(&review);
-        row.append(&headline);
-
-        let location = item
-            .worktree_path
-            .as_ref()
-            .map_or("project root".to_owned(), |path| path.display().to_string());
-        let details = gtk::Label::new(Some(&format!(
-            "{}    comments:{}    {} -> {}",
-            item.pull_request.author,
-            item.pull_request.unresolved_threads,
-            item.pull_request.source_branch,
-            item.pull_request.target_branch,
-        )));
-        details.set_xalign(0.0);
-        details.add_css_class("caption");
-        details.add_css_class("dim-label");
-        details.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        details.set_tooltip_text(Some(&format!(
-            "{} -> {} by {}, {} unresolved thread(s)",
-            item.pull_request.source_branch,
-            item.pull_request.target_branch,
-            item.pull_request.author,
-            item.pull_request.unresolved_threads
-        )));
-        row.append(&details);
-        let location = gtk::Label::new(Some(&format!("cwd  {location}")));
-        location.set_xalign(0.0);
-        location.add_css_class("caption");
-        location.add_css_class("dim-label");
-        location.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        row.append(&location);
+        row.add_suffix(&review);
         row
     }
 
@@ -580,7 +626,7 @@ impl Workspace {
                             id,
                             serde_json::json!({ "acknowledged": acknowledged }),
                         ));
-                    } else if workspace.pr_window.is_visible() {
+                    } else if workspace.prs.modal.is_visible() {
                         workspace.refresh_pr_panel(None);
                     }
                 }
@@ -796,4 +842,12 @@ const fn attention_name(attention: PrAttention) -> &'static str {
         PrAttention::Published => "published",
         PrAttention::Review => "review",
     }
+}
+
+fn badge(text: &str, class: &str) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
+    label.add_css_class("caption-heading");
+    label.add_css_class(class);
+    label.set_valign(gtk::Align::Center);
+    label
 }

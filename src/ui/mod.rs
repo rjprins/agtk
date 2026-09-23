@@ -79,13 +79,7 @@ struct Workspace {
     claude_model_list: gtk::Box,
     selected_claude_preset: Rc<Cell<i32>>,
     pr_button: gtk::Button,
-    pr_window: modal::Modal,
-    pr_root: gtk::Entry,
-    pr_auto_toggle: gtk::CheckButton,
-    pr_list: gtk::Box,
-    pr_loading: gtk::Box,
-    pr_spinner: gtk::Spinner,
-    updating_pr_toggle: Rc<Cell<bool>>,
+    prs: azure_ui::PrDialog,
     launch_button: gtk::Button,
     launch: launch_ui::LaunchDialog,
     worktree_button: gtk::Button,
@@ -302,52 +296,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     claude_model_button.set_visible(false);
     claude_model_button.set_tooltip_text(Some("Choose a Claude model and effort preset"));
 
-    let pr_surface = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    pr_surface.set_margin_top(18);
-    pr_surface.set_margin_bottom(18);
-    pr_surface.set_margin_start(18);
-    pr_surface.set_margin_end(18);
-    let pr_heading_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let pr_heading = gtk::Label::new(Some("Azure pull requests"));
-    pr_heading.set_xalign(0.0);
-    pr_heading.set_hexpand(true);
-    pr_heading.add_css_class("heading");
-    // The window title already names the dialog.
-    pr_heading.set_visible(false);
-    pr_heading_row.set_halign(gtk::Align::End);
-    pr_heading_row.append(&pr_heading);
-    let pr_refresh = gtk::Button::builder()
-        .icon_name("view-refresh-symbolic")
-        .build();
-    pr_refresh.add_css_class("flat");
-    pr_refresh.set_tooltip_text(Some("Refresh active pull requests"));
-    pr_heading_row.append(&pr_refresh);
-    pr_surface.append(&pr_heading_row);
-    let pr_loading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let pr_spinner = gtk::Spinner::new();
-    pr_spinner.set_size_request(18, 18);
-    pr_loading.append(&pr_spinner);
-    let pr_loading_label = gtk::Label::new(Some("Loading active pull requests..."));
-    pr_loading_label.set_xalign(0.0);
-    pr_loading.append(&pr_loading_label);
-    pr_loading.set_visible(false);
-    pr_surface.append(&pr_loading);
-    let pr_root = launch_entry("Project root", "absolute Azure DevOps repository root");
-    pr_surface.append(&pr_root.0);
-    let pr_auto_toggle = gtk::CheckButton::with_label("Auto-review new attention");
-    pr_auto_toggle.set_tooltip_text(Some(
-        "Opt in to launching Codex review sessions for later PR attention changes",
-    ));
-    pr_surface.append(&pr_auto_toggle);
-    let pr_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    let pr_scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .min_content_width(1040)
-        .min_content_height(560)
-        .max_content_height(720)
-        .child(&pr_list)
-        .build();
-    pr_surface.append(&pr_scroller);
     let pr_button = menu_item("Pull requests");
     pr_button.set_sensitive(false);
     pr_button.set_tooltip_text(Some(
@@ -490,7 +438,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let history_window = modal::Modal::new(&window, "Prompt history", 620, 600, &history_surface);
     let search_window = modal::Modal::new(&window, "Search terminal", 650, -1, &search_surface);
     let preferences = preferences_ui::PreferencesDialog::build(&window);
-    let pr_window = modal::Modal::new(&window, "Azure pull requests", 1120, 760, &pr_surface);
+    let prs = azure_ui::PrDialog::build(&window);
     let agents = agents_ui::AgentDialog::build(&window);
     let workspace = Workspace {
         application: app.clone(),
@@ -506,13 +454,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         claude_model_list,
         selected_claude_preset: Rc::new(Cell::new(0)),
         pr_button,
-        pr_window,
-        pr_root: pr_root.1,
-        pr_auto_toggle: pr_auto_toggle.clone(),
-        pr_list,
-        pr_loading,
-        pr_spinner,
-        updating_pr_toggle: Rc::new(Cell::new(false)),
+        prs,
         launch_button,
         launch,
         worktree_button,
@@ -723,30 +665,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         }
     });
     workspace.connect_worktrees();
-    let pr_workspace = workspace.clone();
-    pr_refresh.connect_clicked(move |_| pr_workspace.refresh_pr_panel(None));
-    let pr_workspace = workspace.clone();
-    workspace
-        .pr_window
-        .connect_show(move || pr_workspace.prepare_pr_panel());
-    let pr_workspace = workspace.clone();
-    pr_auto_toggle.connect_toggled(move |toggle| {
-        if pr_workspace.updating_pr_toggle.get() {
-            return;
-        }
-        let root = pr_workspace.pr_root.text().trim().to_owned();
-        if root.is_empty() {
-            pr_workspace.show_error("Select a project before changing auto-review");
-            return;
-        }
-        pr_workspace.set_auto_review(
-            crate::control::PrSetAutoReviewParams {
-                project_root: PathBuf::from(root),
-                enabled: toggle.is_active(),
-            },
-            None,
-        );
-    });
+    workspace.connect_prs();
     workspace.connect_agents();
 
     let search_workspace = workspace.clone();
@@ -961,21 +880,6 @@ fn sibling_binary(name: &str) -> PathBuf {
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.join(name)))
         .unwrap_or_else(|| PathBuf::from(name))
-}
-
-fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    let label = gtk::Label::new(Some(label));
-    label.set_xalign(0.0);
-    label.set_width_chars(18);
-    row.append(&label);
-    let entry = gtk::Entry::builder()
-        .placeholder_text(placeholder)
-        .width_chars(42)
-        .hexpand(true)
-        .build();
-    row.append(&entry);
-    (row, entry)
 }
 
 fn quit_on_main_window_close(quit: impl FnOnce()) -> glib::Propagation {

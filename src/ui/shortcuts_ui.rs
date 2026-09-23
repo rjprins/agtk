@@ -53,8 +53,8 @@ impl Workspace {
         });
         self.add_action("reopen-pr-list", true, |workspace| {
             if let Some(root) = workspace.preferred_project_root() {
-                workspace.pr_root.set_text(&root);
-                workspace.pr_window.present();
+                workspace.prs.root.set_text(&root);
+                workspace.prs.modal.present();
             } else {
                 workspace.show_error("No project is available for pull requests");
             }
