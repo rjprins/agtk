@@ -101,7 +101,8 @@ fn image(icon: ProviderIcon) -> gtk::Image {
     let bytes = glib::Bytes::from_static(icon.svg());
     let texture = gtk::gdk::Texture::from_bytes(&bytes).expect("embedded provider icon is valid");
     let image = gtk::Image::from_paintable(Some(&texture));
-    image.set_pixel_size(16);
+    // No pixel size: the stylesheet sizes these so they follow the UI text size.
+    image.add_css_class("provider-icon");
     image.set_tooltip_text(Some(icon.tooltip()));
     image
 }

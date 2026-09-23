@@ -1,4 +1,5 @@
 use super::*;
+use crate::appearance::{DEFAULT_UI_FONT_SIZE, MAX_UI_FONT_SIZE, MIN_UI_FONT_SIZE};
 
 pub(super) const APPEARANCE_PAGE: &str = "appearance";
 pub(super) const SHORTCUTS_PAGE: &str = "shortcuts";
@@ -12,6 +13,7 @@ pub(super) struct PreferencesDialog {
     theme: adw::ComboRow,
     follow_system: adw::SwitchRow,
     font: adw::EntryRow,
+    text_size: adw::SpinRow,
     pub(super) shortcut_entries: Rc<Vec<(ShortcutAction, gtk::Entry)>>,
     shortcut_resets: Rc<Vec<(ShortcutAction, gtk::Button)>>,
     pub(super) claude_presets: adw::EntryRow,
@@ -41,19 +43,33 @@ impl PreferencesDialog {
             .show_apply_button(true)
             .build();
         font.set_tooltip_text(Some("A Pango font description, such as Monospace 11"));
-        let terminal = adw::PreferencesGroup::builder()
-            .title("Terminal")
-            .description("Ctrl+plus and Ctrl+minus change the text size")
-            .build();
+        let terminal = adw::PreferencesGroup::builder().title("Terminal").build();
         terminal.add(&theme_row);
         terminal.add(&follow_system);
         terminal.add(&font);
+        let text_size = adw::SpinRow::builder()
+            .title("Interface Text Size")
+            .subtitle(format!(
+                "{DEFAULT_UI_FONT_SIZE} matches the system. Ctrl+plus and Ctrl+minus change it with the terminal font."
+            ))
+            .adjustment(&gtk::Adjustment::new(
+                f64::from(DEFAULT_UI_FONT_SIZE),
+                f64::from(MIN_UI_FONT_SIZE),
+                f64::from(MAX_UI_FONT_SIZE),
+                1.0,
+                1.0,
+                0.0,
+            ))
+            .build();
+        let interface = adw::PreferencesGroup::builder().title("Interface").build();
+        interface.add(&text_size);
         let appearance = adw::PreferencesPage::builder()
             .name(APPEARANCE_PAGE)
             .title("Appearance")
             .icon_name("preferences-desktop-appearance-symbolic")
             .build();
         appearance.add(&terminal);
+        appearance.add(&interface);
         dialog.add(&appearance);
 
         let shortcuts_group = adw::PreferencesGroup::builder()
@@ -124,6 +140,7 @@ impl PreferencesDialog {
             theme: theme_row,
             follow_system,
             font,
+            text_size,
             shortcut_entries: Rc::new(shortcut_entries),
             shortcut_resets: Rc::new(shortcut_resets),
             claude_presets,
@@ -153,6 +170,8 @@ impl PreferencesDialog {
         if self.font.text().as_str() != preferences.font {
             self.font.set_text(&preferences.font);
         }
+        self.text_size
+            .set_value(f64::from(preferences.ui_font_size));
         self.updating.set(false);
     }
 }
@@ -185,6 +204,24 @@ impl Workspace {
                 workspace.set_appearance(
                     AppearanceSetParams {
                         follow_system: Some(row.is_active()),
+                        ..Default::default()
+                    },
+                    None,
+                );
+            }
+        });
+
+        let workspace = self.clone();
+        let updating = preferences.updating.clone();
+        preferences.text_size.connect_value_notify(move |row| {
+            if updating.get() {
+                return;
+            }
+            let size = row.value().round() as u8;
+            if size != workspace.appearance.borrow().ui_font_size {
+                workspace.set_appearance(
+                    AppearanceSetParams {
+                        ui_font_size: Some(size),
                         ..Default::default()
                     },
                     None,

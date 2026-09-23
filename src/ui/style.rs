@@ -25,8 +25,9 @@ impl ChromeStyle {
     /// Ctrl+plus and Ctrl+minus scale the system font rather than replacing it.
     pub(super) fn apply(&self, font_size: u8) {
         let percent = u32::from(font_size) * 100 / u32::from(DEFAULT_UI_FONT_SIZE);
+        let icon = 16 * percent / 100;
         self.provider.load_from_string(&format!(
-            "window {{ font-size: {percent}%; }}\n{CHROME_CSS}"
+            "window {{ font-size: {percent}%; }}\n.provider-icon {{ -gtk-icon-size: {icon}px; }}\n{CHROME_CSS}"
         ));
     }
 }
