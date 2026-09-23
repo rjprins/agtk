@@ -114,14 +114,8 @@ impl Workspace {
     }
 
     pub(super) fn apply_appearance(&self) {
-        let chrome_key = if self.style_manager.is_dark() {
-            ThemeKey::Neutral
-        } else {
-            ThemeKey::NeutralLight
-        };
         let preferences = self.appearance.borrow().clone();
-        self.chrome_style
-            .apply(theme(chrome_key).chrome, preferences.ui_font_size);
+        self.chrome_style.apply(preferences.ui_font_size);
         let effective = self.effective_terminal_theme();
         self.theme_button.set_tooltip_text(Some(&format!(
             "Terminal appearance: {}",

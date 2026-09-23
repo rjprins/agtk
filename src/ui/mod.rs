@@ -71,14 +71,14 @@ struct Workspace {
     stack: gtk::Stack,
     overlay: adw::ToastOverlay,
     new_shell_button: gtk::Button,
+    content_title: adw::WindowTitle,
     git_button: gtk::MenuButton,
-    git_window: gtk::Window,
-    claude_model_button: gtk::MenuButton,
+    claude_model_button: gtk::Button,
     claude_model_window: gtk::Window,
     claude_model_list: gtk::Box,
     selected_claude_preset: Rc<Cell<i32>>,
     claude_presets_entry: gtk::Entry,
-    pr_button: gtk::MenuButton,
+    pr_button: gtk::Button,
     pr_window: gtk::Window,
     pr_root: gtk::Entry,
     pr_auto_toggle: gtk::CheckButton,
@@ -86,7 +86,7 @@ struct Workspace {
     pr_loading: gtk::Box,
     pr_spinner: gtk::Spinner,
     updating_pr_toggle: Rc<Cell<bool>>,
-    launch_button: gtk::MenuButton,
+    launch_button: gtk::Button,
     launch_window: gtk::Window,
     launch_cancel: gtk::Button,
     launch_submit: gtk::Button,
@@ -130,14 +130,14 @@ struct Workspace {
     launch_project_values: Rc<RefCell<Vec<Option<String>>>>,
     launch_project_custom: Rc<Cell<bool>>,
     launch_creating_worktree: Rc<Cell<bool>>,
-    worktree_button: gtk::MenuButton,
+    worktree_button: gtk::Button,
     worktree_window: gtk::Window,
     worktree_root: gtk::Entry,
     worktree_branch: gtk::Entry,
     worktree_base: gtk::Entry,
     worktree_purpose: gtk::Entry,
     worktree_list: gtk::Box,
-    agent_button: gtk::MenuButton,
+    agent_button: gtk::Button,
     agent_window: gtk::Window,
     agent_list: gtk::Box,
     agent_project_filter: gtk::DropDown,
@@ -156,17 +156,17 @@ struct Workspace {
     hidden_agent_sessions: Rc<RefCell<HashSet<String>>>,
     hidden_agent_sessions_loaded: Rc<Cell<bool>>,
     selected_agent: Rc<RefCell<Option<ProviderSession>>>,
-    history_button: gtk::MenuButton,
+    history_button: gtk::Button,
     history_list: gtk::Box,
     history_window: gtk::Window,
-    search_button: gtk::MenuButton,
+    search_button: gtk::Button,
     search_window: gtk::Window,
     search_entry: gtk::Entry,
-    theme_button: gtk::MenuButton,
+    theme_button: gtk::Button,
     theme_window: gtk::Window,
     follow_system_toggle: gtk::CheckButton,
     font_entry: gtk::Entry,
-    shortcut_button: gtk::MenuButton,
+    shortcut_button: gtk::Button,
     shortcut_window: gtk::Window,
     shortcut_entries: Rc<Vec<(ShortcutAction, gtk::Entry)>>,
     session_context_bar: gtk::Box,
@@ -235,17 +235,12 @@ struct SessionView {
 pub fn build(app: &adw::Application, paths: InstancePaths) {
     let display = gtk::gdk::Display::default().expect("GTK application has no display");
     let style_manager = adw::StyleManager::for_display(&display);
-    let chrome_theme = if style_manager.is_dark() {
-        theme(ThemeKey::Neutral)
-    } else {
-        theme(ThemeKey::NeutralLight)
-    };
-    let chrome_style = style::ChromeStyle::install(&display, chrome_theme.chrome);
+    let chrome_style = style::ChromeStyle::install(&display);
 
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::Single);
     list.set_focus_on_click(false);
-    list.add_css_class("tui-session-list");
+    list.add_css_class("navigation-sidebar");
 
     let sidebar = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -254,167 +249,151 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     let sidebar_brand_icon = provider_icons::brand_icon();
     let sidebar_heading = gtk::Label::new(Some("agmux"));
-    sidebar_heading.set_xalign(0.0);
-    sidebar_heading.set_hexpand(true);
-    sidebar_heading.add_css_class("tui-brand");
-    let sidebar_header = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-    sidebar_header.add_css_class("tui-brand-row");
+    sidebar_heading.add_css_class("title");
+    let sidebar_header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     sidebar_header.append(&sidebar_brand_icon);
     sidebar_header.append(&sidebar_heading);
+    let sidebar_bar = adw::HeaderBar::new();
+    sidebar_bar.set_title_widget(Some(&sidebar_header));
+    let sidebar_view = adw::ToolbarView::new();
+    sidebar_view.add_top_bar(&sidebar_bar);
+    sidebar_view.set_content(Some(&sidebar));
     let sidebar_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    sidebar_panel.add_css_class("tui-sidebar");
-    sidebar_panel.set_size_request(280, -1);
-    sidebar_panel.append(&sidebar_header);
-    sidebar_panel.append(&sidebar);
-    let sidebar_controls = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-    sidebar_controls.add_css_class("tui-sidebar-controls");
-    sidebar_panel.append(&sidebar_controls);
+    sidebar_panel.append(&sidebar_view);
+    // Primary menu items; filled once the buttons exist further down.
+    let sidebar_controls = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
     let stack = gtk::Stack::builder()
         .hexpand(true)
         .vexpand(true)
         .transition_type(gtk::StackTransitionType::None)
         .build();
-    stack.add_css_class("tui-main");
-    let empty = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    empty.set_halign(gtk::Align::Center);
-    empty.set_valign(gtk::Align::Center);
-    empty.add_css_class("tui-empty");
-    let empty_title = gtk::Label::new(Some("NO ACTIVE SESSION"));
-    empty_title.add_css_class("tui-empty-title");
-    let empty_hint = gtk::Label::new(Some("ctrl+shift+`  new shell"));
-    empty.append(&empty_title);
-    empty.append(&empty_hint);
+    let empty = adw::StatusPage::builder()
+        .icon_name("utilities-terminal-symbolic")
+        .title("No Active Session")
+        .description("Press Ctrl+Shift+` for a new shell")
+        .build();
     stack.add_named(&empty, Some(EMPTY_PAGE));
 
-    let session_context_bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    session_context_bar.add_css_class("tui-session-context");
+    let content_title = adw::WindowTitle::new("agmux", "");
+    let content_bar = adw::HeaderBar::new();
+    content_bar.set_title_widget(Some(&content_title));
+    let session_context_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     session_context_bar.set_visible(false);
-    let context_branch_review = gtk::Button::with_label("Review");
-    context_branch_review.add_css_class("tui-context-action");
+    let context_branch_review = menu_item("Branch review");
     context_branch_review
         .set_tooltip_text(Some("Open the selected worktree in Emacs branch-review"));
-    let context_magit = gtk::Button::with_label("Magit");
-    context_magit.add_css_class("tui-context-action");
+    let context_magit = menu_item("Magit");
     context_magit.set_tooltip_text(Some("Open the selected worktree in Emacs Magit"));
-    session_context_bar.append(&context_branch_review);
-    session_context_bar.append(&context_magit);
     let context_last_input = gtk::Label::new(Some("(none yet)"));
-    context_last_input.set_xalign(0.0);
-    context_last_input.set_hexpand(true);
-    context_last_input.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    context_last_input.add_css_class("tui-context-last-input");
-    let context_last_input_label = gtk::Label::new(Some("Last input"));
-    context_last_input_label.add_css_class("tui-context-caption");
-    let context_input = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    context_input.add_css_class("tui-context-input");
-    context_input.set_hexpand(true);
-    context_input.append(&context_last_input_label);
+    context_last_input.set_visible(false);
+    let context_input = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     context_input.append(&context_last_input);
     session_context_bar.append(&context_input);
+    // The last submitted prompt doubles as the subtitle under the session name.
+    context_last_input
+        .bind_property("label", &content_title, "subtitle")
+        .transform_to(|_, text: String| {
+            Some(if text == "(none yet)" {
+                String::new()
+            } else {
+                text
+            })
+        })
+        .sync_create()
+        .build();
+    content_bar.pack_end(&session_context_bar);
 
     let context_pr = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    context_pr.add_css_class("tui-pr-context");
+    context_pr.add_css_class("toolbar");
     context_pr.set_visible(false);
     let context_pr_number = gtk::Button::with_label("PR #0");
-    context_pr_number.add_css_class("tui-pr-link");
+    context_pr_number.add_css_class("flat");
+    context_pr_number.add_css_class("accent");
     context_pr_number.set_tooltip_text(Some("Open this pull request in Azure DevOps"));
     let context_pr_title = gtk::Label::new(None);
     context_pr_title.set_xalign(0.0);
     context_pr_title.set_hexpand(true);
     context_pr_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     let context_pr_author = gtk::Label::new(None);
-    context_pr_author.add_css_class("tui-muted");
+    context_pr_author.add_css_class("dim-label");
     let context_pr_threads = gtk::Label::new(None);
-    context_pr_threads.add_css_class("tui-pr-threads");
+    context_pr_threads.add_css_class("warning");
     context_pr.append(&context_pr_number);
     context_pr.append(&context_pr_title);
     context_pr.append(&context_pr_author);
     context_pr.append(&context_pr_threads);
 
-    let main_pane = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    main_pane.add_css_class("tui-main-pane");
-    main_pane.append(&session_context_bar);
-    main_pane.append(&context_pr);
-    main_pane.append(&stack);
+    let main_pane = adw::ToolbarView::new();
+    main_pane.add_top_bar(&content_bar);
+    main_pane.add_top_bar(&context_pr);
+    main_pane.set_content(Some(&stack));
 
+    // A plain paned keeps the sidebar drag-resizable; .sidebar-pane gives it the libadwaita look.
+    sidebar_panel.add_css_class("sidebar-pane");
+    sidebar_panel.set_size_request(sidebar::MIN_SIDEBAR_WIDTH, -1);
+    sidebar_bar.set_show_end_title_buttons(false);
+    content_bar.set_show_start_title_buttons(false);
     let split = gtk::Paned::new(gtk::Orientation::Horizontal);
     split.set_start_child(Some(&sidebar_panel));
     split.set_end_child(Some(&main_pane));
     split.set_resize_start_child(false);
     split.set_shrink_start_child(false);
+    split.set_shrink_end_child(false);
     split.set_position(sidebar::DEFAULT_SIDEBAR_WIDTH);
 
     let new_shell = gtk::Button::builder()
         .icon_name("utilities-terminal-symbolic")
         .build();
-    new_shell.add_css_class("tui-button");
+    new_shell.add_css_class("flat");
     new_shell.set_tooltip_text(Some("Start a shell session"));
-    let git_surface = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-    git_surface.add_css_class("modal-surface");
-    git_surface.set_margin_top(18);
-    git_surface.set_margin_bottom(18);
-    git_surface.set_margin_start(18);
-    git_surface.set_margin_end(18);
-    let magit_button = gtk::Button::builder()
-        .icon_name("applications-development-symbolic")
-        .build();
-    magit_button.add_css_class("tui-button");
-    magit_button.set_tooltip_text(Some("Open the selected session worktree in Emacs Magit"));
-    git_surface.append(&magit_button);
-    let branch_review_button = gtk::Button::builder()
-        .icon_name("document-edit-symbolic")
-        .build();
-    branch_review_button.add_css_class("tui-button");
-    branch_review_button.set_tooltip_text(Some(
-        "Open the selected session worktree in Emacs branch-review",
-    ));
-    git_surface.append(&branch_review_button);
+    let git_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    git_surface.append(&context_magit);
+    git_surface.append(&context_branch_review);
+    let git_popover = menu_popover(&git_surface, &[&context_magit, &context_branch_review]);
     let git_button = gtk::MenuButton::builder()
-        .icon_name("applications-development-symbolic")
+        .icon_name("text-editor-symbolic")
+        .popover(&git_popover)
         .sensitive(false)
         .build();
-    git_button.add_css_class("tui-button");
     git_button.set_tooltip_text(Some("Open the selected worktree in Emacs"));
 
     let claude_model_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
     let claude_model_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    claude_model_surface.add_css_class("modal-surface");
     claude_model_surface.set_margin_top(18);
     claude_model_surface.set_margin_bottom(18);
     claude_model_surface.set_margin_start(18);
     claude_model_surface.set_margin_end(18);
     claude_model_surface.append(&claude_model_list);
-    let claude_model_button = gtk::MenuButton::builder()
-        .icon_name("preferences-system-symbolic")
+    let claude_model_button = gtk::Button::builder()
+        .icon_name("power-profile-performance-symbolic")
         .sensitive(false)
         .build();
-    claude_model_button.add_css_class("tui-button");
     claude_model_button.set_visible(false);
     claude_model_button.set_tooltip_text(Some("Choose a Claude model and effort preset"));
 
     let pr_surface = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    pr_surface.add_css_class("modal-surface");
-    pr_surface.add_css_class("pr-dialog");
     pr_surface.set_margin_top(18);
     pr_surface.set_margin_bottom(18);
     pr_surface.set_margin_start(18);
     pr_surface.set_margin_end(18);
     let pr_heading_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let pr_heading = gtk::Label::new(Some("AZURE PULL REQUESTS"));
+    let pr_heading = gtk::Label::new(Some("Azure pull requests"));
     pr_heading.set_xalign(0.0);
     pr_heading.set_hexpand(true);
-    pr_heading.add_css_class("pr-heading");
+    pr_heading.add_css_class("heading");
+    // The window title already names the dialog.
+    pr_heading.set_visible(false);
+    pr_heading_row.set_halign(gtk::Align::End);
     pr_heading_row.append(&pr_heading);
     let pr_refresh = gtk::Button::builder()
         .icon_name("view-refresh-symbolic")
         .build();
-    pr_refresh.add_css_class("pr-icon-button");
+    pr_refresh.add_css_class("flat");
     pr_refresh.set_tooltip_text(Some("Refresh active pull requests"));
     pr_heading_row.append(&pr_refresh);
     pr_surface.append(&pr_heading_row);
     let pr_loading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    pr_loading.add_css_class("pr-loading");
     let pr_spinner = gtk::Spinner::new();
     pr_spinner.set_size_request(18, 18);
     pr_loading.append(&pr_spinner);
@@ -424,10 +403,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     pr_loading.set_visible(false);
     pr_surface.append(&pr_loading);
     let pr_root = launch_entry("Project root", "absolute Azure DevOps repository root");
-    pr_root.0.add_css_class("pr-setting-row");
     pr_surface.append(&pr_root.0);
     let pr_auto_toggle = gtk::CheckButton::with_label("Auto-review new attention");
-    pr_auto_toggle.add_css_class("pr-setting-row");
     pr_auto_toggle.set_tooltip_text(Some(
         "Opt in to launching Codex review sessions for later PR attention changes",
     ));
@@ -440,26 +417,22 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .max_content_height(720)
         .child(&pr_list)
         .build();
-    pr_scroller.add_css_class("pr-list-scroller");
     pr_surface.append(&pr_scroller);
-    let pr_button = gtk::MenuButton::builder()
-        .icon_name("git-merge-symbolic")
-        .sensitive(false)
-        .build();
-    pr_button.add_css_class("tui-button");
+    let pr_button = menu_item("Pull requests");
+    pr_button.set_sensitive(false);
     pr_button.set_tooltip_text(Some(
         "Active Azure DevOps pull requests and review attention",
     ));
 
     let launch_form = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    launch_form.add_css_class("modal-surface");
     launch_form.set_margin_top(18);
     launch_form.set_margin_bottom(18);
     launch_form.set_margin_start(18);
     launch_form.set_margin_end(18);
     let launch_heading = gtk::Label::new(Some("Launch agent"));
     launch_heading.set_xalign(0.0);
-    launch_heading.add_css_class("tui-sidebar-heading");
+    launch_heading.add_css_class("heading");
+    launch_heading.set_visible(false);
     launch_form.append(&launch_heading);
     let launch_agent_choices = gtk::StringList::new(&["claude", "codex", "gemini", "shell"]);
     let launch_agent_dropdown =
@@ -468,13 +441,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_agent_dropdown.set_selected(0);
     launch_agent_dropdown.set_visible(false);
     let agent_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    agent_row.add_css_class("tui-setting-row");
     let agent_label = gtk::Label::new(Some("Agent"));
     agent_label.set_xalign(0.0);
     agent_label.set_width_chars(18);
     agent_row.append(&agent_label);
     let launch_agent_button_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    launch_agent_button_box.add_css_class("tui-agent-buttons");
+    launch_agent_button_box.add_css_class("linked");
     let mut launch_agent_buttons = Vec::new();
     let mut previous_agent_button: Option<gtk::ToggleButton> = None;
     for (kind, label) in [
@@ -484,7 +456,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         (SessionKind::Shell, "shell"),
     ] {
         let button = gtk::ToggleButton::with_label(label);
-        button.add_css_class("tui-agent-button");
         if let Some(previous) = previous_agent_button.as_ref() {
             button.set_group(Some(previous));
         }
@@ -501,6 +472,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     let launch_agent_options = gtk::Stack::builder()
         .transition_type(gtk::StackTransitionType::None)
+        .vhomogeneous(false)
         .build();
     let (launch_claude_permission, launch_claude_danger) = claude_launch_options();
     let (launch_codex_approval, launch_codex_sandbox, launch_codex_full_auto, launch_codex_bypass) =
@@ -598,7 +570,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_existing_worktree_radio.set_size_request(155, -1);
     launch_new_worktree_radio.set_size_request(155, -1);
     let launch_existing_worktree_mode = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    launch_existing_worktree_mode.add_css_class("tui-worktree-mode");
     launch_existing_worktree_mode.append(&launch_existing_worktree_radio);
     launch_existing_worktree_mode.append(&launch_worktree_selector);
 
@@ -629,7 +600,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         "Choose the base branch",
     );
     let launch_new_worktree_mode = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    launch_new_worktree_mode.add_css_class("tui-worktree-mode");
     launch_new_worktree_mode.append(&launch_new_worktree_radio);
     launch_new_worktree_mode.append(&launch_branch);
     launch_new_worktree_mode.append(&launch_base_branch_selector);
@@ -638,32 +608,33 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_form.append(&launch_new_worktree_mode);
     let launch_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let launch_cancel = gtk::Button::with_label("Cancel");
-    launch_cancel.add_css_class("tui-button");
     launch_actions.append(&launch_cancel);
     let launch_submit = gtk::Button::with_label("Launch");
     launch_submit.add_css_class("suggested-action");
     launch_actions.append(&launch_submit);
+    launch_actions.set_halign(gtk::Align::End);
     launch_form.append(&launch_actions);
-    let launch_button = gtk::MenuButton::builder().sensitive(false).build();
-    launch_button.add_css_class("tui-button");
+    let launch_button = gtk::Button::builder()
+        .icon_name("list-add-symbolic")
+        .sensitive(false)
+        .build();
     launch_button.set_tooltip_text(Some("Launch a shell, Codex, Claude, or Gemini session"));
-    launch_button.set_label("New");
 
     let worktree_surface = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    worktree_surface.add_css_class("modal-surface");
     worktree_surface.set_margin_top(18);
     worktree_surface.set_margin_bottom(18);
     worktree_surface.set_margin_start(18);
     worktree_surface.set_margin_end(18);
-    let worktree_heading = gtk::Label::new(Some("WORKTREES"));
+    let worktree_heading = gtk::Label::new(Some("Worktrees"));
     worktree_heading.set_xalign(0.0);
-    worktree_heading.add_css_class("tui-sidebar-heading");
+    worktree_heading.add_css_class("heading");
+    worktree_heading.set_visible(false);
     worktree_surface.append(&worktree_heading);
     let worktree_root = launch_entry("Project root", "absolute repository root");
     let worktree_refresh = gtk::Button::builder()
         .icon_name("view-refresh-symbolic")
         .build();
-    worktree_refresh.add_css_class("tui-button");
+    worktree_refresh.add_css_class("flat");
     worktree_root.0.append(&worktree_refresh);
     worktree_surface.append(&worktree_root.0);
     let worktree_branch = launch_entry("New branch", "concise-kebab-case");
@@ -672,10 +643,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     worktree_surface.append(&worktree_branch.0);
     worktree_surface.append(&worktree_base.0);
     worktree_surface.append(&worktree_purpose.0);
-    let worktree_create = gtk::Button::builder()
-        .icon_name("list-add-symbolic")
-        .build();
-    worktree_create.add_css_class("tui-button");
+    let worktree_create = gtk::Button::with_label("Create worktree");
+    worktree_create.add_css_class("suggested-action");
+    worktree_create.set_halign(gtk::Align::End);
     worktree_surface.append(&worktree_create);
     let worktree_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
     let worktree_scroller = gtk::ScrolledWindow::builder()
@@ -686,56 +656,50 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .child(&worktree_list)
         .build();
     worktree_surface.append(&worktree_scroller);
-    let worktree_button = gtk::MenuButton::builder()
-        .icon_name("folder-open-symbolic")
-        .sensitive(false)
-        .build();
-    worktree_button.add_css_class("tui-button");
+    let worktree_button = menu_item("Worktrees");
+    worktree_button.set_sensitive(false);
     worktree_button.set_tooltip_text(Some("Inspect, create, and safely reap worktrees"));
 
     let agent_surface = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    agent_surface.add_css_class("modal-surface");
-    agent_surface.add_css_class("agent-dialog");
     agent_surface.set_margin_top(18);
     agent_surface.set_margin_bottom(18);
     agent_surface.set_margin_start(18);
     agent_surface.set_margin_end(18);
     let agent_heading_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let agent_heading = gtk::Label::new(Some("RECENT AGENT SESSIONS"));
+    let agent_heading = gtk::Label::new(Some("Recent agent sessions"));
     agent_heading.set_xalign(0.0);
     agent_heading.set_hexpand(true);
-    agent_heading.add_css_class("agent-heading");
+    agent_heading.add_css_class("heading");
+    agent_heading.set_visible(false);
     agent_heading_row.append(&agent_heading);
     let agent_count = gtk::Label::new(None);
     agent_count.set_xalign(1.0);
-    agent_count.add_css_class("tui-muted");
+    agent_count.set_hexpand(true);
+    agent_count.add_css_class("dim-label");
     agent_heading_row.append(&agent_count);
     let agent_refresh = gtk::Button::builder()
         .icon_name("view-refresh-symbolic")
         .build();
-    agent_refresh.add_css_class("agent-icon-button");
+    agent_refresh.add_css_class("flat");
     agent_refresh.set_tooltip_text(Some("Refresh recent agent sessions"));
     agent_heading_row.append(&agent_refresh);
     agent_surface.append(&agent_heading_row);
     let agent_filter_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    agent_filter_row.add_css_class("agent-filter-row");
     let agent_project_label = gtk::Label::new(Some("Project"));
     agent_project_label.set_xalign(0.0);
-    agent_project_label.add_css_class("tui-muted");
+    agent_project_label.add_css_class("dim-label");
     agent_filter_row.append(&agent_project_label);
     let agent_project_choices = gtk::StringList::new(&["All projects"]);
     let agent_project_filter = gtk::DropDown::new(
         Some(agent_project_choices.clone()),
         None::<&gtk::Expression>,
     );
-    agent_project_filter.add_css_class("agent-project-filter");
     agent_project_filter.set_tooltip_text(Some("Filter recent sessions by project"));
     agent_filter_row.append(&agent_project_filter);
     let agent_filter = gtk::SearchEntry::builder()
         .placeholder_text("Filter sessions...")
         .hexpand(true)
         .build();
-    agent_filter.add_css_class("agent-filter");
     agent_filter.set_visible(false);
     agent_filter_row.append(&agent_filter);
     agent_surface.append(&agent_filter_row);
@@ -746,7 +710,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .min_content_height(540)
         .child(&agent_list)
         .build();
-    agent_list_scroller.add_css_class("agent-list-scroller");
     let agent_detail = gtk::Box::new(gtk::Orientation::Vertical, 3);
     let agent_preview = gtk::Box::new(gtk::Orientation::Vertical, 4);
     let agent_preview_scroller = gtk::ScrolledWindow::builder()
@@ -756,13 +719,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .vexpand(true)
         .child(&agent_preview)
         .build();
-    agent_preview_scroller.add_css_class("agent-preview-scroller");
     agent_detail.append(&agent_preview_scroller);
     let agent_destination_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    agent_destination_row.add_css_class("agent-destination-row");
     let agent_destination_label = gtk::Label::new(Some("Resume in"));
     agent_destination_label.set_xalign(0.0);
-    agent_destination_label.add_css_class("tui-muted");
+    agent_destination_label.add_css_class("dim-label");
     agent_destination_row.append(&agent_destination_label);
     let agent_restore_destination_choices = gtk::StringList::new(&["Last known location"]);
     let agent_restore_destination = gtk::DropDown::new(
@@ -770,7 +731,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         None::<&gtk::Expression>,
     );
     agent_restore_destination.set_hexpand(true);
-    agent_restore_destination.add_css_class("agent-destination");
     agent_destination_row.append(&agent_restore_destination);
     agent_detail.append(&agent_destination_row);
     let agent_restore_branch = launch_entry("Branch name", "restore-branch-name");
@@ -783,7 +743,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .icon_name("document-revert-symbolic")
         .label("Restore session")
         .build();
-    agent_restore_button.add_css_class("agent-restore-button");
     agent_restore_button.set_sensitive(false);
     agent_detail.append(&agent_restore_button);
     let agent_split = gtk::Paned::new(gtk::Orientation::Horizontal);
@@ -793,11 +752,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     agent_split.set_shrink_start_child(false);
     agent_split.set_position(320);
     agent_surface.append(&agent_split);
-    let agent_button = gtk::MenuButton::builder()
-        .icon_name("document-open-recent-symbolic")
-        .sensitive(false)
-        .build();
-    agent_button.add_css_class("tui-button");
+    let agent_button = menu_item("Recent agent sessions");
+    agent_button.set_sensitive(false);
     agent_button.set_tooltip_text(Some("Preview and restore recent Codex and Claude sessions"));
 
     let history_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -808,23 +764,18 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .child(&history_list)
         .build();
     let history_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    history_surface.add_css_class("modal-surface");
     history_surface.set_margin_top(18);
     history_surface.set_margin_bottom(18);
     history_surface.set_margin_start(18);
     history_surface.set_margin_end(18);
     history_surface.append(&history_scroller);
-    let history_button = gtk::MenuButton::builder()
-        .icon_name("view-list-symbolic")
+    let history_button = gtk::Button::builder()
+        .label("History (0)")
         .sensitive(false)
         .build();
-    history_button.add_css_class("tui-button");
     history_button.set_tooltip_text(Some("Scroll to a submitted prompt"));
-    history_button.set_label("History (0)");
-    context_input.append(&history_button);
 
     let search_surface = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    search_surface.add_css_class("modal-surface");
     search_surface.set_margin_top(18);
     search_surface.set_margin_bottom(18);
     search_surface.set_margin_start(18);
@@ -833,35 +784,33 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .placeholder_text("Find literal text")
         .width_chars(36)
         .build();
-    search_entry.add_css_class("tui-setting-entry");
     search_surface.append(&search_entry);
     let search_previous = gtk::Button::builder().icon_name("go-up-symbolic").build();
-    search_previous.add_css_class("tui-button");
+    search_previous.add_css_class("flat");
     search_surface.append(&search_previous);
     let search_next = gtk::Button::builder().icon_name("go-down-symbolic").build();
-    search_next.add_css_class("tui-button");
+    search_next.add_css_class("flat");
     search_surface.append(&search_next);
-    let search_button = gtk::MenuButton::builder()
+    let search_button = gtk::Button::builder()
         .icon_name("edit-find-symbolic")
         .sensitive(false)
         .build();
-    search_button.add_css_class("tui-button");
     search_button.set_tooltip_text(Some("Search selected terminal scrollback"));
 
     let theme_list = gtk::Box::new(gtk::Orientation::Vertical, 1);
-    theme_list.add_css_class("modal-surface");
     theme_list.set_margin_top(18);
     theme_list.set_margin_bottom(18);
     theme_list.set_margin_start(18);
     theme_list.set_margin_end(18);
-    let theme_heading = gtk::Label::new(Some("TERMINAL APPEARANCE"));
+    let theme_heading = gtk::Label::new(Some("Terminal appearance"));
     theme_heading.set_xalign(0.0);
-    theme_heading.add_css_class("tui-sidebar-heading");
+    theme_heading.add_css_class("heading");
+    theme_heading.set_visible(false);
     theme_list.append(&theme_heading);
     let mut theme_buttons = Vec::new();
     for key in ThemeKey::ALL {
         let choice = gtk::Button::with_label(theme(key).name);
-        choice.add_css_class("tui-button");
+        choice.add_css_class("flat");
         choice.set_tooltip_text(Some(&format!(
             "Use the {} terminal palette",
             theme(key).name
@@ -870,7 +819,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         theme_buttons.push((key, choice));
     }
     let follow_system_toggle = gtk::CheckButton::with_label("Follow system light/dark");
-    follow_system_toggle.add_css_class("tui-setting-row");
     follow_system_toggle.set_tooltip_text(Some(
         "Resolve the selected terminal palette to its light or dark partner",
     ));
@@ -879,38 +827,35 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .text("Monospace 11")
         .placeholder_text("Terminal font")
         .build();
-    font_entry.add_css_class("tui-setting-entry");
     font_entry.set_tooltip_text(Some("Pango terminal font description"));
     theme_list.append(&font_entry);
     let apply_font = gtk::Button::with_label("Apply font");
-    apply_font.add_css_class("tui-button");
+    apply_font.set_halign(gtk::Align::End);
     theme_list.append(&apply_font);
-    let theme_button = gtk::MenuButton::builder().sensitive(false).build();
-    theme_button.add_css_class("tui-button");
+    let theme_button = menu_item("Terminal appearance");
+    theme_button.set_sensitive(false);
     theme_button.set_tooltip_text(Some("Choose terminal colors and font"));
-    theme_button.set_label("⚙");
 
     let shortcut_list = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    shortcut_list.add_css_class("modal-surface");
     shortcut_list.set_margin_top(18);
     shortcut_list.set_margin_bottom(18);
     shortcut_list.set_margin_start(18);
     shortcut_list.set_margin_end(18);
-    let shortcut_heading = gtk::Label::new(Some("APPLICATION SHORTCUTS"));
+    let shortcut_heading = gtk::Label::new(Some("Application shortcuts"));
     shortcut_heading.set_xalign(0.0);
-    shortcut_heading.add_css_class("tui-sidebar-heading");
+    shortcut_heading.add_css_class("heading");
+    shortcut_heading.set_visible(false);
     shortcut_list.append(&shortcut_heading);
     let shortcut_hint = gtk::Label::new(Some(
         "Click a field, then press a shortcut containing Ctrl, Alt, or Meta. It is saved right away.",
     ));
     shortcut_hint.set_xalign(0.0);
-    shortcut_hint.add_css_class("tui-context-caption");
+    shortcut_hint.add_css_class("dim-label");
     shortcut_list.append(&shortcut_hint);
     let mut shortcut_entries = Vec::new();
     let mut shortcut_controls = Vec::new();
     for action in ShortcutAction::ALL {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        row.add_css_class("tui-setting-row");
         let label = gtk::Label::new(Some(action.label()));
         label.set_xalign(0.0);
         label.set_width_chars(24);
@@ -926,10 +871,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             "Click, then press the new shortcut for {}",
             action.label()
         )));
-        entry.add_css_class("tui-setting-entry");
         row.append(&entry);
         let reset = gtk::Button::with_label("Reset");
-        reset.add_css_class("tui-button");
+        reset.add_css_class("flat");
         reset.set_tooltip_text(Some(&format!("Reset shortcut for {}", action.label())));
         row.append(&reset);
         shortcut_list.append(&row);
@@ -937,7 +881,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         shortcut_controls.push((action, entry, reset));
     }
     let claude_presets_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    claude_presets_row.add_css_class("tui-setting-row");
     let claude_presets_label = gtk::Label::new(Some("Claude presets JSON"));
     claude_presets_label.set_xalign(0.0);
     claude_presets_label.set_width_chars(24);
@@ -947,71 +890,64 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .width_chars(48)
         .hexpand(true)
         .build();
-    claude_presets_entry.add_css_class("tui-setting-entry");
     claude_presets_row.append(&claude_presets_entry);
     let apply_claude_presets = gtk::Button::with_label("Apply");
-    apply_claude_presets.add_css_class("tui-button");
     claude_presets_row.append(&apply_claude_presets);
     shortcut_list.append(&claude_presets_row);
-    let shortcut_button = gtk::MenuButton::builder().sensitive(false).build();
-    shortcut_button.add_css_class("tui-button");
+    let shortcut_button = menu_item("Keyboard shortcuts");
+    shortcut_button.set_sensitive(false);
     shortcut_button.set_tooltip_text(Some("Configure application shortcuts"));
-    shortcut_button.set_label("?");
 
     new_shell.set_visible(false);
-    sidebar_controls.append(&shortcut_button);
+    sidebar_controls.append(&agent_button);
+    sidebar_controls.append(&worktree_button);
+    sidebar_controls.append(&pr_button);
+    sidebar_controls.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     sidebar_controls.append(&theme_button);
-    sidebar_controls.append(&launch_button);
-    let sidebar_controls_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    sidebar_controls_spacer.set_hexpand(true);
-    sidebar_controls.append(&sidebar_controls_spacer);
-    let sidebar_toggle = gtk::Button::builder().label("«").build();
-    sidebar_toggle.add_css_class("tui-button");
-    sidebar_toggle.set_tooltip_text(Some("Collapse sidebar"));
-    sidebar_controls.append(&sidebar_toggle);
+    sidebar_controls.append(&shortcut_button);
+    let main_menu = menu_popover(
+        &sidebar_controls,
+        &[
+            &agent_button,
+            &worktree_button,
+            &pr_button,
+            &theme_button,
+            &shortcut_button,
+        ],
+    );
+    let main_menu_button = gtk::MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .popover(&main_menu)
+        .tooltip_text("Main menu")
+        .build();
+    sidebar_bar.pack_start(&launch_button);
+    sidebar_bar.pack_end(&main_menu_button);
 
-    // Keep the non-global surfaces available to automation without rendering
-    // their former header buttons. Project rows and keyboard commands open
-    // these surfaces directly.
+    session_context_bar.append(&claude_model_button);
+    session_context_bar.append(&git_button);
+    session_context_bar.append(&history_button);
+    session_context_bar.append(&search_button);
+    // Header bars only flatten their direct children, and these sit in a box.
+    claude_model_button.add_css_class("flat");
+    git_button.add_css_class("flat");
+    history_button.add_css_class("flat");
+    search_button.add_css_class("flat");
+    // Kept for the inspection tree; nothing needs an off-screen anchor any more.
     let surface_anchors = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    surface_anchors.add_css_class("tui-surface-anchors");
-    surface_anchors.set_size_request(1, 1);
-    for button in [
-        &worktree_button,
-        &agent_button,
-        &pr_button,
-        &search_button,
-        &claude_model_button,
-    ] {
-        button.set_opacity(0.0);
-        button.set_size_request(1, 1);
-        surface_anchors.append(button);
-    }
+    surface_anchors.set_visible(false);
     sidebar_panel.append(&surface_anchors);
 
-    let sidebar_collapsed = Rc::new(Cell::new(false));
-    let sidebar_width = Rc::new(Cell::new(sidebar::DEFAULT_SIDEBAR_WIDTH));
-    let sidebar_collapsed_state = sidebar_collapsed.clone();
-    let sidebar_width_state = sidebar_width.clone();
-    let sidebar_split = split.clone();
-    sidebar_toggle.connect_clicked(move |button| {
-        let collapsed = !sidebar_collapsed_state.get();
-        sidebar_collapsed_state.set(collapsed);
-        sidebar_split.set_position(if collapsed {
-            0
-        } else {
-            sidebar_width_state.get()
-        });
-        button.set_label(if collapsed { "»" } else { "«" });
-        button.set_tooltip_text(Some(if collapsed {
-            "Expand sidebar"
-        } else {
-            "Collapse sidebar"
-        }));
+    let sidebar_toggle = gtk::Button::builder()
+        .icon_name("sidebar-show-symbolic")
+        .tooltip_text("Toggle sidebar")
+        .build();
+    content_bar.pack_start(&sidebar_toggle);
+    let toggled_sidebar = sidebar_panel.clone();
+    sidebar_toggle.connect_clicked(move |_| {
+        toggled_sidebar.set_visible(!toggled_sidebar.is_visible());
     });
 
     let overlay = adw::ToastOverlay::new();
-    overlay.add_css_class("tui-root");
     overlay.set_child(Some(&split));
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -1023,7 +959,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let close_application = app.clone();
     window.connect_close_request(move |_| quit_on_main_window_close(|| close_application.quit()));
 
-    let git_window = build_modal_window(app, &window, "Emacs actions", 420, 180, &git_surface);
     let claude_model_window = build_modal_window(
         app,
         &window,
@@ -1032,13 +967,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         520,
         &claude_model_surface,
     );
-    let launch_window = build_modal_window(app, &window, "Launch session", 760, 800, &launch_form);
+    let launch_window = build_modal_window(app, &window, "Launch session", 760, -1, &launch_form);
     let worktree_window =
         build_modal_window(app, &window, "Worktrees", 900, 700, &worktree_surface);
     let history_window =
         build_modal_window(app, &window, "Prompt history", 620, 600, &history_surface);
     let search_window =
-        build_modal_window(app, &window, "Search terminal", 650, 180, &search_surface);
+        build_modal_window(app, &window, "Search terminal", 650, -1, &search_surface);
     let theme_window =
         build_modal_window(app, &window, "Terminal appearance", 520, 650, &theme_list);
     let shortcut_window = build_modal_window(
@@ -1058,25 +993,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         900,
         &agent_surface,
     );
-    add_modal_close_button(&git_surface, &git_window, "Close Emacs actions");
-    add_modal_close_button(
-        &claude_model_surface,
-        &claude_model_window,
-        "Close Claude model presets",
-    );
-    add_modal_close_button(&launch_form, &launch_window, "Close launch session");
-    add_modal_close_button(&worktree_surface, &worktree_window, "Close worktrees");
-    add_modal_close_button(&history_surface, &history_window, "Close prompt history");
-    add_modal_close_button(&search_surface, &search_window, "Close terminal search");
-    add_modal_close_button(&theme_list, &theme_window, "Close terminal appearance");
-    add_modal_close_button(
-        &shortcut_list,
-        &shortcut_window,
-        "Close application shortcuts",
-    );
-    add_modal_close_button(&pr_surface, &pr_window, "Close pull requests");
-    add_modal_close_button(&agent_surface, &agent_window, "Close recent agent sessions");
-
     let workspace = Workspace {
         application: app.clone(),
         window: window.clone(),
@@ -1084,8 +1000,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         stack: stack.clone(),
         overlay,
         new_shell_button: new_shell.clone(),
+        content_title: content_title.clone(),
         git_button: git_button.clone(),
-        git_window,
         claude_model_button,
         claude_model_window,
         claude_model_list,
@@ -1224,25 +1140,21 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     };
 
     let dialog_workspace = workspace.clone();
-    workspace.git_button.connect_activate(move |_| {
-        dialog_workspace.git_window.present();
-    });
-    let dialog_workspace = workspace.clone();
     workspace
         .claude_model_button
-        .connect_activate(move |_| dialog_workspace.open_or_cycle_claude_presets());
+        .connect_clicked(move |_| dialog_workspace.open_or_cycle_claude_presets());
     let dialog_workspace = workspace.clone();
-    workspace.launch_button.connect_activate(move |_| {
+    workspace.launch_button.connect_clicked(move |_| {
         dialog_workspace.prepare_launch_panel();
         dialog_workspace.launch_window.present();
     });
     let dialog_workspace = workspace.clone();
-    workspace.worktree_button.connect_activate(move |_| {
+    workspace.worktree_button.connect_clicked(move |_| {
         dialog_workspace.prepare_worktree_panel();
         dialog_workspace.worktree_window.present();
     });
     let dialog_workspace = workspace.clone();
-    workspace.agent_button.connect_activate(move |_| {
+    workspace.agent_button.connect_clicked(move |_| {
         if let Some(root) = dialog_workspace.preferred_project_root() {
             dialog_workspace.open_agent_for_project(&root);
         } else {
@@ -1250,33 +1162,37 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         }
     });
     let dialog_workspace = workspace.clone();
-    workspace.history_button.connect_activate(move |_| {
+    workspace.pr_button.connect_clicked(move |_| {
+        if let Some(root) = dialog_workspace.preferred_project_root() {
+            dialog_workspace.open_pr_for_project(&root);
+        }
+    });
+    let dialog_workspace = workspace.clone();
+    workspace.history_button.connect_clicked(move |_| {
         if dialog_workspace.history_button.is_sensitive() {
             dialog_workspace.history_window.present();
         }
     });
     let dialog_workspace = workspace.clone();
-    workspace.search_button.connect_activate(move |_| {
+    workspace.search_button.connect_clicked(move |_| {
         if dialog_workspace.search_button.is_sensitive() {
             dialog_workspace.search_window.present();
             dialog_workspace.search_entry.grab_focus();
         }
     });
     let dialog_workspace = workspace.clone();
-    workspace.theme_button.connect_activate(move |_| {
+    workspace.theme_button.connect_clicked(move |_| {
         dialog_workspace.theme_window.present();
     });
     let dialog_workspace = workspace.clone();
-    workspace.shortcut_button.connect_activate(move |_| {
+    workspace.shortcut_button.connect_clicked(move |_| {
         dialog_workspace.shortcut_window.present();
     });
 
     let sidebar_width_workspace = workspace.clone();
-    let sidebar_width_state = sidebar_width.clone();
     split.connect_position_notify(move |split| {
         let position = split.position();
         if position >= sidebar::MIN_SIDEBAR_WIDTH {
-            sidebar_width_state.set(position);
             sidebar_width_workspace.save_preference(
                 sidebar::SIDEBAR_WIDTH_PREFERENCE,
                 serde_json::json!(position),
@@ -1298,6 +1214,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             .replace(id.to_string());
         selected_workspace.stack.set_visible_child_name(&id);
         selected_workspace.session_context_bar.set_visible(true);
+        selected_workspace.refresh_content_title();
         if let Some(session) = selected_workspace.sessions.borrow().get(id.as_str()) {
             session.terminal.grab_focus();
         }
@@ -1349,22 +1266,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
 
-    let magit_workspace = workspace.clone();
-    magit_button.connect_clicked(move |_| {
-        if let Some(id) = magit_workspace.selected_session_id() {
-            magit_workspace.open_session_in_emacs(&id, crate::emacs::EmacsAction::Magit, None);
-        }
-    });
-    let review_workspace = workspace.clone();
-    branch_review_button.connect_clicked(move |_| {
-        if let Some(id) = review_workspace.selected_session_id() {
-            review_workspace.open_session_in_emacs(
-                &id,
-                crate::emacs::EmacsAction::BranchReview,
-                None,
-            );
-        }
-    });
     let context_magit_workspace = workspace.clone();
     context_magit.connect_clicked(move |_| {
         if let Some(id) = context_magit_workspace.selected_session_id() {
@@ -1587,6 +1488,7 @@ impl Workspace {
                 self.stack.set_visible_child_name(EMPTY_PAGE);
                 self.session_context_bar.set_visible(false);
                 self.selected_session.borrow_mut().take();
+                self.refresh_content_title();
                 self.render_history(None);
                 self.clear_selected_pr_context();
                 self.search_button.set_sensitive(false);
@@ -1595,6 +1497,18 @@ impl Workspace {
                 self.save_preference("selectedSessionId", serde_json::Value::Null);
             }
         }
+    }
+
+    /// The content header names the selected session, or the app when nothing is selected.
+    pub(super) fn refresh_content_title(&self) {
+        let name = self.selected_session_id().and_then(|id| {
+            self.sessions
+                .borrow()
+                .get(&id)
+                .map(|session| session.record.name.clone())
+        });
+        self.content_title
+            .set_title(name.as_deref().unwrap_or("agmux"));
     }
 
     fn run_io<T: Send + 'static>(
@@ -1748,7 +1662,6 @@ fn sibling_binary(name: &str) -> PathBuf {
 
 fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    row.add_css_class("tui-setting-row");
     let label = gtk::Label::new(Some(label));
     label.set_xalign(0.0);
     label.set_width_chars(18);
@@ -1758,7 +1671,6 @@ fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
         .width_chars(42)
         .hexpand(true)
         .build();
-    entry.add_css_class("tui-setting-entry");
     row.append(&entry);
     (row, entry)
 }
@@ -1781,6 +1693,7 @@ fn build_modal_window<W: IsA<gtk::Widget>>(
         .resizable(true)
         .child(child)
         .build();
+    window.set_titlebar(Some(&adw::HeaderBar::new()));
     // Application-owned windows can be registered while the application is
     // activating. Keep every modal closed until its action explicitly opens it.
     window.hide();
@@ -1814,18 +1727,33 @@ fn is_modal_escape_key(key: gtk::gdk::Key) -> bool {
     key == gtk::gdk::Key::Escape
 }
 
-fn add_modal_close_button(surface: &gtk::Box, window: &gtk::Window, tooltip: &str) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    row.set_halign(gtk::Align::End);
-    let close = gtk::Button::builder()
-        .icon_name("window-close-symbolic")
-        .build();
-    close.add_css_class("modal-icon-button");
-    close.set_tooltip_text(Some(tooltip));
-    let window = window.clone();
-    close.connect_clicked(move |_| window.hide());
-    row.append(&close);
-    surface.append(&row);
+/// A flat, left-aligned text button that reads as a menu entry inside a popover.
+fn menu_item(label: &str) -> gtk::Button {
+    let button = gtk::Button::with_label(label);
+    button.add_css_class("flat");
+    button.set_halign(gtk::Align::Fill);
+    if let Some(label) = button.child().and_downcast::<gtk::Label>() {
+        label.set_xalign(0.0);
+    }
+    button
+}
+
+pub(super) fn set_menu_item_label(button: &gtk::Button, text: &str) {
+    button.set_label(text);
+    if let Some(label) = button.child().and_downcast::<gtk::Label>() {
+        label.set_xalign(0.0);
+    }
+}
+
+/// Wraps menu items in a popover that closes itself when one of them is used.
+fn menu_popover(surface: &gtk::Box, items: &[&gtk::Button]) -> gtk::Popover {
+    let popover = gtk::Popover::builder().child(surface).build();
+    popover.add_css_class("menu");
+    for item in items {
+        let popover = popover.clone();
+        item.connect_clicked(move |_| popover.popdown());
+    }
+    popover
 }
 
 fn launch_mode_entry(label: &str, placeholder: &str) -> gtk::Entry {
@@ -1834,7 +1762,6 @@ fn launch_mode_entry(label: &str, placeholder: &str) -> gtk::Entry {
         .width_chars(16)
         .hexpand(true)
         .build();
-    entry.add_css_class("tui-setting-entry");
     entry.update_property(&[
         gtk::accessible::Property::Label(label),
         gtk::accessible::Property::Autocomplete(gtk::AccessibleAutocomplete::List),
@@ -1891,7 +1818,6 @@ fn editable_choice_control(
 
     let control = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     control.add_css_class("linked");
-    control.add_css_class("tui-editable-choice");
     control.set_hexpand(true);
     control.append(entry);
     control.append(dropdown);
@@ -1962,13 +1888,11 @@ fn launch_dropdown(values: &[&str]) -> gtk::DropDown {
     let dropdown = gtk::DropDown::new(Some(model), None::<&gtk::Expression>);
     dropdown.set_enable_search(true);
     dropdown.set_hexpand(true);
-    dropdown.add_css_class("tui-path-dropdown");
     dropdown
 }
 
 fn launch_option_row(label: &str, control: &impl IsA<gtk::Widget>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    row.add_css_class("tui-setting-row");
     let label_widget = gtk::Label::new(Some(label));
     label_widget.set_xalign(0.0);
     label_widget.set_width_chars(18);
@@ -2039,7 +1963,6 @@ fn searchable_path_dropdown(model: &gtk::StringList) -> gtk::DropDown {
     dropdown.set_show_arrow(true);
     dropdown.set_tooltip_text(Some("Search known paths or choose one"));
     dropdown.set_size_request(220, -1);
-    dropdown.add_css_class("tui-path-dropdown");
     dropdown
 }
 

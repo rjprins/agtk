@@ -80,14 +80,11 @@ pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, 
 }
 
 fn active_surface(workspace: &Workspace) -> gtk::Widget {
+    // Whole dialog windows, so the capture includes their header bar.
     if workspace.pr_window.is_visible() {
-        return workspace
-            .pr_window
-            .child()
-            .expect("visible PR window has capture content");
+        return workspace.pr_window.clone().upcast();
     }
     for window in [
-        &workspace.git_window,
         &workspace.launch_window,
         &workspace.shortcut_window,
         &workspace.theme_window,
@@ -98,10 +95,9 @@ fn active_surface(workspace: &Workspace) -> gtk::Widget {
         &workspace.claude_model_window,
     ] {
         if window.is_visible() {
-            return window
-                .child()
-                .expect("visible agmux modal window has capture content");
+            return window.clone().upcast();
         }
     }
-    workspace.overlay.clone().upcast()
+    // The window paints the background that transparent header bars sit on.
+    workspace.window.clone().upcast()
 }

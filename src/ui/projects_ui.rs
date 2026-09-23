@@ -176,7 +176,7 @@ impl Workspace {
             .filter(|session| session.record.project_root.is_none())
             .collect::<Vec<_>>();
         if !ungrouped.is_empty() {
-            self.list.append(&group_label("OTHER"));
+            self.list.append(&group_label("Other"));
             ungrouped.sort_by_key(|session| session.record.position);
             for session in ungrouped {
                 session.row.set_visible(true);
@@ -196,7 +196,6 @@ impl Workspace {
         let row = gtk::ListBoxRow::new();
         row.set_selectable(false);
         row.set_activatable(false);
-        row.add_css_class("tui-group-row");
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
         // GtkButton's `icon_name` child replaces its label child. Build the
         // compact project control explicitly so the chevron and project name
@@ -214,10 +213,17 @@ impl Workspace {
         collapse_label.set_xalign(0.0);
         collapse_label.set_hexpand(true);
         collapse_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        collapse_label.add_css_class("heading");
         collapse_contents.append(&collapse_icon);
         collapse_contents.append(&collapse_label);
+        if settings.is_pinned {
+            let pinned = gtk::Image::from_icon_name("starred-symbolic");
+            pinned.add_css_class("dim-label");
+            pinned.set_tooltip_text(Some("Pinned project"));
+            collapse_contents.append(&pinned);
+        }
         collapse.set_child(Some(&collapse_contents));
-        collapse.add_css_class("tui-group-button");
+        collapse.add_css_class("flat");
         collapse.set_hexpand(true);
         collapse.set_halign(gtk::Align::Fill);
         collapse.set_tooltip_text(Some(root));
@@ -235,24 +241,16 @@ impl Workspace {
         let launch = gtk::Button::builder()
             .icon_name("list-add-symbolic")
             .build();
-        launch.add_css_class("tui-button");
+        launch.add_css_class("flat");
         launch.set_tooltip_text(Some("Launch in this project"));
         let launch_workspace = self.clone();
         let launch_root = root.to_owned();
         launch.connect_clicked(move |_| launch_workspace.open_launch_for_project(&launch_root));
-        let pin = gtk::Button::builder()
-            .icon_name(if settings.is_pinned {
-                "starred-symbolic"
-            } else {
-                "non-starred-symbolic"
-            })
-            .build();
-        pin.add_css_class("tui-button");
-        pin.set_tooltip_text(Some(if settings.is_pinned {
+        let pin = menu_item(if settings.is_pinned {
             "Unpin project"
         } else {
             "Pin project"
-        }));
+        });
         let pin_workspace = self.clone();
         let pin_root = root.to_owned();
         pin.connect_clicked(move |_| {
@@ -263,40 +261,43 @@ impl Workspace {
                 None,
             );
         });
-        let resume = gtk::Button::builder()
-            .icon_name("document-open-recent-symbolic")
-            .build();
-        resume.add_css_class("tui-button");
+        let resume = menu_item("Resume recent session");
         resume.set_tooltip_text(Some("Resume a recent agent session in this project"));
         let resume_workspace = self.clone();
         let resume_root = root.to_owned();
         resume.connect_clicked(move |_| resume_workspace.open_agent_for_project(&resume_root));
-        let worktrees = gtk::Button::builder()
-            .icon_name("folder-open-symbolic")
-            .build();
-        worktrees.add_css_class("tui-button");
+        let worktrees = menu_item("Worktrees");
         worktrees.set_tooltip_text(Some("Manage project worktrees"));
         let worktree_workspace = self.clone();
         let worktree_root = root.to_owned();
         worktrees.connect_clicked(move |_| {
             worktree_workspace.open_worktrees_for_project(&worktree_root)
         });
-        let pull_requests = gtk::Button::builder()
-            .icon_name("git-merge-symbolic")
-            .build();
-        pull_requests.add_css_class("tui-button");
+        let pull_requests = menu_item("Pull requests");
         pull_requests.set_tooltip_text(Some("Show pull requests for this project"));
         let pr_workspace = self.clone();
         let pr_root = root.to_owned();
         pull_requests.connect_clicked(move |_| pr_workspace.open_pr_for_project(&pr_root));
 
-        // Keep the project affordances in the same order as the original
-        // sidebar: PRs, worktrees, pin, resume, and launch.
-        content.append(&pull_requests);
-        content.append(&worktrees);
-        content.append(&pin);
-        content.append(&resume);
+        let menu = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        menu.append(&resume);
+        menu.append(&worktrees);
+        menu.append(&pull_requests);
+        menu.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        menu.append(&pin);
+        let more = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .popover(&menu_popover(
+                &menu,
+                &[&resume, &worktrees, &pull_requests, &pin],
+            ))
+            .valign(gtk::Align::Center)
+            .tooltip_text("Project actions")
+            .build();
+        more.add_css_class("flat");
+        launch.set_valign(gtk::Align::Center);
         content.append(&launch);
+        content.append(&more);
         row.set_child(Some(&content));
         row
     }
@@ -306,9 +307,10 @@ fn group_label(text: &str) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.set_selectable(false);
     row.set_activatable(false);
-    row.add_css_class("tui-subgroup-row");
     let label = gtk::Label::new(Some(text));
     label.set_xalign(0.0);
+    label.add_css_class("heading");
+    label.add_css_class("dim-label");
     row.set_child(Some(&label));
     row
 }

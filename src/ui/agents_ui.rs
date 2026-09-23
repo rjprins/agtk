@@ -574,7 +574,6 @@ impl Workspace {
         }
         for group in group_agent_sessions(&sessions) {
             let heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-            heading.add_css_class("agent-project-heading");
             let name = group
                 .project_root
                 .as_deref()
@@ -589,7 +588,7 @@ impl Workspace {
             }
             heading.append(&label);
             let count = gtk::Label::new(Some(&group.sessions.len().to_string()));
-            count.add_css_class("tui-muted");
+            count.add_css_class("dim-label");
             heading.append(&count);
             self.agent_list.append(&heading);
             for session in group.sessions {
@@ -602,16 +601,15 @@ impl Workspace {
         let worktree_name = agent_worktree_name(&item);
         let session = item.session;
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        row.add_css_class("agent-session-row");
         let button = gtk::Button::new();
-        button.add_css_class("tui-agent-row");
-        if self
+        // Only the selected card keeps a button background.
+        if !self
             .selected_agent
             .borrow()
             .as_ref()
             .is_some_and(|selected| same_agent_session(selected, &session))
         {
-            button.add_css_class("agent-session-selected");
+            button.add_css_class("flat");
         }
         button.set_hexpand(true);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -621,17 +619,15 @@ impl Workspace {
         title.set_xalign(0.0);
         title.set_hexpand(true);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        title.add_css_class("agent-card-title");
         title_row.append(&title);
         let elapsed = gtk::Label::new(Some(&format_agent_elapsed(
             now_millis(),
             session.last_seen_at,
         )));
-        elapsed.add_css_class("tui-muted");
+        elapsed.add_css_class("dim-label");
         title_row.append(&elapsed);
         content.append(&title_row);
         let chips = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        chips.add_css_class("agent-card-chips");
         append_agent_chip(
             &chips,
             &short_agent_session_id(&session.provider_session_id),
@@ -643,7 +639,6 @@ impl Workspace {
             worktree.set_hexpand(true);
             worktree.set_wrap(true);
             worktree.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            worktree.add_css_class("agent-worktree-name");
             content.append(&worktree);
         }
         button.set_child(Some(&content));
@@ -655,7 +650,6 @@ impl Workspace {
         row.append(&button);
 
         let hide = gtk::Button::with_label("×");
-        hide.add_css_class("agent-session-hide");
         hide.set_tooltip_text(Some("Hide this session from the list"));
         let hide_workspace = self.clone();
         let hidden_session = session;
@@ -768,9 +762,9 @@ impl Workspace {
         let elapsed = format_agent_elapsed(now_millis(), preview.session.last_seen_at);
         let title = gtk::Label::new(Some(&preview.session.name));
         title.set_xalign(0.0);
+        title.add_css_class("title-4");
         title.set_wrap(true);
         title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        title.add_css_class("agent-detail-title");
         self.agent_preview.append(&title);
         let heading = gtk::Label::new(Some(&format!(
             "{}  {}{}{}",
@@ -788,7 +782,7 @@ impl Workspace {
             }
         )));
         heading.set_xalign(0.0);
-        heading.add_css_class("tui-muted");
+        heading.add_css_class("dim-label");
         self.agent_preview.append(&heading);
         if preview.is_truncated {
             let first_prompt =
@@ -796,12 +790,11 @@ impl Workspace {
             first_prompt.set_xalign(0.0);
             first_prompt.set_wrap(true);
             first_prompt.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            first_prompt.add_css_class("agent-first-prompt");
             self.agent_preview.append(&first_prompt);
         }
-        let preview_heading = gtk::Label::new(Some("RECENT CONVERSATION"));
+        let preview_heading = gtk::Label::new(Some("Recent conversation"));
         preview_heading.set_xalign(0.0);
-        preview_heading.add_css_class("agent-preview-label");
+        preview_heading.add_css_class("heading");
         self.agent_preview.append(&preview_heading);
         if preview.messages.is_empty() {
             let empty = gtk::Label::new(Some("No user or assistant messages found"));
@@ -818,7 +811,6 @@ impl Workspace {
             label.set_wrap(true);
             label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
             label.set_selectable(true);
-            label.add_css_class("agent-preview-message");
             label.add_css_class(match message.role {
                 ConversationRole::User => "agent-preview-user",
                 ConversationRole::Assistant => "agent-preview-assistant",
@@ -927,7 +919,7 @@ impl Workspace {
         }
         let label = gtk::Label::new(Some(text));
         label.set_xalign(0.0);
-        label.add_css_class("tui-muted");
+        label.add_css_class("dim-label");
         self.agent_list.append(&label);
     }
 
@@ -937,7 +929,7 @@ impl Workspace {
         }
         let label = gtk::Label::new(Some(text));
         label.set_xalign(0.0);
-        label.add_css_class("tui-muted");
+        label.add_css_class("dim-label");
         self.agent_preview.append(&label);
     }
 
@@ -1002,9 +994,10 @@ fn compact_agent_path(path: &Path) -> String {
 
 fn append_agent_chip(parent: &gtk::Box, text: &str) {
     let chip = gtk::Label::new(Some(text));
+    chip.add_css_class("caption");
+    chip.add_css_class("dim-label");
     chip.set_ellipsize(gtk::pango::EllipsizeMode::End);
     chip.set_max_width_chars(24);
-    chip.add_css_class("agent-chip");
     parent.append(&chip);
 }
 

@@ -217,10 +217,6 @@ impl Workspace {
         while let Some(child) = self.claude_model_list.first_child() {
             self.claude_model_list.remove(&child);
         }
-        let heading = gtk::Label::new(Some("CLAUDE MODEL PRESETS"));
-        heading.set_xalign(0.0);
-        heading.add_css_class("tui-sidebar-heading");
-        self.claude_model_list.append(&heading);
         for preset in self.claude_presets.borrow().presets.clone() {
             let button = gtk::Button::with_label(&format!(
                 "[{}]  {} / {}",
@@ -228,7 +224,6 @@ impl Workspace {
                 preset.model,
                 preset.effort.as_str()
             ));
-            button.add_css_class("tui-agent-row");
             button.set_halign(gtk::Align::Fill);
             let workspace = self.clone();
             let preset_id = preset.id;

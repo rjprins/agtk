@@ -94,7 +94,6 @@ pub(super) fn brand_icon() -> gtk::Image {
     image.set_pixel_size(22);
     image.set_valign(gtk::Align::Center);
     image.set_tooltip_text(Some("agmux"));
-    image.add_css_class("tui-brand-icon");
     image
 }
 
@@ -104,6 +103,5 @@ fn image(icon: ProviderIcon) -> gtk::Image {
     let image = gtk::Image::from_paintable(Some(&texture));
     image.set_pixel_size(16);
     image.set_tooltip_text(Some(icon.tooltip()));
-    image.add_css_class("tui-provider-icon");
     image
 }

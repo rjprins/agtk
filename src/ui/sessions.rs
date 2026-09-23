@@ -65,6 +65,7 @@ impl Workspace {
                         }
                     }
                     workspace.send_pending_agent_name(&updated.id);
+                    workspace.refresh_content_title();
                     if let Some(pending) = pending {
                         match workspace.session_summary(&updated.id).and_then(|summary| {
                             serde_json::to_value(summary).map_err(|error| error.to_string())
@@ -705,30 +706,20 @@ impl Workspace {
         let row = gtk::ListBoxRow::new();
         row.set_widget_name(&id);
         row.set_focus_on_click(false);
-        row.add_css_class("tui-session-row");
         focus_terminal_on_row_activation(&row, &terminal);
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
-        content.add_css_class("tui-session-content");
-        let mainline = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        let kind = provider_icons::session_icon(record.kind, &record.program);
+        kind.set_valign(gtk::Align::Center);
+        content.append(&kind);
+        let mainline = gtk::Box::new(gtk::Orientation::Vertical, 2);
         mainline.set_hexpand(true);
-        let primary = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-        primary.add_css_class("tui-session-primary");
-        let state_label = gtk::Label::new(None);
-        state_label.add_css_class("tui-state");
-        primary.append(&state_label);
-        let elapsed_label = gtk::Label::new(None);
-        elapsed_label.add_css_class("tui-elapsed");
-        primary.append(&elapsed_label);
+        mainline.set_valign(gtk::Align::Center);
+        let primary = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         let label = gtk::Label::new(Some(&name));
         label.set_xalign(0.0);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_tooltip_text(Some("Select session"));
         primary.append(&label);
-        let details = primary.clone();
-        let kind = provider_icons::session_icon(record.kind, &record.program);
-        let secondary = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        secondary.add_css_class("tui-session-secondary");
-        secondary.append(&kind);
+        mainline.append(&primary);
         if let Some(worktree) = record.worktree_path.as_ref().or(record.cwd.as_ref()) {
             let worktree_name = worktree
                 .file_name()
@@ -740,17 +731,30 @@ impl Workspace {
             worktree_label.set_xalign(0.0);
             worktree_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
             worktree_label.set_tooltip_text(Some(&worktree.to_string_lossy()));
-            worktree_label.add_css_class("tui-session-worktree");
-            secondary.append(&worktree_label);
+            worktree_label.add_css_class("caption");
+            worktree_label.add_css_class("dim-label");
+            mainline.append(&worktree_label);
         }
-        let edit = gtk::Button::builder()
-            .icon_name("document-edit-symbolic")
-            .build();
-        edit.add_css_class("tui-button");
+        content.append(&mainline);
+        let elapsed_label = gtk::Label::new(None);
+        elapsed_label.add_css_class("caption");
+        elapsed_label.add_css_class("dim-label");
+        elapsed_label.add_css_class("numeric");
+        elapsed_label.set_valign(gtk::Align::Center);
+        content.append(&elapsed_label);
+        let state_label = gtk::Label::new(None);
+        state_label.add_css_class("session-state");
+        state_label.set_valign(gtk::Align::Center);
+        content.append(&state_label);
+
+        // Rename, launch-here and close live in one overflow menu per row.
+        let menu = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let edit = menu_item("Rename");
         edit.set_tooltip_text(Some("Rename session"));
-        let edit_details = details.clone();
+        menu.append(&edit);
+        let mut menu_items = vec![edit.clone()];
+        let edit_details = primary.clone();
         let edit_label = label.clone();
-        let edit_elapsed = elapsed_label.clone();
         let edit_workspace = self.clone();
         let edit_id = id.clone();
         edit.connect_clicked(move |_| {
@@ -760,10 +764,9 @@ impl Workspace {
                 .build();
             editor.set_text(&edit_label.text());
             edit_details.remove(&edit_label);
-            edit_details.insert_child_after(&editor, Some(&edit_elapsed));
+            edit_details.prepend(&editor);
             let finish_details = edit_details.clone();
             let finish_label = edit_label.clone();
-            let finish_elapsed = edit_elapsed.clone();
             let finish_workspace = edit_workspace.clone();
             let finish_id = edit_id.clone();
             editor.connect_editing_notify(move |editor| {
@@ -772,18 +775,11 @@ impl Workspace {
                 }
                 let name = editor.text().trim().to_owned();
                 finish_details.remove(editor);
-                finish_details.insert_child_after(&finish_label, Some(&finish_elapsed));
+                finish_details.prepend(&finish_label);
                 finish_workspace.rename_session(&finish_id, name, None);
             });
             editor.start_editing();
         });
-        primary.append(&edit);
-        mainline.append(&primary);
-        mainline.append(&secondary);
-        content.append(&mainline);
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 1);
-        actions.add_css_class("tui-session-actions");
-        actions.set_valign(gtk::Align::Center);
         if let (Some(project_root), Some(worktree)) = (
             record.project_root.clone(),
             record
@@ -792,23 +788,27 @@ impl Workspace {
                 .or_else(|| record.cwd.clone())
                 .or_else(|| record.project_root.clone()),
         ) {
-            let launch = gtk::Button::builder()
-                .icon_name("list-add-symbolic")
-                .build();
-            launch.add_css_class("tui-button");
-            launch.set_tooltip_text(Some("Launch in this worktree"));
+            let launch = menu_item("Launch in this worktree");
             let launch_workspace = self.clone();
             launch.connect_clicked(move |_| {
                 launch_workspace.open_launch_for_worktree(&project_root, &worktree)
             });
-            actions.append(&launch);
+            menu.append(&launch);
+            menu_items.push(launch);
         }
-        let close = gtk::Button::builder()
-            .icon_name("window-close-symbolic")
-            .build();
-        close.add_css_class("tui-button");
+        let close = menu_item("Close session");
+        close.add_css_class("destructive-action");
         close.set_tooltip_text(Some("Close this shell session"));
-        actions.append(&close);
+        menu.append(&close);
+        menu_items.push(close.clone());
+        let item_refs = menu_items.iter().collect::<Vec<_>>();
+        let actions = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .popover(&menu_popover(&menu, &item_refs))
+            .valign(gtk::Align::Center)
+            .tooltip_text("Session actions")
+            .build();
+        actions.add_css_class("flat");
         content.append(&actions);
         row.set_child(Some(&content));
         let close_workspace = self.clone();

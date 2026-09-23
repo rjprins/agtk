@@ -171,7 +171,7 @@ impl Workspace {
         }
         let label = gtk::Label::new(Some(text));
         label.set_xalign(0.0);
-        label.add_css_class("tui-muted");
+        label.add_css_class("dim-label");
         self.worktree_list.append(&label);
     }
 
@@ -185,7 +185,7 @@ impl Workspace {
             inventory.worktrees.len()
         )));
         summary.set_xalign(0.0);
-        summary.add_css_class("tui-muted");
+        summary.add_css_class("dim-label");
         self.worktree_list.append(&summary);
         for worktree in inventory.worktrees {
             self.worktree_list
@@ -195,7 +195,6 @@ impl Workspace {
 
     fn worktree_inventory_row(&self, project_root: &Path, worktree: WorktreeInfo) -> gtk::Box {
         let row = gtk::Box::new(gtk::Orientation::Vertical, 1);
-        row.add_css_class("tui-worktree-row");
         let headline = gtk::Box::new(gtk::Orientation::Horizontal, 5);
         let branch = worktree.branch.as_deref().unwrap_or("(detached)");
         let dirty = if worktree.dirty {
@@ -217,7 +216,7 @@ impl Workspace {
         let launch = gtk::Button::builder()
             .icon_name("list-add-symbolic")
             .build();
-        launch.add_css_class("tui-button");
+        launch.add_css_class("flat");
         launch.set_tooltip_text(Some("Open quick launch in this worktree"));
         let launch_workspace = self.clone();
         let launch_project = project_root.to_owned();
@@ -231,7 +230,8 @@ impl Workspace {
             let reap = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
                 .build();
-            reap.add_css_class("tui-danger-button");
+            reap.add_css_class("flat");
+            reap.add_css_class("destructive-action");
             reap.set_tooltip_text(Some("Arm, then confirm guarded reap using this preview"));
             let armed = Rc::new(Cell::new(false));
             let reap_workspace = self.clone();
@@ -254,7 +254,7 @@ impl Workspace {
         )));
         details.set_xalign(0.0);
         details.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        details.add_css_class("tui-muted");
+        details.add_css_class("dim-label");
         details.set_tooltip_text(Some(&format!(
             "{}\n{}",
             worktree.path.display(),

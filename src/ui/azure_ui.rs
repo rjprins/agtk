@@ -373,7 +373,7 @@ impl Workspace {
         }
         let label = gtk::Label::new(Some(text));
         label.set_xalign(0.0);
-        label.add_css_class("tui-muted");
+        label.add_css_class("dim-label");
         self.pr_list.append(&label);
     }
 
@@ -411,7 +411,6 @@ impl Workspace {
 
     fn pr_row(&self, context: &PrContext, item: &PrItem) -> gtk::Box {
         let row = gtk::Box::new(gtk::Orientation::Vertical, 1);
-        row.add_css_class("pr-row");
         let headline = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let marker = item
             .attention
@@ -423,7 +422,8 @@ impl Workspace {
             ""
         };
         let number = gtk::Button::with_label(&format!("#{}", item.pull_request.id));
-        number.add_css_class("pr-number-link");
+        number.add_css_class("flat");
+        number.add_css_class("accent");
         number.set_tooltip_text(Some("Open this pull request in Azure DevOps"));
         let number_workspace = self.clone();
         let number_url = item.pull_request.url.clone();
@@ -459,14 +459,13 @@ impl Workspace {
         title.set_hexpand(true);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title.set_tooltip_text(Some(&item.pull_request.title));
-        title.add_css_class("pr-title");
         headline.append(&number);
         headline.append(&title);
 
         let view = gtk::Button::builder()
             .icon_name("web-browser-symbolic")
             .build();
-        view.add_css_class("tui-button");
+        view.add_css_class("flat");
         view.set_tooltip_text(Some(
             "Open in the browser and mark current attention viewed",
         ));
@@ -503,7 +502,7 @@ impl Workspace {
         let review = gtk::Button::builder()
             .icon_name("document-edit-symbolic")
             .build();
-        review.add_css_class("tui-button");
+        review.add_css_class("flat");
         review.set_tooltip_text(Some("Launch Codex with the review-pr workflow"));
         let review_workspace = self.clone();
         let review_root = context.project_root.clone();
@@ -526,8 +525,9 @@ impl Workspace {
             item.pull_request.target_branch,
         )));
         details.set_xalign(0.0);
+        details.add_css_class("caption");
+        details.add_css_class("dim-label");
         details.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        details.add_css_class("pr-meta");
         details.set_tooltip_text(Some(&format!(
             "{} -> {} by {}, {} unresolved thread(s)",
             item.pull_request.source_branch,
@@ -538,8 +538,9 @@ impl Workspace {
         row.append(&details);
         let location = gtk::Label::new(Some(&format!("cwd  {location}")));
         location.set_xalign(0.0);
+        location.add_css_class("caption");
+        location.add_css_class("dim-label");
         location.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        location.add_css_class("pr-meta");
         row.append(&location);
         row
     }
@@ -729,11 +730,11 @@ impl Workspace {
     pub(super) fn update_pr_indicator(&self) {
         let count = self.pr_attention_count();
         if count == 0 {
-            self.pr_button.set_label("PR");
+            set_menu_item_label(&self.pr_button, "Pull requests");
             self.pr_button
                 .set_tooltip_text(Some("Active Azure DevOps pull requests"));
         } else {
-            self.pr_button.set_label("PR!");
+            set_menu_item_label(&self.pr_button, &format!("Pull requests ({count})"));
             self.pr_button
                 .set_tooltip_text(Some(&format!("{count} pull request attention marker(s)")));
         }

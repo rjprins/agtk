@@ -7,13 +7,13 @@ use crate::persist::now_millis;
 
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 const STATE_CLASSES: [&str; 7] = [
-    "tui-state-running",
-    "tui-state-busy",
-    "tui-state-ready",
-    "tui-state-waiting",
-    "tui-state-idle",
-    "tui-state-exited",
-    "tui-state-reconnecting",
+    "state-running",
+    "state-busy",
+    "state-ready",
+    "state-waiting",
+    "state-idle",
+    "state-exited",
+    "state-reconnecting",
 ];
 
 impl Workspace {
@@ -202,8 +202,8 @@ impl Workspace {
             .state_label
             .add_css_class(session_state_css_class(state));
         for (class, active) in [
-            ("tui-session-ready", state == SessionState::Ready),
-            ("tui-session-waiting", state == SessionState::Waiting),
+            ("session-ready", state == SessionState::Ready),
+            ("session-waiting", state == SessionState::Waiting),
         ] {
             if active {
                 session.row.add_css_class(class);
@@ -286,13 +286,13 @@ pub(super) const fn session_state_indicator(state: SessionState) -> &'static str
 
 pub(super) const fn session_state_css_class(state: SessionState) -> &'static str {
     match state {
-        SessionState::Running => "tui-state-running",
-        SessionState::Busy => "tui-state-busy",
-        SessionState::Ready => "tui-state-ready",
-        SessionState::Waiting => "tui-state-waiting",
-        SessionState::Idle => "tui-state-idle",
-        SessionState::Exited => "tui-state-exited",
-        SessionState::Reconnecting => "tui-state-reconnecting",
+        SessionState::Running => "state-running",
+        SessionState::Busy => "state-busy",
+        SessionState::Ready => "state-ready",
+        SessionState::Waiting => "state-waiting",
+        SessionState::Idle => "state-idle",
+        SessionState::Exited => "state-exited",
+        SessionState::Reconnecting => "state-reconnecting",
     }
 }
 
