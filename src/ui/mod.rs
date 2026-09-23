@@ -47,6 +47,7 @@ mod emacs_ui;
 mod history_ui;
 mod inspection;
 mod launch_ui;
+mod modal;
 mod projects_ui;
 mod provider_icons;
 mod search_ui;
@@ -74,12 +75,12 @@ struct Workspace {
     content_title: adw::WindowTitle,
     git_button: gtk::MenuButton,
     claude_model_button: gtk::Button,
-    claude_model_window: gtk::Window,
+    claude_model_window: modal::Modal,
     claude_model_list: gtk::Box,
     selected_claude_preset: Rc<Cell<i32>>,
     claude_presets_entry: gtk::Entry,
     pr_button: gtk::Button,
-    pr_window: gtk::Window,
+    pr_window: modal::Modal,
     pr_root: gtk::Entry,
     pr_auto_toggle: gtk::CheckButton,
     pr_list: gtk::Box,
@@ -87,7 +88,7 @@ struct Workspace {
     pr_spinner: gtk::Spinner,
     updating_pr_toggle: Rc<Cell<bool>>,
     launch_button: gtk::Button,
-    launch_window: gtk::Window,
+    launch_window: modal::Modal,
     launch_cancel: gtk::Button,
     launch_submit: gtk::Button,
     launch_agent_dropdown: gtk::DropDown,
@@ -131,14 +132,14 @@ struct Workspace {
     launch_project_custom: Rc<Cell<bool>>,
     launch_creating_worktree: Rc<Cell<bool>>,
     worktree_button: gtk::Button,
-    worktree_window: gtk::Window,
+    worktree_window: modal::Modal,
     worktree_root: gtk::Entry,
     worktree_branch: gtk::Entry,
     worktree_base: gtk::Entry,
     worktree_purpose: gtk::Entry,
     worktree_list: gtk::Box,
     agent_button: gtk::Button,
-    agent_window: gtk::Window,
+    agent_window: modal::Modal,
     agent_list: gtk::Box,
     agent_project_filter: gtk::DropDown,
     agent_project_choices: gtk::StringList,
@@ -158,16 +159,16 @@ struct Workspace {
     selected_agent: Rc<RefCell<Option<ProviderSession>>>,
     history_button: gtk::Button,
     history_list: gtk::Box,
-    history_window: gtk::Window,
+    history_window: modal::Modal,
     search_button: gtk::Button,
-    search_window: gtk::Window,
+    search_window: modal::Modal,
     search_entry: gtk::Entry,
     theme_button: gtk::Button,
-    theme_window: gtk::Window,
+    theme_window: modal::Modal,
     follow_system_toggle: gtk::CheckButton,
     font_entry: gtk::Entry,
     shortcut_button: gtk::Button,
-    shortcut_window: gtk::Window,
+    shortcut_window: modal::Modal,
     shortcut_entries: Rc<Vec<(ShortcutAction, gtk::Entry)>>,
     session_context_bar: gtk::Box,
     context_input: gtk::Box,
@@ -959,40 +960,23 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let close_application = app.clone();
     window.connect_close_request(move |_| quit_on_main_window_close(|| close_application.quit()));
 
-    let claude_model_window = build_modal_window(
-        app,
+    let claude_model_window = modal::Modal::new(
         &window,
         "Claude model presets",
         620,
         520,
         &claude_model_surface,
     );
-    let launch_window = build_modal_window(app, &window, "Launch session", 760, -1, &launch_form);
-    let worktree_window =
-        build_modal_window(app, &window, "Worktrees", 900, 700, &worktree_surface);
-    let history_window =
-        build_modal_window(app, &window, "Prompt history", 620, 600, &history_surface);
-    let search_window =
-        build_modal_window(app, &window, "Search terminal", 650, -1, &search_surface);
-    let theme_window =
-        build_modal_window(app, &window, "Terminal appearance", 520, 650, &theme_list);
-    let shortcut_window = build_modal_window(
-        app,
-        &window,
-        "Application shortcuts",
-        900,
-        820,
-        &shortcut_list,
-    );
-    let pr_window = build_modal_window(app, &window, "Azure pull requests", 1120, 760, &pr_surface);
-    let agent_window = build_modal_window(
-        app,
-        &window,
-        "Recent agent sessions",
-        1400,
-        900,
-        &agent_surface,
-    );
+    let launch_window = modal::Modal::new(&window, "Launch session", 760, -1, &launch_form);
+    let worktree_window = modal::Modal::new(&window, "Worktrees", 900, 700, &worktree_surface);
+    let history_window = modal::Modal::new(&window, "Prompt history", 620, 600, &history_surface);
+    let search_window = modal::Modal::new(&window, "Search terminal", 650, -1, &search_surface);
+    let theme_window = modal::Modal::new(&window, "Terminal appearance", 520, 650, &theme_list);
+    let shortcut_window =
+        modal::Modal::new(&window, "Application shortcuts", 900, 820, &shortcut_list);
+    let pr_window = modal::Modal::new(&window, "Azure pull requests", 1120, 760, &pr_surface);
+    let agent_window =
+        modal::Modal::new(&window, "Recent agent sessions", 1400, 900, &agent_surface);
     let workspace = Workspace {
         application: app.clone(),
         window: window.clone(),
@@ -1261,7 +1245,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let launch_workspace = workspace.clone();
     workspace
         .launch_window
-        .connect_show(move |_| launch_workspace.prepare_launch_panel());
+        .connect_show(move || launch_workspace.prepare_launch_panel());
 
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
@@ -1298,7 +1282,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let worktree_workspace = workspace.clone();
     worktree_create.connect_clicked(move |_| worktree_workspace.create_worktree_from_panel());
     let worktree_workspace = workspace.clone();
-    workspace.worktree_window.connect_show(move |_| {
+    workspace.worktree_window.connect_show(move || {
         worktree_workspace.prepare_worktree_panel();
     });
     let pr_workspace = workspace.clone();
@@ -1306,7 +1290,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let pr_workspace = workspace.clone();
     workspace
         .pr_window
-        .connect_show(move |_| pr_workspace.prepare_pr_panel());
+        .connect_show(move || pr_workspace.prepare_pr_panel());
     let pr_workspace = workspace.clone();
     pr_auto_toggle.connect_toggled(move |toggle| {
         if pr_workspace.updating_pr_toggle.get() {
@@ -1344,7 +1328,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let agent_workspace = workspace.clone();
     workspace
         .agent_window
-        .connect_show(move |_| agent_workspace.refresh_agent_panel());
+        .connect_show(move || agent_workspace.refresh_agent_panel());
     let agent_navigation = gtk::EventControllerKey::new();
     agent_navigation.set_propagation_phase(gtk::PropagationPhase::Capture);
     let agent_workspace = workspace.clone();
@@ -1675,56 +1659,9 @@ fn launch_entry(label: &str, placeholder: &str) -> (gtk::Box, gtk::Entry) {
     (row, entry)
 }
 
-fn build_modal_window<W: IsA<gtk::Widget>>(
-    app: &adw::Application,
-    parent: &adw::ApplicationWindow,
-    title: &str,
-    width: i32,
-    height: i32,
-    child: &W,
-) -> gtk::Window {
-    let window = gtk::Window::builder()
-        .application(app)
-        .title(title)
-        .transient_for(parent)
-        .modal(true)
-        .default_width(width)
-        .default_height(height)
-        .resizable(true)
-        .child(child)
-        .build();
-    window.set_titlebar(Some(&adw::HeaderBar::new()));
-    // Application-owned windows can be registered while the application is
-    // activating. Keep every modal closed until its action explicitly opens it.
-    window.hide();
-    window.set_hide_on_close(true);
-    install_modal_escape_handler(&window);
-    window
-}
-
 fn quit_on_main_window_close(quit: impl FnOnce()) -> glib::Propagation {
     quit();
     glib::Propagation::Proceed
-}
-
-fn install_modal_escape_handler(window: &gtk::Window) {
-    let controller = gtk::EventControllerKey::new();
-    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let window_ref = window.downgrade();
-    controller.connect_key_pressed(move |_, key, _, _| {
-        if !is_modal_escape_key(key) {
-            return glib::Propagation::Proceed;
-        }
-        if let Some(window) = window_ref.upgrade() {
-            window.hide();
-        }
-        glib::Propagation::Stop
-    });
-    window.add_controller(controller);
-}
-
-fn is_modal_escape_key(key: gtk::gdk::Key) -> bool {
-    key == gtk::gdk::Key::Escape
 }
 
 /// A flat, left-aligned text button that reads as a menu entry inside a popover.
@@ -1974,13 +1911,7 @@ fn display_name(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_modal_escape_key, quit_on_main_window_close};
-
-    #[test]
-    fn only_escape_is_a_modal_dismissal_key() {
-        assert!(is_modal_escape_key(gtk::gdk::Key::Escape));
-        assert!(!is_modal_escape_key(gtk::gdk::Key::Return));
-    }
+    use super::quit_on_main_window_close;
 
     #[test]
     fn closing_the_main_window_requests_application_quit() {

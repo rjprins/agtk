@@ -28,6 +28,13 @@ fn main() -> glib::ExitCode {
             }
         }
         if let Some(window) = main_window {
+            // Reactivation brings back the workspace, not a leftover dialog.
+            for _ in 0..16 {
+                let Some(dialog) = window.visible_dialog() else {
+                    break;
+                };
+                dialog.force_close();
+            }
             window.present();
         } else {
             ui::build(app, paths.clone());

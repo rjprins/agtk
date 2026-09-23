@@ -80,24 +80,6 @@ pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, 
 }
 
 fn active_surface(workspace: &Workspace) -> gtk::Widget {
-    // Whole dialog windows, so the capture includes their header bar.
-    if workspace.pr_window.is_visible() {
-        return workspace.pr_window.clone().upcast();
-    }
-    for window in [
-        &workspace.launch_window,
-        &workspace.shortcut_window,
-        &workspace.theme_window,
-        &workspace.history_window,
-        &workspace.search_window,
-        &workspace.worktree_window,
-        &workspace.agent_window,
-        &workspace.claude_model_window,
-    ] {
-        if window.is_visible() {
-            return window.clone().upcast();
-        }
-    }
-    // The window paints the background that transparent header bars sit on.
+    // Dialogs live inside the main window, so the window shows them over the workspace.
     workspace.window.clone().upcast()
 }

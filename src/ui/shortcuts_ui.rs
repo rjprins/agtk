@@ -95,7 +95,7 @@ impl Workspace {
         self.apply_shortcuts();
         let workspace = self.clone();
         self.shortcut_window
-            .connect_hide(move |_| workspace.apply_shortcuts());
+            .connect_hide(move || workspace.apply_shortcuts());
     }
 
     pub(super) fn load_shortcuts(&self, preferences: ShortcutPreferences) {
