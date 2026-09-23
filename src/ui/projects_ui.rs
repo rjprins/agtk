@@ -136,60 +136,111 @@ impl Workspace {
             .collect()
     }
 
-    pub(super) fn rebuild_sidebar(&self) {
-        while let Some(child) = self.list.first_child() {
-            let row = child
-                .downcast::<gtk::ListBoxRow>()
-                .expect("list contains rows");
-            self.list.remove(&row);
-        }
+    pub(super) fn bind_sidebar_model(&self) {
+        let workspace = self.clone();
+        self.list
+            .bind_model(Some(&self.sidebar_model), move |item| {
+                let key = item
+                    .downcast_ref::<gtk::StringObject>()
+                    .map(|key| key.string().to_string())
+                    .unwrap_or_default();
+                workspace.sidebar_row(&key).upcast()
+            });
+    }
 
+    /// Builds the row for a key; session rows are the long-lived rows the sessions own.
+    fn sidebar_row(&self, key: &str) -> gtk::ListBoxRow {
+        match SidebarKey::parse(key) {
+            Some(SidebarKey::Session(id)) => self
+                .sessions
+                .borrow()
+                .get(id)
+                .map(|session| session.row.clone())
+                .unwrap_or_default(),
+            Some(SidebarKey::Project {
+                root,
+                name,
+                settings,
+            }) => self.project_header(root, name, settings),
+            Some(SidebarKey::Other) | None => group_label("Other"),
+        }
+    }
+
+    pub(super) fn rebuild_sidebar(&self) {
         let projects = self.project_summaries();
         self.menus.worktrees.set_enabled(!projects.is_empty());
-        let sessions = self.sessions.borrow();
-        for project in projects {
-            self.list.append(&self.project_header(
-                &project.root,
-                &project.name,
-                ProjectSettings {
+        let mut keys = Vec::new();
+        {
+            let sessions = self.sessions.borrow();
+            for project in projects {
+                let settings = ProjectSettings {
                     is_pinned: project.is_pinned,
                     is_collapsed: project.is_collapsed,
-                },
-            ));
-            let mut project_sessions = sessions
-                .values()
-                .filter(|session| {
-                    session.record.project_root.as_ref().is_some_and(|root| {
-                        root.to_string_lossy().as_ref() == project.root.as_str()
+                };
+                keys.push(SidebarKey::project_key(
+                    &project.root,
+                    &project.name,
+                    settings,
+                ));
+                let mut project_sessions = sessions
+                    .values()
+                    .filter(|session| {
+                        session.record.project_root.as_ref().is_some_and(|root| {
+                            root.to_string_lossy().as_ref() == project.root.as_str()
+                        })
                     })
-                })
+                    .collect::<Vec<_>>();
+                project_sessions.sort_by_key(|session| session.record.position);
+                for session in project_sessions {
+                    session.row.set_visible(!project.is_collapsed);
+                    keys.push(SidebarKey::session_key(&session.record.id));
+                }
+            }
+            let mut ungrouped = sessions
+                .values()
+                .filter(|session| session.record.project_root.is_none())
                 .collect::<Vec<_>>();
-            project_sessions.sort_by_key(|session| session.record.position);
-            for session in project_sessions {
-                session.row.set_visible(!project.is_collapsed);
-                self.list.append(&session.row);
+            if !ungrouped.is_empty() {
+                keys.push(SidebarKey::OTHER.to_owned());
+                ungrouped.sort_by_key(|session| session.record.position);
+                for session in ungrouped {
+                    session.row.set_visible(true);
+                    keys.push(SidebarKey::session_key(&session.record.id));
+                }
             }
         }
+        self.splice_sidebar(&keys);
 
-        let mut ungrouped = sessions
-            .values()
-            .filter(|session| session.record.project_root.is_none())
-            .collect::<Vec<_>>();
-        if !ungrouped.is_empty() {
-            self.list.append(&group_label("Other"));
-            ungrouped.sort_by_key(|session| session.record.position);
-            for session in ungrouped {
-                session.row.set_visible(true);
-                self.list.append(&session.row);
-            }
-        }
-
-        if let Some(selected) = self.selected_session_id()
-            && let Some(row) = sessions.get(&selected).map(|session| session.row.clone())
+        let selected = self.selected_session_id().and_then(|id| {
+            self.sessions
+                .borrow()
+                .get(&id)
+                .map(|session| session.row.clone())
+        });
+        if let Some(row) = selected
+            && self.list.selected_row().as_ref() != Some(&row)
         {
             self.list.select_row(Some(&row));
         }
         self.refresh_launch_project_choices();
+    }
+
+    /// Replaces only the changed middle of the key list, so untouched rows keep focus.
+    fn splice_sidebar(&self, keys: &[String]) {
+        let model = &self.sidebar_model;
+        let current = (0..model.n_items())
+            .filter_map(|index| model.item(index).and_downcast::<gtk::StringObject>())
+            .map(|key| key.string().to_string())
+            .collect::<Vec<_>>();
+        let (position, removed, added) = changed_range(&current, keys);
+        if removed == 0 && added.is_empty() {
+            return;
+        }
+        let added = added
+            .iter()
+            .map(|key| gtk::StringObject::new(key))
+            .collect::<Vec<_>>();
+        model.splice(position as u32, removed as u32, &added);
     }
 
     fn project_header(&self, root: &str, name: &str, settings: ProjectSettings) -> gtk::ListBoxRow {
@@ -310,4 +361,128 @@ fn project_name(path: &str) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or(path)
         .to_owned()
+}
+
+/// What one sidebar row shows, encoded as a string for the list model.
+enum SidebarKey<'a> {
+    Project {
+        root: &'a str,
+        name: &'a str,
+        settings: ProjectSettings,
+    },
+    Session(&'a str),
+    Other,
+}
+
+const KEY_SEPARATOR: char = '\u{1f}';
+
+impl<'a> SidebarKey<'a> {
+    const OTHER: &'static str = "other";
+
+    /// Pin and collapse state are part of the key, so changing them rebuilds the header.
+    fn project_key(root: &str, name: &str, settings: ProjectSettings) -> String {
+        format!(
+            "project{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{root}{KEY_SEPARATOR}{name}",
+            u8::from(settings.is_pinned),
+            u8::from(settings.is_collapsed),
+        )
+    }
+
+    fn session_key(id: &str) -> String {
+        format!("session{KEY_SEPARATOR}{id}")
+    }
+
+    fn parse(key: &'a str) -> Option<Self> {
+        if key == Self::OTHER {
+            return Some(Self::Other);
+        }
+        let mut parts = key.splitn(5, KEY_SEPARATOR);
+        match parts.next()? {
+            "session" => Some(Self::Session(parts.next()?)),
+            "project" => {
+                let is_pinned = parts.next()? == "1";
+                let is_collapsed = parts.next()? == "1";
+                Some(Self::Project {
+                    root: parts.next()?,
+                    name: parts.next()?,
+                    settings: ProjectSettings {
+                        is_pinned,
+                        is_collapsed,
+                    },
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The start, removed count and new items that turn `current` into `wanted`.
+fn changed_range<'a>(current: &[String], wanted: &'a [String]) -> (usize, usize, &'a [String]) {
+    let prefix = current
+        .iter()
+        .zip(wanted)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let suffix = current[prefix..]
+        .iter()
+        .rev()
+        .zip(wanted[prefix..].iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count();
+    (
+        prefix,
+        current.len() - prefix - suffix,
+        &wanted[prefix..wanted.len() - suffix],
+    )
+}
+
+#[cfg(test)]
+mod sidebar_tests {
+    use super::{ProjectSettings, SidebarKey, changed_range};
+
+    fn keys(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn unchanged_keys_need_no_splice() {
+        let current = keys(&["a", "b", "c"]);
+        assert_eq!(changed_range(&current, &current), (3, 0, &[][..]));
+    }
+
+    #[test]
+    fn an_added_session_only_inserts_its_row() {
+        let current = keys(&["project", "one", "two"]);
+        let wanted = keys(&["project", "one", "new", "two"]);
+        assert_eq!(changed_range(&current, &wanted), (2, 0, &wanted[2..3]));
+    }
+
+    #[test]
+    fn a_removed_session_only_removes_its_row() {
+        let current = keys(&["project", "one", "gone", "two"]);
+        let wanted = keys(&["project", "one", "two"]);
+        assert_eq!(changed_range(&current, &wanted), (2, 1, &[][..]));
+    }
+
+    #[test]
+    fn project_keys_round_trip() {
+        let key = SidebarKey::project_key(
+            "/work/agmux",
+            "agmux",
+            ProjectSettings {
+                is_pinned: true,
+                is_collapsed: false,
+            },
+        );
+        let Some(SidebarKey::Project {
+            root,
+            name,
+            settings,
+        }) = SidebarKey::parse(&key)
+        else {
+            panic!("project key did not parse");
+        };
+        assert_eq!((root, name), ("/work/agmux", "agmux"));
+        assert!(settings.is_pinned && !settings.is_collapsed);
+    }
 }

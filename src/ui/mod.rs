@@ -70,6 +70,8 @@ struct Workspace {
     application: adw::Application,
     window: adw::ApplicationWindow,
     list: gtk::ListBox,
+    /// One key per sidebar row; the list is bound to it so updates only touch changed rows.
+    sidebar_model: gio::ListStore,
     stack: gtk::Stack,
     overlay: adw::ToastOverlay,
     new_shell_button: gtk::Button,
@@ -371,6 +373,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         application: app.clone(),
         window: window.clone(),
         list: list.clone(),
+        sidebar_model: gio::ListStore::new::<gtk::StringObject>(),
         stack: stack.clone(),
         overlay,
         new_shell_button: new_shell.clone(),
@@ -556,6 +559,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     workspace.connect_preferences();
     workspace.install_status_timers();
+    workspace.bind_sidebar_model();
     workspace.install_menu_actions();
     workspace.install_shortcut_actions();
     workspace.discover_sessions();
@@ -570,9 +574,6 @@ impl Workspace {
             return;
         };
         self.stack.remove(&session.page);
-        if session.row.parent().is_some() {
-            self.list.remove(&session.row);
-        }
         self.rebuild_sidebar();
         if was_selected {
             let row = self
