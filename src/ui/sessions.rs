@@ -778,8 +778,12 @@ impl Workspace {
                         bases.push(root);
                     }
                 }
-                let path = crate::file_links::resolve(&link.path, &bases, &home)
-                    .ok_or_else(|| format!("no file named {} here", link.path))?;
+                let path = crate::file_links::resolve(&link.path, &bases, &home).ok_or_else(
+                    || match bases.first() {
+                        Some(base) => format!("{} is not in {}", link.path, base.display()),
+                        None => format!("{} does not exist", link.path),
+                    },
+                )?;
                 EmacsIntegration::from_environment().open_file(&path, link.line, link.column)?;
                 Ok(())
             },
