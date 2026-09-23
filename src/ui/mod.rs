@@ -42,6 +42,8 @@ mod azure_ui;
 mod capture;
 mod claude_ui;
 mod controls;
+#[allow(dead_code)]
+mod diff_viewer;
 mod emacs_ui;
 mod history_ui;
 mod inspection;

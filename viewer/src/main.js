@@ -65,6 +65,8 @@ const diffEditor = monaco.editor.createDiffEditor(editorElement, {
 let modelSequence = 0;
 let currentTabId = null;
 let currentRequestId = null;
+let activeChangeIndex = -1;
+let findState = { query: '', index: -1 };
 
 function sendEvent(event) {
   window.webkit?.messageHandlers?.agmux?.postMessage(event);
@@ -80,6 +82,8 @@ function clearDiff() {
 
   currentTabId = null;
   currentRequestId = null;
+  activeChangeIndex = -1;
+  findState = { query: '', index: -1 };
   fileNameElement.textContent = 'No file selected';
   versionLabelsElement.textContent = '';
   editorElement.classList.remove('visible');
@@ -123,6 +127,8 @@ function showDiff({
 
   currentTabId = tabId;
   currentRequestId = typeof requestId === 'string' ? requestId : tabId;
+  activeChangeIndex = -1;
+  findState = { query: '', index: -1 };
   diffEditor.setModel({ original: originalModel, modified: modifiedModel });
   fileNameElement.textContent = path;
   versionLabelsElement.textContent = `${originalLabel || 'Original'} → ${modifiedLabel || 'Current'}`;
@@ -139,6 +145,54 @@ function sendViewState() {
   return state;
 }
 
+function moveToChange(next) {
+  const changes = diffEditor.getLineChanges() || [];
+  if (changes.length === 0) return;
+
+  activeChangeIndex = next
+    ? (activeChangeIndex + 1) % changes.length
+    : (activeChangeIndex - 1 + changes.length) % changes.length;
+  const change = changes[activeChangeIndex];
+  const line = Math.max(
+    1,
+    change.modifiedStartLineNumber || change.modifiedEndLineNumber || 1,
+  );
+  const editor = diffEditor.getModifiedEditor();
+  editor.revealLineInCenter(line);
+  editor.setPosition({ lineNumber: line, column: 1 });
+  editor.focus();
+}
+
+function find(query, next) {
+  if (typeof query !== 'string' || query.length === 0) return;
+  const editor = diffEditor.getModifiedEditor();
+  const model = editor.getModel();
+  if (!model) return;
+
+  const matches = model.findMatches(query, false, false, false, null, false, 10000);
+  if (matches.length === 0) return;
+  const sameSearch = query === findState.query;
+  const currentLine = editor.getPosition()?.lineNumber || 1;
+  if (!sameSearch) {
+    const position = matches.findIndex((match) => match.range.startLineNumber >= currentLine);
+    findState = {
+      query,
+      index: next
+        ? (position < 0 ? 0 : position)
+        : (position < 0 ? matches.length - 1 : (position - 1 + matches.length) % matches.length),
+    };
+  } else {
+    findState.index = next
+      ? (findState.index + 1) % matches.length
+      : (findState.index - 1 + matches.length) % matches.length;
+  }
+
+  const range = matches[findState.index].range;
+  editor.setSelection(range);
+  editor.revealRangeInCenter(range);
+  editor.focus();
+}
+
 function setAppearance(theme, fontFamily, fontSize) {
   const isDark = theme === 'dark';
   document.body.dataset.theme = isDark ? 'dark' : 'light';
@@ -153,6 +207,8 @@ function setAppearance(theme, fontFamily, fontSize) {
 
 window.agmuxDiffViewer = Object.freeze({
   clearDiff,
+  find,
+  moveToChange,
   saveViewState: sendViewState,
   setAppearance,
   showDiff,
