@@ -18,6 +18,7 @@ case "$task_prefix" in
     *[!A-Za-z0-9_./-]*) printf '%s\n' "PREFIX contains unsupported characters" >&2; exit 2 ;;
 esac
 
+"$task_repo/scripts/build-viewer.sh"
 cargo build --manifest-path "$task_repo/Cargo.toml" --release --locked --bins
 
 task_bindir="$task_destdir$task_prefix/bin"

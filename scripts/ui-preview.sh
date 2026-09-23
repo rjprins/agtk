@@ -24,6 +24,7 @@ done
 ((${#surfaces[@]})) || surfaces=(main launch appearance shortcuts history search worktrees agents pull-requests claude-models)
 
 command -v mutter >/dev/null || { echo "ui-preview needs mutter" >&2; exit 1; }
+"$repo/scripts/build-viewer.sh"
 cargo build --quiet --manifest-path "$repo/Cargo.toml" --bins
 bin="$repo/target/debug"
 

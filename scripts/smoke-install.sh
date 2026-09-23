@@ -5,6 +5,7 @@ task_repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 task_stage=$(mktemp -d)
 trap 'find "$task_stage" -depth -delete' EXIT HUP INT TERM
 
+"$task_repo/scripts/build-viewer.sh"
 DESTDIR="$task_stage" PREFIX=/usr/local "$task_repo/scripts/install-local.sh"
 
 task_bindir="$task_stage/usr/local/bin"
