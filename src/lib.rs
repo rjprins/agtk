@@ -19,6 +19,7 @@ pub mod persist;
 pub mod projects;
 pub mod providers;
 pub mod session;
+mod session_names;
 pub mod shortcuts;
 pub mod terminal_text;
 pub mod ui;

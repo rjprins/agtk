@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use crate::agent_hooks::ensure_claude_hook_settings;
 use crate::agent_status::ScreenTracker;
+use crate::session_names::next_worktree_session_name;
 
 // Matches the original agmux, which sent 3 events for a browser wheel notch.
 const WHEEL_EVENTS_PER_NOTCH: f64 = 3.0;
@@ -344,7 +345,14 @@ impl Workspace {
                 let plan = SessionLaunchPlan::new(params)?;
                 fs::create_dir_all(socket.parent().ok_or("invalid socket path")?)?;
                 let mut record = SessionRecord::discovered(&id, socket.clone());
-                record.name = plan.name.unwrap_or_else(|| display_name(&id));
+                record.name = match plan.name {
+                    Some(name) => name,
+                    None => next_worktree_session_name(
+                        &display_name(&id),
+                        plan.worktree_path.as_deref().or(plan.cwd.as_deref()),
+                        &store.sessions()?,
+                    ),
+                };
                 record.kind = plan.kind;
                 record.program = plan.program;
                 record.args = plan.args;
