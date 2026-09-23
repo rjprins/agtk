@@ -46,6 +46,7 @@ mod emacs_ui;
 mod history_ui;
 mod inspection;
 mod launch_ui;
+mod menus;
 mod modal;
 mod preferences_ui;
 mod projects_ui;
@@ -73,18 +74,15 @@ struct Workspace {
     overlay: adw::ToastOverlay,
     new_shell_button: gtk::Button,
     content_title: adw::WindowTitle,
-    git_button: gtk::MenuButton,
+    menus: menus::Menus,
     claude_model_button: gtk::Button,
     claude_model_window: modal::Modal,
     claude_model_list: gtk::ListBox,
     selected_claude_preset: Rc<Cell<i32>>,
-    pr_button: gtk::Button,
     prs: azure_ui::PrDialog,
     launch_button: gtk::Button,
     launch: launch_ui::LaunchDialog,
-    worktree_button: gtk::Button,
     worktrees: worktrees_ui::WorktreeDialog,
-    agent_button: gtk::Button,
     agents: agents_ui::AgentDialog,
     history_button: gtk::Button,
     history_list: gtk::ListBox,
@@ -92,9 +90,7 @@ struct Workspace {
     search_button: gtk::Button,
     search_bar: gtk::SearchBar,
     search_entry: gtk::SearchEntry,
-    theme_button: gtk::Button,
     preferences: preferences_ui::PreferencesDialog,
-    shortcut_button: gtk::Button,
     session_context_bar: gtk::Box,
     context_input: gtk::Box,
     context_last_input: gtk::Label,
@@ -103,8 +99,6 @@ struct Workspace {
     context_pr_title: gtk::Label,
     context_pr_author: gtk::Label,
     context_pr_threads: gtk::Label,
-    context_branch_review: gtk::Button,
-    context_magit: gtk::Button,
     sidebar_panel: gtk::Box,
     sidebar_split: gtk::Paned,
     sidebar_header: gtk::Box,
@@ -184,8 +178,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     sidebar_view.set_content(Some(&sidebar));
     let sidebar_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
     sidebar_panel.append(&sidebar_view);
-    // Primary menu items; filled once the buttons exist further down.
-    let sidebar_controls = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let sidebar_controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
 
     let stack = gtk::Stack::builder()
         .hexpand(true)
@@ -204,11 +197,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     content_bar.set_title_widget(Some(&content_title));
     let session_context_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     session_context_bar.set_visible(false);
-    let context_branch_review = menu_item("Branch review");
-    context_branch_review
-        .set_tooltip_text(Some("Open the selected worktree in Emacs branch-review"));
-    let context_magit = menu_item("Magit");
-    context_magit.set_tooltip_text(Some("Open the selected worktree in Emacs Magit"));
     let context_last_input = gtk::Label::new(Some("(none yet)"));
     context_last_input.set_visible(false);
     let context_input = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -271,17 +259,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     new_shell.add_css_class("flat");
     new_shell.set_tooltip_text(Some("Start a shell session"));
-    let git_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    git_surface.append(&context_magit);
-    git_surface.append(&context_branch_review);
-    let git_popover = menu_popover(&git_surface, &[&context_magit, &context_branch_review]);
-    let git_button = gtk::MenuButton::builder()
-        .icon_name("text-editor-symbolic")
-        .popover(&git_popover)
-        .sensitive(false)
-        .build();
-    git_button.set_tooltip_text(Some("Open the selected worktree in Emacs"));
-
+    let menus = menus::Menus::build();
     let claude_model_list = boxed_list();
     let claude_model_surface = dialog_page(
         &claude_model_list,
@@ -294,25 +272,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     claude_model_button.set_visible(false);
     claude_model_button.set_tooltip_text(Some("Choose a Claude model and effort preset"));
 
-    let pr_button = menu_item("Pull requests");
-    pr_button.set_sensitive(false);
-    pr_button.set_tooltip_text(Some(
-        "Active Azure DevOps pull requests and review attention",
-    ));
-
     let launch_button = gtk::Button::builder()
         .icon_name("list-add-symbolic")
         .sensitive(false)
         .build();
     launch_button.set_tooltip_text(Some("Launch a shell, Codex, Claude, or Gemini session"));
-
-    let worktree_button = menu_item("Worktrees");
-    worktree_button.set_sensitive(false);
-    worktree_button.set_tooltip_text(Some("Inspect, create, and safely reap worktrees"));
-
-    let agent_button = menu_item("Recent agent sessions");
-    agent_button.set_sensitive(false);
-    agent_button.set_tooltip_text(Some("Preview and restore recent Codex and Claude sessions"));
 
     let history_list = boxed_list();
     let history_surface = dialog_page(
@@ -355,46 +319,17 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     search_button.set_tooltip_text(Some("Search selected terminal scrollback"));
 
-    let theme_button = menu_item("Preferences");
-    theme_button.set_sensitive(false);
-    theme_button.set_tooltip_text(Some("Terminal appearance and Claude presets"));
-
-    let shortcut_button = menu_item("Keyboard Shortcuts");
-    shortcut_button.set_sensitive(false);
-    shortcut_button.set_tooltip_text(Some("Configure application shortcuts"));
-
     new_shell.set_visible(false);
-    sidebar_controls.append(&agent_button);
-    sidebar_controls.append(&worktree_button);
-    sidebar_controls.append(&pr_button);
-    sidebar_controls.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    sidebar_controls.append(&theme_button);
-    sidebar_controls.append(&shortcut_button);
-    let main_menu = menu_popover(
-        &sidebar_controls,
-        &[
-            &agent_button,
-            &worktree_button,
-            &pr_button,
-            &theme_button,
-            &shortcut_button,
-        ],
-    );
-    let main_menu_button = gtk::MenuButton::builder()
-        .icon_name("open-menu-symbolic")
-        .popover(&main_menu)
-        .tooltip_text("Main menu")
-        .build();
+    sidebar_controls.append(&menus.main_button);
     sidebar_bar.pack_start(&launch_button);
-    sidebar_bar.pack_end(&main_menu_button);
+    sidebar_bar.pack_end(&sidebar_controls);
 
     session_context_bar.append(&claude_model_button);
-    session_context_bar.append(&git_button);
+    session_context_bar.append(&menus.git_button);
     session_context_bar.append(&history_button);
     session_context_bar.append(&search_button);
     // Header bars only flatten their direct children, and these sit in a box.
     claude_model_button.add_css_class("flat");
-    git_button.add_css_class("flat");
     history_button.add_css_class("flat");
     search_button.add_css_class("flat");
     // Kept for the inspection tree; nothing needs an off-screen anchor any more.
@@ -440,18 +375,15 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         overlay,
         new_shell_button: new_shell.clone(),
         content_title: content_title.clone(),
-        git_button: git_button.clone(),
+        menus,
         claude_model_button,
         claude_model_window,
         claude_model_list,
         selected_claude_preset: Rc::new(Cell::new(0)),
-        pr_button,
         prs,
         launch_button,
         launch,
-        worktree_button,
         worktrees,
-        agent_button,
         agents,
         history_button,
         history_list,
@@ -459,9 +391,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         search_button,
         search_bar: search_bar.clone(),
         search_entry: search_entry.clone(),
-        theme_button,
         preferences,
-        shortcut_button,
         session_context_bar: session_context_bar.clone(),
         context_input: context_input.clone(),
         context_last_input: context_last_input.clone(),
@@ -470,8 +400,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         context_pr_title,
         context_pr_author,
         context_pr_threads,
-        context_branch_review: context_branch_review.clone(),
-        context_magit: context_magit.clone(),
         sidebar_panel: sidebar_panel.clone(),
         sidebar_split: split.clone(),
         sidebar_header: sidebar_header.clone(),
@@ -509,25 +437,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         dialog_workspace.launch.modal.present();
     });
     let dialog_workspace = workspace.clone();
-    workspace.worktree_button.connect_clicked(move |_| {
-        dialog_workspace.prepare_worktree_panel();
-        dialog_workspace.worktrees.modal.present();
-    });
-    let dialog_workspace = workspace.clone();
-    workspace.agent_button.connect_clicked(move |_| {
-        if let Some(root) = dialog_workspace.preferred_project_root() {
-            dialog_workspace.open_agent_for_project(&root);
-        } else {
-            dialog_workspace.agents.modal.present();
-        }
-    });
-    let dialog_workspace = workspace.clone();
-    workspace.pr_button.connect_clicked(move |_| {
-        if let Some(root) = dialog_workspace.preferred_project_root() {
-            dialog_workspace.open_pr_for_project(&root);
-        }
-    });
-    let dialog_workspace = workspace.clone();
     workspace.history_button.connect_clicked(move |_| {
         if dialog_workspace.history_button.is_sensitive() {
             dialog_workspace.history_window.present();
@@ -540,18 +449,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         if open {
             dialog_workspace.search_entry.grab_focus();
         }
-    });
-    let dialog_workspace = workspace.clone();
-    workspace.theme_button.connect_clicked(move |_| {
-        dialog_workspace
-            .preferences
-            .open(preferences_ui::APPEARANCE_PAGE);
-    });
-    let dialog_workspace = workspace.clone();
-    workspace.shortcut_button.connect_clicked(move |_| {
-        dialog_workspace
-            .preferences
-            .open(preferences_ui::SHORTCUTS_PAGE);
     });
 
     let sidebar_width_workspace = workspace.clone();
@@ -637,26 +534,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());
 
-    let context_magit_workspace = workspace.clone();
-    context_magit.connect_clicked(move |_| {
-        if let Some(id) = context_magit_workspace.selected_session_id() {
-            context_magit_workspace.open_session_in_emacs(
-                &id,
-                crate::emacs::EmacsAction::Magit,
-                None,
-            );
-        }
-    });
-    let context_review_workspace = workspace.clone();
-    context_branch_review.connect_clicked(move |_| {
-        if let Some(id) = context_review_workspace.selected_session_id() {
-            context_review_workspace.open_session_in_emacs(
-                &id,
-                crate::emacs::EmacsAction::BranchReview,
-                None,
-            );
-        }
-    });
     workspace.connect_worktrees();
     workspace.connect_prs();
     workspace.connect_agents();
@@ -679,6 +556,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     workspace.connect_preferences();
     workspace.install_status_timers();
+    workspace.install_menu_actions();
     workspace.install_shortcut_actions();
     workspace.discover_sessions();
 
@@ -903,35 +781,6 @@ fn dialog_page(list: &gtk::ListBox, description: &str) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.add(&group);
     page
-}
-
-/// A flat, left-aligned text button that reads as a menu entry inside a popover.
-fn menu_item(label: &str) -> gtk::Button {
-    let button = gtk::Button::with_label(label);
-    button.add_css_class("flat");
-    button.set_halign(gtk::Align::Fill);
-    if let Some(label) = button.child().and_downcast::<gtk::Label>() {
-        label.set_xalign(0.0);
-    }
-    button
-}
-
-pub(super) fn set_menu_item_label(button: &gtk::Button, text: &str) {
-    button.set_label(text);
-    if let Some(label) = button.child().and_downcast::<gtk::Label>() {
-        label.set_xalign(0.0);
-    }
-}
-
-/// Wraps menu items in a popover that closes itself when one of them is used.
-fn menu_popover(surface: &gtk::Box, items: &[&gtk::Button]) -> gtk::Popover {
-    let popover = gtk::Popover::builder().child(surface).build();
-    popover.add_css_class("menu");
-    for item in items {
-        let popover = popover.clone();
-        item.connect_clicked(move |_| popover.popdown());
-    }
-    popover
 }
 
 fn display_name(id: &str) -> String {

@@ -94,6 +94,40 @@ impl Workspace {
     }
 
     /// Waits for a finished turn so `/rename` never lands in a running turn or a prompt.
+    /// Swaps the row title for an inline editor; finishing the edit renames the session.
+    pub(super) fn start_session_rename(&self, id: &str) {
+        let Some(label) = self
+            .sessions
+            .borrow()
+            .get(id)
+            .map(|session| session.label.clone())
+        else {
+            return;
+        };
+        let Some(details) = label.parent().and_downcast::<gtk::Box>() else {
+            return;
+        };
+        let editor = gtk::EditableLabel::builder()
+            .editable(true)
+            .focus_on_click(true)
+            .build();
+        editor.set_text(&label.text());
+        details.remove(&label);
+        details.prepend(&editor);
+        let workspace = self.clone();
+        let id = id.to_owned();
+        editor.connect_editing_notify(move |editor| {
+            if editor.is_editing() {
+                return;
+            }
+            let name = editor.text().trim().to_owned();
+            details.remove(editor);
+            details.prepend(&label);
+            workspace.rename_session(&id, name, None);
+        });
+        editor.start_editing();
+    }
+
     pub(super) fn send_pending_agent_name(&self, id: &str) {
         let pending = {
             let mut sessions = self.sessions.borrow_mut();
@@ -264,11 +298,8 @@ impl Workspace {
                         workspace.list.select_row(Some(&row));
                     }
                     workspace.new_shell_button.set_sensitive(true);
-                    workspace.theme_button.set_sensitive(true);
-                    workspace.shortcut_button.set_sensitive(true);
+                    workspace.menus.enable_surfaces();
                     workspace.launch_button.set_sensitive(true);
-                    workspace.agent_button.set_sensitive(true);
-                    workspace.pr_button.set_sensitive(true);
                     workspace.start_control_server();
                     if workspace.sessions.borrow().is_empty()
                         && workspace.paths.name().as_str() == "default"
@@ -755,75 +786,35 @@ impl Workspace {
         state_label.set_valign(gtk::Align::Center);
         content.append(&state_label);
 
-        // Rename, launch-here and close live in one overflow menu per row.
-        let menu = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let edit = menu_item("Rename");
-        edit.set_tooltip_text(Some("Rename session"));
-        menu.append(&edit);
-        let mut menu_items = vec![edit.clone()];
-        let edit_details = primary.clone();
-        let edit_label = label.clone();
-        let edit_workspace = self.clone();
-        let edit_id = id.clone();
-        edit.connect_clicked(move |_| {
-            let editor = gtk::EditableLabel::builder()
-                .editable(true)
-                .focus_on_click(true)
-                .build();
-            editor.set_text(&edit_label.text());
-            edit_details.remove(&edit_label);
-            edit_details.prepend(&editor);
-            let finish_details = edit_details.clone();
-            let finish_label = edit_label.clone();
-            let finish_workspace = edit_workspace.clone();
-            let finish_id = edit_id.clone();
-            editor.connect_editing_notify(move |editor| {
-                if editor.is_editing() {
-                    return;
-                }
-                let name = editor.text().trim().to_owned();
-                finish_details.remove(editor);
-                finish_details.prepend(&finish_label);
-                finish_workspace.rename_session(&finish_id, name, None);
-            });
-            editor.start_editing();
-        });
-        if let (Some(project_root), Some(worktree)) = (
-            record.project_root.clone(),
-            record
-                .worktree_path
-                .clone()
-                .or_else(|| record.cwd.clone())
-                .or_else(|| record.project_root.clone()),
-        ) {
-            let launch = menu_item("Launch in this worktree");
-            let launch_workspace = self.clone();
-            launch.connect_clicked(move |_| {
-                launch_workspace.open_launch_for_worktree(&project_root, &worktree)
-            });
-            menu.append(&launch);
-            menu_items.push(launch);
+        // Rename, launch-here and close live in one menu, from the overflow button or a right-click.
+        let menu = gio::Menu::new();
+        let edit_section = gio::Menu::new();
+        edit_section.append_item(&menus::targeted_item("Rename…", "win.session-rename", &id));
+        if record.project_root.is_some() {
+            edit_section.append_item(&menus::targeted_item(
+                "Launch in This Worktree…",
+                "win.session-launch-here",
+                &id,
+            ));
         }
-        let close = menu_item("Close session");
-        close.add_css_class("destructive-action");
-        close.set_tooltip_text(Some("Close this shell session"));
-        menu.append(&close);
-        menu_items.push(close.clone());
-        let item_refs = menu_items.iter().collect::<Vec<_>>();
+        menu.append_section(None, &edit_section);
+        let close_section = gio::Menu::new();
+        close_section.append_item(&menus::targeted_item(
+            "Close Session",
+            "win.session-close",
+            &id,
+        ));
+        menu.append_section(None, &close_section);
         let actions = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
-            .popover(&menu_popover(&menu, &item_refs))
+            .menu_model(&menu)
             .valign(gtk::Align::Center)
             .tooltip_text("Session actions")
             .build();
         actions.add_css_class("flat");
         content.append(&actions);
         row.set_child(Some(&content));
-        let close_workspace = self.clone();
-        let close_id = id.clone();
-        close.connect_clicked(move |_| {
-            close_workspace.stop_session(&close_id, None);
-        });
+        menus::open_menu_on_right_click(&row, &actions);
 
         self.sessions.borrow_mut().insert(
             id.clone(),

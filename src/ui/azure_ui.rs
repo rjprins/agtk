@@ -775,15 +775,7 @@ impl Workspace {
 
     pub(super) fn update_pr_indicator(&self) {
         let count = self.pr_attention_count();
-        if count == 0 {
-            set_menu_item_label(&self.pr_button, "Pull requests");
-            self.pr_button
-                .set_tooltip_text(Some("Active Azure DevOps pull requests"));
-        } else {
-            set_menu_item_label(&self.pr_button, &format!("Pull requests ({count})"));
-            self.pr_button
-                .set_tooltip_text(Some(&format!("{count} pull request attention marker(s)")));
-        }
+        self.menus.set_pull_request_attention(count);
     }
 }
 

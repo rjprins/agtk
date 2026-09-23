@@ -145,7 +145,7 @@ impl Workspace {
         }
 
         let projects = self.project_summaries();
-        self.worktree_button.set_sensitive(!projects.is_empty());
+        self.menus.worktrees.set_enabled(!projects.is_empty());
         let sessions = self.sessions.borrow();
         for project in projects {
             self.list.append(&self.project_header(
@@ -246,51 +246,38 @@ impl Workspace {
         let launch_workspace = self.clone();
         let launch_root = root.to_owned();
         launch.connect_clicked(move |_| launch_workspace.open_launch_for_project(&launch_root));
-        let pin = menu_item(if settings.is_pinned {
-            "Unpin project"
-        } else {
-            "Pin project"
-        });
-        let pin_workspace = self.clone();
-        let pin_root = root.to_owned();
-        pin.connect_clicked(move |_| {
-            pin_workspace.set_project_preferences(
-                pin_root.clone(),
-                Some(!settings.is_pinned),
-                None,
-                None,
-            );
-        });
-        let resume = menu_item("Resume recent session");
-        resume.set_tooltip_text(Some("Resume a recent agent session in this project"));
-        let resume_workspace = self.clone();
-        let resume_root = root.to_owned();
-        resume.connect_clicked(move |_| resume_workspace.open_agent_for_project(&resume_root));
-        let worktrees = menu_item("Worktrees");
-        worktrees.set_tooltip_text(Some("Manage project worktrees"));
-        let worktree_workspace = self.clone();
-        let worktree_root = root.to_owned();
-        worktrees.connect_clicked(move |_| {
-            worktree_workspace.open_worktrees_for_project(&worktree_root)
-        });
-        let pull_requests = menu_item("Pull requests");
-        pull_requests.set_tooltip_text(Some("Show pull requests for this project"));
-        let pr_workspace = self.clone();
-        let pr_root = root.to_owned();
-        pull_requests.connect_clicked(move |_| pr_workspace.open_pr_for_project(&pr_root));
-
-        let menu = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        menu.append(&resume);
-        menu.append(&worktrees);
-        menu.append(&pull_requests);
-        menu.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        menu.append(&pin);
+        let menu = gio::Menu::new();
+        let surfaces = gio::Menu::new();
+        surfaces.append_item(&menus::targeted_item(
+            "Resume Recent Session…",
+            "win.project-resume",
+            root,
+        ));
+        surfaces.append_item(&menus::targeted_item(
+            "Worktrees",
+            "win.project-worktrees",
+            root,
+        ));
+        surfaces.append_item(&menus::targeted_item(
+            "Pull Requests",
+            "win.project-pull-requests",
+            root,
+        ));
+        menu.append_section(None, &surfaces);
+        let pin = gio::Menu::new();
+        pin.append_item(&menus::targeted_item(
+            if settings.is_pinned {
+                "Unpin Project"
+            } else {
+                "Pin Project"
+            },
+            "win.project-pin",
+            root,
+        ));
+        menu.append_section(None, &pin);
         let more = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
-            .popover(&menu_popover(
-                &menu,
-                &[&resume, &worktrees, &pull_requests, &pin],
-            ))
+            .menu_model(&menu)
             .valign(gtk::Align::Center)
             .tooltip_text("Project actions")
             .build();
@@ -298,6 +285,7 @@ impl Workspace {
         launch.set_valign(gtk::Align::Center);
         content.append(&launch);
         content.append(&more);
+        menus::open_menu_on_right_click(&collapse, &more);
         row.set_child(Some(&content));
         row
     }

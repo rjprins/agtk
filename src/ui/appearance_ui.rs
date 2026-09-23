@@ -116,10 +116,6 @@ impl Workspace {
         let preferences = self.appearance.borrow().clone();
         self.chrome_style.apply(preferences.ui_font_size);
         let effective = self.effective_terminal_theme();
-        self.theme_button.set_tooltip_text(Some(&format!(
-            "Terminal appearance: {}",
-            effective.as_str()
-        )));
         self.preferences.show_appearance(&preferences);
         let terminals = self
             .sessions

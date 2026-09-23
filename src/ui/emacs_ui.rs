@@ -62,8 +62,8 @@ impl Workspace {
                         || session.record.project_root.is_some()
                 })
         });
-        self.git_button.set_sensitive(enabled);
-        self.context_branch_review.set_sensitive(enabled);
-        self.context_magit.set_sensitive(enabled);
+        self.menus.git_button.set_sensitive(enabled);
+        self.menus.magit.set_enabled(enabled);
+        self.menus.branch_review.set_enabled(enabled);
     }
 }
