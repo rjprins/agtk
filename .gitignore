@@ -1,3 +1,4 @@
 /target/
 *.sock
-
+viewer/dist/
+viewer/node_modules/

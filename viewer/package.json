@@ -1,0 +1,20 @@
+{
+  "name": "agmux-native-diff-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "monaco-editor": "0.56.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.0"
+  },
+  "overrides": {
+    "dompurify": "3.4.16"
+  }
+}
