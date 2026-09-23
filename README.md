@@ -20,7 +20,7 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Shell, Codex, Claude, Gemini, and custom launches with exact working-directory and worktree context
 - Independent PTY hosts with bounded detached replay and explicit process-group shutdown
 - Persisted session metadata, ordering, project pins, collapsed groups, launch preferences, terminal themes, fonts, and keyboard overrides
-- Ctrl-plus and Ctrl-minus font scaling for the TUI chrome and every embedded terminal, persisted with appearance settings
+- Ctrl-plus and Ctrl-minus font scaling for the application chrome and every embedded terminal, persisted with appearance settings
 - Safe purpose-aware worktree creation and guarded reap with salvage and attic tags
 - Recent Codex and Claude conversation discovery, preview, direct restore, and busy, waiting, ready, and idle agent states from Claude hooks and screen reading
 - Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
