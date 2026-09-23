@@ -631,7 +631,7 @@ impl Workspace {
         let url_tag = add_pattern(URL_PATTERN);
         let file_tag = add_pattern(crate::file_links::TERMINAL_PATTERN);
 
-        // Ctrl+click, because agent TUIs usually grab plain mouse clicks.
+        // Ctrl+click opens right away and keeps the click from the terminal.
         let click = gtk::GestureClick::new();
         click.set_button(gtk::gdk::BUTTON_PRIMARY);
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -646,41 +646,101 @@ impl Workspace {
             let Some(terminal) = gesture.widget().and_downcast::<vte::Terminal>() else {
                 return;
             };
-            let target = match terminal.check_hyperlink_at(x, y) {
-                Some(uri) => Some((uri.to_string(), url_tag)),
-                None => match terminal.check_match_at(x, y) {
-                    (Some(text), tag) if tag == url_tag || tag == file_tag => {
-                        Some((text.to_string(), tag))
-                    }
-                    _ => None,
-                },
-            };
-            let Some((text, tag)) = target else {
-                return;
-            };
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            if tag == file_tag {
-                workspace.open_terminal_file(&terminal, &text);
-            } else if let Some(path) = text
-                .starts_with("file://")
-                .then(|| gio::File::for_uri(&text).path())
-                .flatten()
-            {
-                workspace.open_file_in_emacs(path, None, None);
-            } else {
-                let launch_workspace = workspace.clone();
-                gtk::UriLauncher::new(&text).launch(
-                    Some(&workspace.window),
-                    None::<&gio::Cancellable>,
-                    move |result| {
-                        if let Err(error) = result {
-                            launch_workspace.show_error(&format!("Could not open link: {error}"));
-                        }
-                    },
-                );
+            if let Some((text, tag)) = link_at(&terminal, x, y, url_tag, file_tag) {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                workspace.open_link(&terminal, &text, tag == file_tag);
             }
         });
         terminal.add_controller(click);
+        self.enable_plain_link_clicks(terminal, url_tag, file_tag);
+    }
+
+    /// A plain click on a link opens it once the double-click window has passed, so
+    /// drags still select and double-clicks still select a word. Raw events are used
+    /// because a click gesture would lose the sequence to VTE's own gestures.
+    fn enable_plain_link_clicks(&self, terminal: &vte::Terminal, url_tag: i32, file_tag: i32) {
+        let events = gtk::EventControllerLegacy::new();
+        events.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pressed_at = Rc::new(Cell::new(None::<(f64, f64)>));
+        let pending = Rc::new(RefCell::new(None::<glib::SourceId>));
+        let workspace = self.clone();
+        events.connect_event(move |controller, event| {
+            let is_press = event.event_type() == gtk::gdk::EventType::ButtonPress;
+            let is_release = event.event_type() == gtk::gdk::EventType::ButtonRelease;
+            let is_primary = event
+                .downcast_ref::<gtk::gdk::ButtonEvent>()
+                .is_some_and(|button| button.button() == gtk::gdk::BUTTON_PRIMARY);
+            if !(is_press || is_release) || !is_primary {
+                return glib::Propagation::Proceed;
+            }
+            let Some(terminal) = controller.widget().and_downcast::<vte::Terminal>() else {
+                return glib::Propagation::Proceed;
+            };
+            let Some(position) = widget_position(&terminal, event) else {
+                return glib::Propagation::Proceed;
+            };
+            if is_press {
+                // A second press within the double-click window means the user is selecting.
+                if let Some(source) = pending.borrow_mut().take() {
+                    source.remove();
+                }
+                pressed_at.set(Some(position));
+                return glib::Propagation::Proceed;
+            }
+            let modified = event.modifier_state().intersects(
+                gtk::gdk::ModifierType::CONTROL_MASK
+                    | gtk::gdk::ModifierType::SHIFT_MASK
+                    | gtk::gdk::ModifierType::ALT_MASK,
+            );
+            let Some(start) = pressed_at.take() else {
+                return glib::Propagation::Proceed;
+            };
+            if modified || !is_click(start, position) {
+                return glib::Propagation::Proceed;
+            }
+            let Some((text, tag)) = link_at(&terminal, position.0, position.1, url_tag, file_tag)
+            else {
+                return glib::Propagation::Proceed;
+            };
+            let delay = terminal
+                .settings()
+                .gtk_double_click_time()
+                .max(0)
+                .unsigned_abs();
+            let open_workspace = workspace.clone();
+            let open_pending = pending.clone();
+            let source =
+                glib::timeout_add_local_once(Duration::from_millis(u64::from(delay)), move || {
+                    open_pending.borrow_mut().take();
+                    open_workspace.open_link(&terminal, &text, tag == file_tag);
+                });
+            pending.borrow_mut().replace(source);
+            glib::Propagation::Proceed
+        });
+        terminal.add_controller(events);
+    }
+
+    fn open_link(&self, terminal: &vte::Terminal, text: &str, is_file_path: bool) {
+        if is_file_path {
+            self.open_terminal_file(terminal, text);
+        } else if let Some(path) = text
+            .starts_with("file://")
+            .then(|| gio::File::for_uri(text).path())
+            .flatten()
+        {
+            self.open_file_in_emacs(path, None, None);
+        } else {
+            let workspace = self.clone();
+            gtk::UriLauncher::new(text).launch(
+                Some(&self.window),
+                None::<&gio::Cancellable>,
+                move |result| {
+                    if let Err(error) = result {
+                        workspace.show_error(&format!("Could not open link: {error}"));
+                    }
+                },
+            );
+        }
     }
 
     /// Opens a path printed in the terminal, resolved against where that terminal runs.
@@ -926,6 +986,42 @@ impl Workspace {
     }
 }
 
+/// The hyperlink or matched link text under a point, with the tag of the pattern that matched.
+fn link_at(
+    terminal: &vte::Terminal,
+    x: f64,
+    y: f64,
+    url_tag: i32,
+    file_tag: i32,
+) -> Option<(String, i32)> {
+    if let Some(uri) = terminal.check_hyperlink_at(x, y) {
+        return Some((uri.to_string(), url_tag));
+    }
+    match terminal.check_match_at(x, y) {
+        (Some(text), tag) if tag == url_tag || tag == file_tag => Some((text.to_string(), tag)),
+        _ => None,
+    }
+}
+
+/// Raw events carry surface coordinates; link lookup needs terminal coordinates.
+fn widget_position(terminal: &vte::Terminal, event: &gtk::gdk::Event) -> Option<(f64, f64)> {
+    let (x, y) = event.position()?;
+    let native = terminal.native()?;
+    let (offset_x, offset_y) = native.surface_transform();
+    let point = native.upcast_ref::<gtk::Widget>().compute_point(
+        terminal,
+        &gtk::graphene::Point::new((x - offset_x) as f32, (y - offset_y) as f32),
+    )?;
+    Some((f64::from(point.x()), f64::from(point.y())))
+}
+
+/// Pointer travel beyond this turns a click into a selection drag.
+const CLICK_SLOP: f64 = 4.0;
+
+fn is_click(press: (f64, f64), release: (f64, f64)) -> bool {
+    (press.0 - release.0).hypot(press.1 - release.1) <= CLICK_SLOP
+}
+
 fn runs_claude(record: &SessionRecord) -> bool {
     record.kind == SessionKind::Claude
         || record
@@ -1024,6 +1120,13 @@ fn focus_terminal_on_row_activation(row: &gtk::ListBoxRow, terminal: &vte::Termi
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_nearly_still_press_counts_as_a_link_click() {
+        assert!(super::is_click((10.0, 10.0), (10.0, 10.0)));
+        assert!(super::is_click((10.0, 10.0), (12.0, 13.0)));
+        assert!(!super::is_click((10.0, 10.0), (30.0, 10.0)));
+    }
+
     /// Wraps every match of the terminal file pattern in brackets, using VTE's own PCRE2.
     fn bracket_file_links(text: &str) -> String {
         const PCRE2_SUBSTITUTE_GLOBAL: u32 = 0x0000_0100;
