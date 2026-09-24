@@ -18,7 +18,7 @@ The desired review surface includes source line numbers, character-level change 
 
 Use Git's read-only commands to gather worktree, index, branch, and commit comparisons. Render text comparisons in one lazily created WebKitGTK view with bundled Monaco assets. Keep native GTK widgets for navigation and status. Do not add Git mutation controls or edit operations.
 
-The left sidebar remains session based. Center tabs represent sessions and file diffs. The right Changes sidebar follows the selected session's recorded worktree. Live diffs remain stable while being read and offer an explicit reload when their source changes.
+The left sidebar remains session based. Center tabs represent sessions and one reusable diff buffer per worktree. Clicking another file replaces that buffer's comparison instead of creating another diff tab. The right Changes sidebar follows the selected session's recorded worktree. Live diffs remain stable while being read and offer an explicit reload when their source changes.
 
 ## Alternatives considered
 
@@ -37,7 +37,7 @@ Rejected because the goal is to browse changes over time and inspect files witho
 ## Consequences
 
 - The application bundles Monaco and its workers into the native binary through GResource. No local server or network access is needed at runtime.
-- A single WebKit view serves all diff tabs. Per-tab state stays lightweight, and old text models are disposed when switching files.
+- A single WebKit view serves the reusable diff buffer. Its comparison changes in place, and old text models are disposed when switching files.
 - Git and file reads run off the GTK thread with bounded output, time, and content size.
 - Git history, staged content, unstaged content, and untracked files have distinct comparison scopes.
 - This adds a WebKitGTK dependency and Node.js/npm build tooling for preparing viewer assets. Node.js is not needed to run an already built application.

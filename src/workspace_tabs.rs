@@ -69,9 +69,10 @@ impl WorkspaceTabs {
             return None;
         }
         let tabs = self.contexts.entry(context.clone()).or_default();
-        if !tabs.diffs.contains(&key) {
-            tabs.diffs.push(key.clone());
-        }
+        tabs.diffs.clear();
+        tabs.diffs.push(key.clone());
+        tabs.recent
+            .retain(|tab| matches!(tab, WorkspaceTabId::Session(_)));
         self.selected_session = Some(context_owner.to_owned());
         self.active_context = Some(context.clone());
         let tab = WorkspaceTabId::Diff(key);

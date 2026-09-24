@@ -93,6 +93,31 @@ impl Workspace {
             old_path: file.old_path.clone(),
             new_path: file.new_path.clone(),
         };
+        let previous_diffs = self
+            .workspace_tabs
+            .borrow()
+            .context_tabs(&key.worktree_root)
+            .into_iter()
+            .filter_map(|tab| match tab {
+                WorkspaceTabId::Diff(open) if open != key => Some(open),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let same_diff_is_visible = self
+            .workspace_tabs
+            .borrow()
+            .visible_tab()
+            .is_some_and(|tab| tab == &WorkspaceTabId::Diff(key.clone()))
+            && self.stack.visible_child_name().as_deref() == Some("changes-diff");
+        if previous_diffs.is_empty()
+            && same_diff_is_visible
+            && !self.stale_diff_tabs.borrow().contains(&key)
+        {
+            if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+                viewer.focus();
+            }
+            return Some(crate::workspace_tabs::WorkspaceTabs::diff_tab_id(&key));
+        }
         if self
             .workspace_tabs
             .borrow_mut()
@@ -101,6 +126,13 @@ impl Workspace {
         {
             self.show_error("Could not open this diff in the selected worktree");
             return None;
+        }
+        for previous in previous_diffs {
+            self.diff_tab_data.borrow_mut().remove(&previous);
+            self.diff_document_signatures.borrow_mut().remove(&previous);
+            self.stale_diff_tabs.borrow_mut().remove(&previous);
+            let previous_tab_id = crate::workspace_tabs::WorkspaceTabs::diff_tab_id(&previous);
+            self.diff_view_states.borrow_mut().remove(&previous_tab_id);
         }
         let tab_id = crate::workspace_tabs::WorkspaceTabs::diff_tab_id(&key);
         self.diff_tab_data
@@ -597,11 +629,6 @@ impl Workspace {
             }
         }
         self.diff_document_signatures.borrow_mut().remove(key);
-        if self.stack.visible_child_name().as_deref() == Some("changes-diff")
-            && let Some(viewer) = self.diff_viewer.borrow().as_ref()
-        {
-            viewer.save_view_state();
-        }
         self.stack.set_visible_child_name("changes-diff");
         self.session_context_bar.set_visible(false);
         self.context_pr.set_visible(false);
@@ -922,9 +949,6 @@ impl Workspace {
     }
 
     fn close_diff_tab(&self, key: &DiffTabKey) {
-        if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
-            viewer.save_view_state();
-        }
         self.diff_tab_data.borrow_mut().remove(key);
         self.diff_document_signatures.borrow_mut().remove(key);
         self.stale_diff_tabs.borrow_mut().remove(key);
