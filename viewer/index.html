@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>agmux diff</title>
+  </head>
+  <body>
+    <main id="viewer" aria-label="Read-only file comparison">
+      <header id="diff-heading" aria-live="polite">
+        <strong id="file-name">No file selected</strong>
+        <span id="version-labels"></span>
+        <span id="metadata"></span>
+      </header>
+      <div id="editor" aria-label="File comparison"></div>
+      <p id="empty-state">Select a changed file to view its diff.</p>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

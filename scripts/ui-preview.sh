@@ -3,7 +3,7 @@
 # Nothing touches the live instance or the desktop.
 #
 # Usage: scripts/ui-preview.sh [--dark] [--keep] [--font-size N] [SURFACE...]
-#   SURFACE: main launch appearance shortcuts history search worktrees agents
+#   SURFACE: main changes launch appearance shortcuts history search worktrees agents
 #            pull-requests claude-models (default: all)
 #   --keep   leave the instance running and print how to drive it
 set -euo pipefail
@@ -21,9 +21,10 @@ while (($#)); do
   esac
   shift
 done
-((${#surfaces[@]})) || surfaces=(main launch appearance shortcuts history search worktrees agents pull-requests claude-models)
+((${#surfaces[@]})) || surfaces=(main changes launch appearance shortcuts history search worktrees agents pull-requests claude-models)
 
 command -v mutter >/dev/null || { echo "ui-preview needs mutter" >&2; exit 1; }
+"$repo/scripts/build-viewer.sh"
 cargo build --quiet --manifest-path "$repo/Cargo.toml" --bins
 bin="$repo/target/debug"
 
@@ -70,11 +71,44 @@ chmod 700 "$work/fake-az"
 # A demo repository with an Azure remote and two extra worktrees.
 project="$work/demo-service"
 git init -q -b main "$project"
-git -C "$project" -c user.name=Demo -c user.email=demo@example.com commit -q --allow-empty -m "initial commit"
+mkdir -p "$project/src"
+cat > "$project/src/orders.py" <<'PY'
+def fetch_orders(cursor=None):
+    return query_orders(cursor=cursor)
+PY
+git -C "$project" add src/orders.py
+git -C "$project" -c user.name=Demo -c user.email=demo@example.com commit -q -m "Add orders endpoint"
 git -C "$project" remote add origin https://dev.azure.com/org/project/_git/demo-service
 git -C "$project" worktree add -q -b pagination-cursor "$work/demo-service-pagination-cursor"
 git -C "$project" worktree add -q -b retry-backoff "$work/demo-service-retry-backoff"
 feature="$work/demo-service-pagination-cursor"
+git -C "$feature" config user.name Demo
+git -C "$feature" config user.email demo@example.com
+cat > "$feature/src/orders.py" <<'PY'
+def fetch_orders(cursor=None, page_size=50):
+    return query_orders(cursor=cursor, limit=page_size)
+PY
+git -C "$feature" add src/orders.py
+git -C "$feature" commit -q -m "Add cursor pagination"
+cat >> "$feature/src/orders.py" <<'PY'
+
+def next_cursor(rows):
+    return rows[-1].id if rows else None
+PY
+git -C "$feature" add src/orders.py
+git -C "$feature" commit -q -m "Return next page cursor"
+cat > "$feature/src/staged.py" <<'PY'
+def staged_example():
+    return "ready"
+PY
+git -C "$feature" add src/staged.py
+cat >> "$feature/src/orders.py" <<'PY'
+
+# Local query instrumentation.
+PY
+cat > "$feature/notes.txt" <<'TXT'
+Untracked preview file.
+TXT
 cat > "$work/azure-prs.json" <<JSON
 [{"pullRequestId":4217,"title":"Use cursor pagination for the orders endpoint","sourceRefName":"refs/heads/pagination-cursor","targetRefName":"refs/heads/main","creationDate":"2026-09-22T10:00:00Z","isDraft":false,"createdBy":{"displayName":"A Colleague","uniqueName":"colleague@example.com"},"lastMergeSourceCommit":{"commitId":"0123456789abcdef"},"mergeStatus":"succeeded","reviewers":[]},
  {"pullRequestId":4230,"title":"Retry transient queue failures with backoff","sourceRefName":"refs/heads/retry-backoff","targetRefName":"refs/heads/main","creationDate":"2026-09-23T08:00:00Z","isDraft":true,"createdBy":{"displayName":"Another Colleague","uniqueName":"other@example.com"},"lastMergeSourceCommit":{"commitId":"fedcba9876543210"},"mergeStatus":"succeeded","reviewers":[]}]
@@ -148,10 +182,26 @@ for surface in "${surfaces[@]}"; do
   kill "$ui_pid"; wait "$ui_pid" 2>/dev/null || true
   start_ui
   ctl session select "$main_id" >/dev/null
+  if [[ $surface == changes ]]; then
+    ctl session select "$(id_of 'cursor pagination')" >/dev/null
+  fi
   # Prompt history only lives as long as one UI process.
   ctl session input "$main_id" --text "Make the orders endpoint use cursor pagination" >/dev/null
   shown=$(ctl ui show "$surface" | grep -o '"shown":[a-z]*' | cut -d: -f2)
   [[ $shown == true ]] || { echo "$surface: not available" >&2; continue; }
+  if [[ $surface == changes ]]; then
+    changes_session=$(id_of 'cursor pagination')
+    ctl ui diff "$changes_session" --scope committed --path src/orders.py >/dev/null
+    rendered=0
+    for _ in $(seq 40); do
+      if ctl ui inspect | grep -q '"label":"rendered:'; then
+        rendered=1
+        break
+      fi
+      sleep 0.1
+    done
+    ((rendered)) || { echo "Changes diff did not render" >&2; exit 1; }
+  fi
   sleep 1.5
   capture "$surface"
 done

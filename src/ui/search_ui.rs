@@ -2,6 +2,12 @@ use super::*;
 
 impl Workspace {
     pub(super) fn open_search(&self) {
+        let is_diff = self.stack.visible_child_name().as_deref() == Some("changes-diff");
+        self.search_entry.set_placeholder_text(Some(if is_diff {
+            "Find in diff"
+        } else {
+            "Find in terminal"
+        }));
         self.search_bar.set_search_mode(true);
         self.search_entry.grab_focus();
     }
@@ -9,6 +15,12 @@ impl Workspace {
     /// Escape leaves the search and hands the keyboard back to the terminal.
     pub(super) fn close_search(&self) {
         self.search_bar.set_search_mode(false);
+        if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
+            if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+                viewer.focus();
+            }
+            return;
+        }
         let terminal = self.selected_session_id().and_then(|id| {
             self.sessions
                 .borrow()
@@ -23,6 +35,12 @@ impl Workspace {
     pub(super) fn search_selected(&self, forward: bool) {
         let query = self.search_entry.text();
         if query.is_empty() {
+            return;
+        }
+        if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
+            if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+                viewer.find(query.as_str(), forward);
+            }
             return;
         }
         let Some(id) = self.selected_session_id() else {

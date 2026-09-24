@@ -13,8 +13,8 @@ use agmux_native::control::{
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams,
     SessionIdParams, SessionKind, SessionSetStateParams, SessionState, ShortcutSetParams,
-    UiShowParams, UiSurface, WaitCondition, WorktreeCreateParams, WorktreeListParams,
-    WorktreeReapParams,
+    UiDiffScope, UiOpenDiffParams, UiShowParams, UiSurface, WaitCondition, WorktreeCreateParams,
+    WorktreeListParams, WorktreeReapParams,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
 use agmux_native::providers::AgentProvider;
@@ -78,6 +78,9 @@ fn run() -> Result<(), Failure> {
                 surface: parse_ui_surface(surface)?,
             })
         }
+        [group, command, session_id, rest @ ..] if group == "ui" && command == "diff" => {
+            ControlCommand::UiOpenDiff(parse_ui_diff(session_id, rest)?)
+        }
         [group, action, rest @ ..] if group == "appearance" && action == "set" => {
             parse_appearance_set(rest)?
         }
@@ -120,6 +123,45 @@ struct WaitOptions {
     condition: WaitCondition,
     timeout: Duration,
     poll_interval: Duration,
+}
+
+fn parse_ui_diff(session_id: &str, arguments: &[String]) -> Result<UiOpenDiffParams, Failure> {
+    let mut scope = None;
+    let mut path = None;
+    let mut commit_id = None;
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?
+            .clone();
+        match option {
+            "--scope" => {
+                scope = Some(match value.as_str() {
+                    "all" => UiDiffScope::All,
+                    "staged" => UiDiffScope::Staged,
+                    "unstaged" => UiDiffScope::Unstaged,
+                    "untracked" => UiDiffScope::Untracked,
+                    "committed" => UiDiffScope::Committed,
+                    "commit" => UiDiffScope::Commit,
+                    _ => return Err(Failure::Usage("unknown diff scope".to_owned())),
+                });
+            }
+            "--path" => path = Some(value),
+            "--commit" => commit_id = Some(value),
+            _ => return Err(Failure::Usage(format!("unknown ui diff option: {option}"))),
+        }
+        index += 2;
+    }
+    let scope = scope.ok_or_else(|| Failure::Usage("ui diff requires --scope".to_owned()))?;
+    let path = path.ok_or_else(|| Failure::Usage("ui diff requires --path".to_owned()))?;
+    Ok(UiOpenDiffParams {
+        session_id: session_id.to_owned(),
+        scope,
+        path,
+        commit_id,
+    })
 }
 
 fn parse_wait(arguments: &[String]) -> Result<WaitOptions, Failure> {
@@ -271,6 +313,7 @@ fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
         "shortcuts" => Ok(UiSurface::Shortcuts),
         "history" => Ok(UiSurface::History),
         "search" => Ok(UiSurface::Search),
+        "changes" => Ok(UiSurface::Changes),
         "worktrees" => Ok(UiSurface::Worktrees),
         "agents" => Ok(UiSurface::Agents),
         "pull-requests" | "prs" => Ok(UiSurface::PullRequests),
@@ -920,7 +963,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session state ID STATE|session magit ID|session review ID|wait OPTIONS>"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session state ID STATE|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

@@ -19,6 +19,7 @@ use vte::prelude::*;
 
 use crate::appearance::{AppearancePreferences, ThemeKey, theme};
 use crate::azure::{AzurePr, PrContext, PrPreferences};
+use crate::changes::{ChangedFile, DiffDocumentResult, WorktreeContext};
 use crate::claude_presets::ClaudePresetPreferences;
 use crate::control::{
     AppState, AppearanceSetParams, AppearanceSummary, AttentionSummary, Bounds, ControlCommand,
@@ -40,8 +41,10 @@ mod agents_ui;
 mod appearance_ui;
 mod azure_ui;
 mod capture;
+mod changes_ui;
 mod claude_ui;
 mod controls;
+mod diff_viewer;
 mod emacs_ui;
 mod history_ui;
 mod inspection;
@@ -57,6 +60,7 @@ mod shortcuts_ui;
 mod sidebar;
 mod status_ui;
 mod style;
+mod workspace_tabs_ui;
 mod worktrees_ui;
 
 const EMPTY_PAGE: &str = "empty";
@@ -73,6 +77,27 @@ struct Workspace {
     /// One key per sidebar row; the list is bound to it so updates only touch changed rows.
     sidebar_model: gio::ListStore,
     stack: gtk::Stack,
+    center_tabs: gtk::Box,
+    workspace_tabs: Rc<RefCell<crate::workspace_tabs::WorkspaceTabs>>,
+    diff_page: gtk::Box,
+    diff_viewer_host: gtk::Box,
+    diff_placeholder: gtk::Label,
+    diff_heading: gtk::Label,
+    diff_stale_banner: gtk::Box,
+    diff_stale_label: gtk::Label,
+    diff_reload_button: gtk::Button,
+    diff_viewer: Rc<RefCell<Option<diff_viewer::DiffViewer>>>,
+    diff_tab_data:
+        Rc<RefCell<HashMap<crate::workspace_tabs::DiffTabKey, (ChangedFile, WorktreeContext)>>>,
+    diff_document_signatures: Rc<RefCell<HashMap<crate::workspace_tabs::DiffTabKey, String>>>,
+    stale_diff_tabs: Rc<RefCell<HashSet<crate::workspace_tabs::DiffTabKey>>>,
+    diff_view_states: Rc<RefCell<HashMap<String, serde_json::Value>>>,
+    diff_request_sequence: Rc<Cell<u64>>,
+    diff_current_request: Rc<RefCell<Option<String>>>,
+    diff_rendered: Rc<RefCell<Option<(String, usize, usize)>>>,
+    diff_error: Rc<RefCell<Option<(String, String)>>>,
+    changes: changes_ui::ChangesSidebar,
+    changes_io: IoWorker,
     overlay: adw::ToastOverlay,
     new_shell_button: gtk::Button,
     content_title: adw::WindowTitle,
@@ -112,6 +137,7 @@ struct Workspace {
     sessions: Rc<RefCell<HashMap<String, SessionView>>>,
     closing_sessions: Rc<RefCell<HashSet<String>>>,
     selected_session: Rc<RefCell<Option<String>>>,
+    suppress_session_activation: Rc<Cell<bool>>,
     sequence: Rc<Cell<u64>>,
     control_server: Rc<RefCell<Option<ControlServer>>>,
     io: IoWorker,
@@ -194,6 +220,64 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     stack.add_named(&empty, Some(EMPTY_PAGE));
 
+    let diff_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let diff_toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    diff_toolbar.set_margin_start(8);
+    diff_toolbar.set_margin_end(8);
+    diff_toolbar.set_margin_top(4);
+    diff_toolbar.set_margin_bottom(4);
+    let diff_previous = gtk::Button::builder()
+        .icon_name("go-up-symbolic")
+        .tooltip_text("Previous change")
+        .build();
+    diff_previous.add_css_class("flat");
+    let diff_next = gtk::Button::builder()
+        .icon_name("go-down-symbolic")
+        .tooltip_text("Next change")
+        .build();
+    diff_next.add_css_class("flat");
+    let diff_heading = gtk::Label::new(Some("Select a changed file"));
+    diff_heading.set_xalign(0.0);
+    diff_heading.set_hexpand(true);
+    diff_toolbar.append(&diff_previous);
+    diff_toolbar.append(&diff_next);
+    diff_toolbar.append(&diff_heading);
+    diff_page.append(&diff_toolbar);
+    let diff_stale_banner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    diff_stale_banner.set_margin_start(8);
+    diff_stale_banner.set_margin_end(8);
+    diff_stale_banner.set_margin_top(4);
+    diff_stale_banner.set_margin_bottom(4);
+    let diff_stale_label = gtk::Label::new(Some("This file changed while you were reading it."));
+    diff_stale_label.set_xalign(0.0);
+    diff_stale_label.set_hexpand(true);
+    let diff_reload_button = gtk::Button::with_label("Reload diff");
+    diff_stale_banner.append(&diff_stale_label);
+    diff_stale_banner.append(&diff_reload_button);
+    diff_stale_banner.set_visible(false);
+    diff_page.append(&diff_stale_banner);
+    let diff_placeholder = gtk::Label::new(Some("Select a changed file to inspect its diff."));
+    diff_placeholder.set_wrap(true);
+    diff_placeholder.set_vexpand(true);
+    diff_page.append(&diff_placeholder);
+    let diff_viewer_host = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    diff_viewer_host.set_hexpand(true);
+    diff_viewer_host.set_vexpand(true);
+    diff_viewer_host.set_visible(false);
+    diff_page.append(&diff_viewer_host);
+    stack.add_named(&diff_page, Some("changes-diff"));
+
+    let center_tabs = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    center_tabs.set_margin_start(8);
+    center_tabs.set_margin_end(8);
+    let tabs_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .child(&center_tabs)
+        .build();
+    tabs_scroll.set_propagate_natural_height(true);
+    tabs_scroll.set_size_request(-1, 42);
+
     let content_title = adw::WindowTitle::new("agmux", "");
     let content_bar = adw::HeaderBar::new();
     content_bar.set_title_widget(Some(&content_title));
@@ -241,7 +325,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let main_pane = adw::ToolbarView::new();
     main_pane.add_top_bar(&content_bar);
     main_pane.add_top_bar(&context_pr);
-    main_pane.set_content(Some(&stack));
+    main_pane.add_top_bar(&tabs_scroll);
+    let center_content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    center_content.append(&stack);
+    main_pane.set_content(Some(&center_content));
+
+    let changes = changes_ui::ChangesSidebar::new(&main_pane);
+    content_bar.pack_end(&changes.toggle);
 
     // A plain paned keeps the sidebar drag-resizable; .sidebar-pane gives it the libadwaita look.
     sidebar_panel.add_css_class("sidebar-pane");
@@ -250,7 +340,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     content_bar.set_show_start_title_buttons(false);
     let split = gtk::Paned::new(gtk::Orientation::Horizontal);
     split.set_start_child(Some(&sidebar_panel));
-    split.set_end_child(Some(&main_pane));
+    split.set_end_child(Some(&changes.split));
     split.set_resize_start_child(false);
     split.set_shrink_start_child(false);
     split.set_shrink_end_child(false);
@@ -366,6 +456,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     ));
     narrow.add_setter(&sidebar_panel, "visible", Some(&false.to_value()));
     window.add_breakpoint(narrow);
+    let changes_narrow = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+        adw::BreakpointConditionLengthType::MaxWidth,
+        1100.0,
+        adw::LengthUnit::Sp,
+    ));
+    changes_narrow.add_setter(&changes.split, "collapsed", Some(&true.to_value()));
+    window.add_breakpoint(changes_narrow);
     let close_application = app.clone();
     window.connect_close_request(move |_| quit_on_main_window_close(|| close_application.quit()));
 
@@ -383,6 +480,26 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         list: list.clone(),
         sidebar_model: gio::ListStore::new::<gtk::StringObject>(),
         stack: stack.clone(),
+        center_tabs: center_tabs.clone(),
+        workspace_tabs: Rc::new(RefCell::new(crate::workspace_tabs::WorkspaceTabs::default())),
+        diff_page: diff_page.clone(),
+        diff_viewer_host: diff_viewer_host.clone(),
+        diff_placeholder: diff_placeholder.clone(),
+        diff_heading: diff_heading.clone(),
+        diff_stale_banner: diff_stale_banner.clone(),
+        diff_stale_label: diff_stale_label.clone(),
+        diff_reload_button: diff_reload_button.clone(),
+        diff_viewer: Rc::new(RefCell::new(None)),
+        diff_tab_data: Rc::new(RefCell::new(HashMap::new())),
+        diff_document_signatures: Rc::new(RefCell::new(HashMap::new())),
+        stale_diff_tabs: Rc::new(RefCell::new(HashSet::new())),
+        diff_view_states: Rc::new(RefCell::new(HashMap::new())),
+        diff_request_sequence: Rc::new(Cell::new(0)),
+        diff_current_request: Rc::new(RefCell::new(None)),
+        diff_rendered: Rc::new(RefCell::new(None)),
+        diff_error: Rc::new(RefCell::new(None)),
+        changes: changes.clone(),
+        changes_io: IoWorker::default(),
         overlay,
         new_shell_button: new_shell.clone(),
         content_title: content_title.clone(),
@@ -422,6 +539,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         sessions: Rc::new(RefCell::new(HashMap::new())),
         closing_sessions: Rc::new(RefCell::new(HashSet::new())),
         selected_session: Rc::new(RefCell::new(None)),
+        suppress_session_activation: Rc::new(Cell::new(false)),
         sequence: Rc::new(Cell::new(0)),
         control_server: Rc::new(RefCell::new(None)),
         io: IoWorker::default(),
@@ -480,24 +598,43 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let selected_workspace = workspace.clone();
     list.connect_row_selected(move |_, row| {
         let Some(row) = row else { return };
-        let id = row.widget_name();
-        selected_workspace
-            .selected_session
-            .borrow_mut()
-            .replace(id.to_string());
-        selected_workspace.stack.set_visible_child_name(&id);
-        selected_workspace.session_context_bar.set_visible(true);
-        selected_workspace.refresh_content_title();
-        if let Some(session) = selected_workspace.sessions.borrow().get(id.as_str()) {
-            session.terminal.grab_focus();
+        if !selected_workspace.suppress_session_activation.get() {
+            selected_workspace.activate_session(&row.widget_name());
         }
-        selected_workspace.acknowledge_session(id.as_str());
-        selected_workspace.render_history(Some(id.as_str()));
-        selected_workspace.refresh_selected_pr_context(id.as_str());
-        selected_workspace.search_button.set_sensitive(true);
-        selected_workspace.save_preference("selectedSessionId", serde_json::json!(id.as_str()));
-        selected_workspace.update_emacs_actions();
-        selected_workspace.update_claude_actions();
+    });
+    let activated_workspace = workspace.clone();
+    list.connect_row_activated(move |_, row| {
+        activated_workspace.activate_session(&row.widget_name());
+    });
+    let changes_workspace = workspace.clone();
+    changes
+        .refresh
+        .connect_clicked(move |_| changes_workspace.refresh_changes());
+    let reload_workspace = workspace.clone();
+    diff_reload_button.connect_clicked(move |_| reload_workspace.reload_active_diff());
+    let changes_workspace = workspace.clone();
+    changes.toggle.connect_toggled(move |toggle| {
+        changes_workspace
+            .save_preference("changesSidebarOpen", serde_json::json!(toggle.is_active()));
+        if toggle.is_active() {
+            changes_workspace.refresh_changes();
+        }
+    });
+    let base_workspace = workspace.clone();
+    changes
+        .base
+        .connect_selected_notify(move |_| base_workspace.select_changes_base());
+    let diff_workspace = workspace.clone();
+    diff_previous.connect_clicked(move |_| {
+        if let Some(viewer) = diff_workspace.diff_viewer.borrow().as_ref() {
+            viewer.move_to_change(false);
+        }
+    });
+    let diff_workspace = workspace.clone();
+    diff_next.connect_clicked(move |_| {
+        if let Some(viewer) = diff_workspace.diff_viewer.borrow().as_ref() {
+            viewer.move_to_change(true);
+        }
     });
 
     workspace.connect_launch_path_controls();
@@ -567,6 +704,19 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     workspace.connect_preferences();
     workspace.install_status_timers();
+    let changes_refresh_workspace = workspace.clone();
+    glib::timeout_add_local(Duration::from_secs(2), move || {
+        let visible = changes_refresh_workspace.changes.split.shows_sidebar()
+            || changes_refresh_workspace
+                .stack
+                .visible_child_name()
+                .as_deref()
+                == Some("changes-diff");
+        if visible && changes_refresh_workspace.window.is_active() {
+            changes_refresh_workspace.refresh_changes();
+        }
+        glib::ControlFlow::Continue
+    });
     workspace.bind_sidebar_model();
     workspace.install_menu_actions();
     workspace.install_shortcut_actions();
@@ -578,10 +728,25 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 impl Workspace {
     fn remove_session_view(&self, id: &str) {
         let was_selected = self.selected_session_id().as_deref() == Some(id);
+        let context_key = self
+            .workspace_tabs
+            .borrow()
+            .session_context(id)
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("session:{id}"));
         let Some(session) = self.sessions.borrow_mut().remove(id) else {
             return;
         };
+        let fallback = self.workspace_tabs.borrow_mut().remove_session(id);
         self.stack.remove(&session.page);
+        if self
+            .workspace_tabs
+            .borrow()
+            .context_tabs(&context_key)
+            .is_empty()
+        {
+            self.discard_diff_context(&context_key);
+        }
         self.rebuild_sidebar();
         if was_selected {
             let row = self
@@ -592,7 +757,19 @@ impl Workspace {
                 .map(|session| session.row.clone());
             if let Some(row) = row {
                 self.list.select_row(Some(&row));
+            } else if let Some(fallback_id) = fallback {
+                if let Some(row) = self
+                    .sessions
+                    .borrow()
+                    .get(&fallback_id)
+                    .map(|session| session.row.clone())
+                {
+                    self.list.select_row(Some(&row));
+                }
             } else {
+                if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+                    viewer.clear();
+                }
                 self.stack.set_visible_child_name(EMPTY_PAGE);
                 self.session_context_bar.set_visible(false);
                 self.selected_session.borrow_mut().take();
@@ -601,15 +778,39 @@ impl Workspace {
                 self.clear_selected_pr_context();
                 self.search_button.set_sensitive(false);
                 self.search_bar.set_search_mode(false);
+                self.changes
+                    .set_error("Select an agent to inspect its worktree");
+                self.invalidate_changes("empty", "Select an agent to inspect its worktree");
                 self.update_emacs_actions();
                 self.update_claude_actions();
                 self.save_preference("selectedSessionId", serde_json::Value::Null);
             }
         }
+        self.render_workspace_tabs();
+    }
+
+    fn discard_diff_context(&self, context: &str) {
+        let keys = self
+            .diff_tab_data
+            .borrow()
+            .keys()
+            .filter(|key| key.worktree_root == context)
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in keys {
+            let tab_id = crate::workspace_tabs::WorkspaceTabs::diff_tab_id(&key);
+            self.diff_tab_data.borrow_mut().remove(&key);
+            self.diff_document_signatures.borrow_mut().remove(&key);
+            self.stale_diff_tabs.borrow_mut().remove(&key);
+            self.diff_view_states.borrow_mut().remove(&tab_id);
+        }
     }
 
     /// The content header names the selected session, or the app when nothing is selected.
     pub(super) fn refresh_content_title(&self) {
+        if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
+            return;
+        }
         let name = self.selected_session_id().and_then(|id| {
             self.sessions
                 .borrow()

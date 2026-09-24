@@ -24,6 +24,10 @@ impl Workspace {
     }
 
     pub(super) fn handle_control_request(&self, pending: PendingRequest) {
+        if matches!(&pending.request.command, ControlCommand::UiOpenDiff(_)) {
+            self.open_diff_control(pending);
+            return;
+        }
         if let ControlCommand::SessionCreate(params) = &pending.request.command {
             self.launch_controlled_session(params.clone(), pending);
             return;
@@ -169,6 +173,15 @@ impl Workspace {
                         true
                     }
                     UiSurface::Search => false,
+                    UiSurface::Changes => {
+                        let already_open = self.changes.split.shows_sidebar();
+                        self.changes.split.set_show_sidebar(true);
+                        self.changes.toggle.set_active(true);
+                        if already_open {
+                            self.refresh_changes();
+                        }
+                        true
+                    }
                     UiSurface::Worktrees => {
                         if let Some(root) = self.preferred_project_root() {
                             self.open_worktrees_for_project(&root);
@@ -304,6 +317,7 @@ impl Workspace {
                 serde_json::json!({ "presets": self.claude_presets.borrow().presets }),
             ),
             ControlCommand::SessionCreate(_)
+            | ControlCommand::UiOpenDiff(_)
             | ControlCommand::AppearanceSet(_)
             | ControlCommand::ShortcutSet(_)
             | ControlCommand::ProjectSet(_)

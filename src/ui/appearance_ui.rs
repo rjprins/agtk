@@ -153,7 +153,7 @@ impl Workspace {
         );
     }
 
-    fn effective_terminal_theme(&self) -> ThemeKey {
+    pub(super) fn effective_terminal_theme(&self) -> ThemeKey {
         let preferences = self.appearance.borrow();
         if preferences.follow_system {
             resolve_system_theme(preferences.theme, self.style_manager.is_dark())

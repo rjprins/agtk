@@ -13,10 +13,11 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 
 ## Current features
 
-- One compact native window with project and worktree grouped sessions in the sidebar
+- One compact native window with individual agent sessions grouped by project in the sidebar
 - Project headers with launch, pin, resume, worktree, and pull-request actions
 - Selectable session rows with explicit rename and same-worktree launch buttons
 - Embedded VTE terminals with true color, selection-to-clipboard, normal copy and paste, search, and live prompt history navigation
+- Read-only worktree Changes sidebar with staged, unstaged, untracked, branch, and commit file diffs in a unified Monaco viewer
 - Shell, Codex, Claude, Gemini, and custom launches with exact working-directory and worktree context
 - Independent PTY hosts with bounded detached replay and explicit process-group shutdown
 - Persisted session metadata, ordering, project pins, collapsed groups, launch preferences, terminal themes, fonts, and keyboard overrides
@@ -25,14 +26,14 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Recent Codex and Claude conversation discovery, preview, direct restore, and busy, waiting, ready, and idle agent states from Claude hooks and screen reading
 - Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
 - Emacs Magit and branch-review integration for the selected session
-- Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in Emacs at that line, or a URL to open it in the browser. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select; Ctrl+click opens immediately.
+- Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in Emacs at that line, or a URL to open it in the browser. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select. Ctrl+click opens immediately.
 - Azure DevOps PR attention, exact acknowledgement, source-worktree matching, manual review launch, and per-project opt-in auto-review
 - App-only PNG capture and structural UI inspection for isolated agent-driven testing
 - Local CLI and MCP control without exposing a network listener
 
 ## Requirements
 
-The current build targets recent GTK APIs. The tested Arch packages are `gtk4`, `libadwaita`, `vte4`, and `sqlite`, plus a Rust toolchain. The observed baseline is GTK 4.22, libadwaita 1.9, VTE 0.84, and Rust 1.98.
+The current build targets recent GTK APIs. The tested Arch packages are `gtk4`, `libadwaita`, `vte4`, and `sqlite`, plus a Rust toolchain. The observed baseline is GTK 4.22, libadwaita 1.9, VTE 0.84, and Rust 1.98. Building the bundled Changes viewer also requires Node.js and npm when viewer assets need to be prepared. Node.js is not needed when running the built application.
 
 Azure PR support additionally needs the Azure CLI with the Azure DevOps extension and an existing local sign-in. Emacs actions need `emacsclient`. Codex and Claude need their respective command-line tools.
 
@@ -123,6 +124,8 @@ agmuxctl session text SESSION_ID --lines 200
 agmuxctl ui inspect
 agmuxctl ui capture
 agmuxctl ui show pull-requests
+agmuxctl ui show changes
+agmuxctl ui diff SESSION_ID --scope unstaged --path src/main.rs
 agmuxctl pr list /absolute/project
 agmuxctl pr review /absolute/project 1234
 agmuxctl claude presets
@@ -166,7 +169,7 @@ An MCP client can start the adapter as a local stdio server:
 }
 ```
 
-The tools cover sessions, terminal input and snapshots, worktrees, recent provider sessions, Claude presets, Emacs actions, PR workflows, readiness callbacks, UI structure, and app-only PNG capture. The adapter never captures the desktop.
+The tools cover sessions, terminal input and snapshots, read-only diff inspection, worktrees, recent provider sessions, Claude presets, Emacs actions, PR workflows, readiness callbacks, UI structure, and app-only PNG capture. The adapter never captures the desktop.
 
 ## Verification
 
