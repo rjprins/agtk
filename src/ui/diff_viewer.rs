@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Once;
 
@@ -62,6 +61,7 @@ enum ViewerCommand {
         query: String,
         next: bool,
     },
+    Copy,
     PreviousChange,
     NextChange,
     SaveViewState,
@@ -95,6 +95,8 @@ impl DiffViewer {
         let network_session = NetworkSession::new_ephemeral();
         network_session.connect_download_started(|_, download| download.cancel());
         let web_view = WebView::builder()
+            .hexpand(true)
+            .vexpand(true)
             .web_context(&context)
             .network_session(&network_session)
             .user_content_manager(&content_manager)
@@ -174,10 +176,6 @@ impl DiffViewer {
         self.web_view.clone().upcast()
     }
 
-    pub(super) fn is_ready(&self) -> bool {
-        self.state.borrow().ready
-    }
-
     pub(super) fn show_diff(&self, diff: &Value) -> Result<(), String> {
         let json = serde_json::to_string(diff).map_err(|error| error.to_string())?;
         if json.len() > MAX_DIFF_BYTES {
@@ -196,6 +194,10 @@ impl DiffViewer {
             query: query.to_owned(),
             next,
         });
+    }
+
+    pub(super) fn copy(&self) {
+        self.enqueue(ViewerCommand::Copy);
     }
 
     pub(super) fn move_to_change(&self, next: bool) {
@@ -222,26 +224,6 @@ impl DiffViewer {
         });
     }
 
-    pub(super) fn snapshot_to_png(
-        &self,
-        path: PathBuf,
-        completed: impl FnOnce(Result<(), String>) + 'static,
-    ) {
-        self.web_view.snapshot(
-            webkit6::SnapshotRegion::Visible,
-            webkit6::SnapshotOptions::NONE,
-            None::<&gio::Cancellable>,
-            move |result| {
-                let result = result
-                    .map_err(|error| error.to_string())
-                    .and_then(|texture| {
-                        texture.save_to_png(path).map_err(|error| error.to_string())
-                    });
-                completed(result);
-            },
-        );
-    }
-
     fn enqueue(&self, command: ViewerCommand) {
         if self.state.borrow().ready {
             call_command(&self.web_view, command);
@@ -262,6 +244,7 @@ impl DiffViewer {
                 state.queued.push_back(command);
             }
             ViewerCommand::Find { .. }
+            | ViewerCommand::Copy
             | ViewerCommand::PreviousChange
             | ViewerCommand::NextChange
             | ViewerCommand::SaveViewState => state.queued.push_back(command),
@@ -286,7 +269,7 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             let args = glib::VariantDict::new(None);
             args.insert("diffJson", json);
             (
-                "window.agmuxDiffViewer.showDiff(JSON.parse(diffJson))",
+                "try { const data = JSON.parse(diffJson); window.agmuxDiffViewer.showDiff(data); } catch (error) { let requestId = null; try { requestId = JSON.parse(diffJson).requestId; } catch (_) {} window.webkit?.messageHandlers?.agmux?.postMessage({ type: 'error', requestId, message: String(error).slice(0, 2048) }); }",
                 Some(args.end()),
             )
         }
@@ -297,6 +280,7 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             args.insert("next", next);
             ("window.agmuxDiffViewer.find(query, next)", Some(args.end()))
         }
+        ViewerCommand::Copy => ("window.agmuxDiffViewer.copySelection()", None),
         ViewerCommand::PreviousChange => ("window.agmuxDiffViewer.moveToChange(false)", None),
         ViewerCommand::NextChange => ("window.agmuxDiffViewer.moveToChange(true)", None),
         ViewerCommand::SaveViewState => ("window.agmuxDiffViewer.saveViewState()", None),

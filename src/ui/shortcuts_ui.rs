@@ -70,11 +70,20 @@ impl Workspace {
         });
 
         self.add_action("copy", true, |workspace| {
+            if workspace.stack.visible_child_name().as_deref() == Some("changes-diff") {
+                if let Some(viewer) = workspace.diff_viewer.borrow().as_ref() {
+                    viewer.copy();
+                }
+                return;
+            }
             if let Some(terminal) = workspace.selected_terminal() {
                 terminal.copy_clipboard_format(vte::Format::Text);
             }
         });
         self.add_action("paste", true, |workspace| {
+            if workspace.stack.visible_child_name().as_deref() == Some("changes-diff") {
+                return;
+            }
             if let Some(terminal) = workspace.selected_terminal() {
                 if clipboard_has_image(&terminal) {
                     // VTE's clipboard action only requests text. Let agent TUIs
@@ -86,7 +95,9 @@ impl Workspace {
             }
         });
         self.add_action("search", true, |workspace| {
-            if workspace.selected_session_id().is_some() {
+            if workspace.stack.visible_child_name().as_deref() == Some("changes-diff") {
+                workspace.open_search();
+            } else if workspace.selected_session_id().is_some() {
                 workspace.open_search();
             }
         });
@@ -328,6 +339,9 @@ impl Workspace {
     }
 
     fn selected_terminal(&self) -> Option<vte::Terminal> {
+        if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
+            return None;
+        }
         let id = self.selected_session_id()?;
         self.sessions
             .borrow()

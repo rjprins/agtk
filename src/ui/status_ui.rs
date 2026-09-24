@@ -40,6 +40,7 @@ impl Workspace {
         self.window.connect_is_active_notify(move |window| {
             if window.is_active()
                 && let Some(id) = workspace.selected_session_id()
+                && workspace.stack.visible_child_name().as_deref() == Some(id.as_str())
             {
                 workspace.acknowledge_session(&id);
             }
@@ -153,6 +154,9 @@ impl Workspace {
 
     /// The user has seen the session, so a finished turn no longer needs attention.
     pub(super) fn acknowledge_session(&self, id: &str) {
+        if self.stack.visible_child_name().as_deref() != Some(id) {
+            return;
+        }
         let is_ready = self
             .sessions
             .borrow()
@@ -165,7 +169,9 @@ impl Workspace {
 
     fn transition_session(&self, id: &str, next: SessionState) {
         // A turn that finishes in front of the user is already viewed.
-        let viewing = self.selected_session_id().as_deref() == Some(id) && self.window.is_active();
+        let viewing = self.selected_session_id().as_deref() == Some(id)
+            && self.stack.visible_child_name().as_deref() == Some(id)
+            && self.window.is_active();
         let next = if next == SessionState::Ready && viewing {
             SessionState::Idle
         } else {

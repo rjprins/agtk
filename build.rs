@@ -27,7 +27,10 @@ fn main() {
                 "The embedded Changes viewer is missing. Run scripts/build-viewer.sh before building agmux-native."
             )
         });
-    for path in source_files.iter().chain(walk_files(&viewer.join("src")).iter()) {
+    for path in source_files
+        .iter()
+        .chain(walk_files(&viewer.join("src")).iter())
+    {
         if modified(path).is_some_and(|time| time > stamp_time) {
             panic!(
                 "The embedded Changes viewer is stale because {} changed. Run scripts/build-viewer.sh before building agmux-native.",
@@ -60,9 +63,7 @@ fn main() {
             .to_string_lossy()
             .replace('\\', "/");
         let alias = xml_escape(&alias);
-        xml.push_str(&format!(
-            "    <file alias=\"{alias}\">{alias}</file>\n"
-        ));
+        xml.push_str(&format!("    <file alias=\"{alias}\">{alias}</file>\n"));
     }
     xml.push_str("  </gresource>\n</gresources>\n");
     fs::write(&manifest, xml).expect("could not write generated viewer resource manifest");
@@ -75,7 +76,9 @@ fn main() {
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
-    fs::metadata(path).and_then(|metadata| metadata.modified()).ok()
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
 }
 
 fn walk_files(root: &Path) -> Vec<PathBuf> {

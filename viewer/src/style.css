@@ -47,6 +47,12 @@ body {
   text-overflow: ellipsis;
 }
 
+#metadata {
+  color: #666666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #editor {
   display: none;
   min-width: 0;
@@ -77,6 +83,7 @@ body[data-theme='dark'] #diff-heading {
 }
 
 body[data-theme='dark'] #version-labels,
+body[data-theme='dark'] #metadata,
 body[data-theme='dark'] #empty-state {
   color: #aaaaaa;
 }

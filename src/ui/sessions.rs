@@ -193,6 +193,14 @@ impl Workspace {
                     .preference("claudeModelPresets")?
                     .map(crate::claude_presets::ClaudePresetPreferences::from_value_lossy)
                     .unwrap_or_default();
+                let changes_sidebar_open = store
+                    .preference("changesSidebarOpen")?
+                    .and_then(|value| value.as_bool());
+                let changes_base_refs = store
+                    .preference("changesBaseRefs")?
+                    .map(serde_json::from_value::<std::collections::HashMap<String, String>>)
+                    .transpose()?
+                    .unwrap_or_default();
                 let mut records = store.sessions()?;
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
@@ -251,6 +259,8 @@ impl Workspace {
                     quick_launch,
                     pr_preferences,
                     claude_presets,
+                    changes_sidebar_open,
+                    changes_base_refs,
                     recovered,
                 ))
             },
@@ -265,6 +275,8 @@ impl Workspace {
                     quick_launch,
                     pr_preferences,
                     claude_presets,
+                    changes_sidebar_open,
+                    changes_base_refs,
                     recovered,
                 )) => {
                     *workspace.store.borrow_mut() = Some(store);
@@ -276,6 +288,11 @@ impl Workspace {
                     *workspace.pr_preferences.borrow_mut() = pr_preferences;
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
+                    workspace.changes.state.borrow_mut().base_ref_by_context = changes_base_refs;
+                    if let Some(open) = changes_sidebar_open {
+                        workspace.changes.split.set_show_sidebar(open);
+                        workspace.changes.toggle.set_active(open);
+                    }
                     let mut last = None;
                     for (record, connected) in recovered {
                         let (control, attachment) =
@@ -893,6 +910,18 @@ impl Workspace {
         row.set_widget_name(&id);
         row.set_focus_on_click(false);
         focus_terminal_on_row_activation(&row, &terminal);
+        let repeat_click = gtk::GestureClick::new();
+        repeat_click.set_button(1);
+        let repeat_workspace = self.clone();
+        let repeat_id = id.clone();
+        repeat_click.connect_pressed(move |_, _, _, _| {
+            if repeat_workspace.selected_session_id().as_deref() == Some(repeat_id.as_str())
+                && repeat_workspace.stack.visible_child_name().as_deref() == Some("changes-diff")
+            {
+                repeat_workspace.activate_session(&repeat_id);
+            }
+        });
+        row.add_controller(repeat_click);
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         let kind = provider_icons::session_icon(record.kind, &record.program);
         kind.set_valign(gtk::Align::Center);
@@ -981,6 +1010,7 @@ impl Workspace {
                 control,
             },
         );
+        self.attach_workspace_session(&id);
         self.apply_session_state(&id);
         self.rebuild_sidebar();
         if select {

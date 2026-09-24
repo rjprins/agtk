@@ -42,6 +42,7 @@ self.MonacoEnvironment = {
 const editorElement = document.querySelector('#editor');
 const fileNameElement = document.querySelector('#file-name');
 const versionLabelsElement = document.querySelector('#version-labels');
+const metadataElement = document.querySelector('#metadata');
 const emptyStateElement = document.querySelector('#empty-state');
 
 const diffEditor = monaco.editor.createDiffEditor(editorElement, {
@@ -86,6 +87,7 @@ function clearDiff() {
   findState = { query: '', index: -1 };
   fileNameElement.textContent = 'No file selected';
   versionLabelsElement.textContent = '';
+  metadataElement.textContent = '';
   editorElement.classList.remove('visible');
   emptyStateElement.hidden = false;
 }
@@ -99,6 +101,7 @@ function showDiff({
   originalLabel,
   modifiedLabel,
   language,
+  metadata,
   viewState,
 }) {
   if (
@@ -132,6 +135,7 @@ function showDiff({
   diffEditor.setModel({ original: originalModel, modified: modifiedModel });
   fileNameElement.textContent = path;
   versionLabelsElement.textContent = `${originalLabel || 'Original'} → ${modifiedLabel || 'Current'}`;
+  metadataElement.textContent = Array.isArray(metadata) ? metadata.join(' · ') : '';
   editorElement.classList.add('visible');
   emptyStateElement.hidden = true;
   if (viewState) diffEditor.restoreViewState(viewState);
@@ -193,6 +197,11 @@ function find(query, next) {
   editor.focus();
 }
 
+function copySelection() {
+  const editor = diffEditor.getModifiedEditor();
+  editor.getAction('editor.action.clipboardCopyAction')?.run();
+}
+
 function setAppearance(theme, fontFamily, fontSize) {
   const isDark = theme === 'dark';
   document.body.dataset.theme = isDark ? 'dark' : 'light';
@@ -207,6 +216,7 @@ function setAppearance(theme, fontFamily, fontSize) {
 
 window.agmuxDiffViewer = Object.freeze({
   clearDiff,
+  copySelection,
   find,
   moveToChange,
   saveViewState: sendViewState,

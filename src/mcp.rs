@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json};
 
 use crate::control::{
     CloseSessionParams, ControlClient, ControlCommand, ControlRequest, CreateSessionParams,
-    PROTOCOL_VERSION, ResponseBody, SessionIdParams, WorktreeListParams,
+    PROTOCOL_VERSION, ResponseBody, SessionIdParams, UiOpenDiffParams, WorktreeListParams,
 };
 use crate::providers::AgentProvider;
 
@@ -229,6 +229,7 @@ impl<B: ControlBackend> McpServer<B> {
                 })
             }
             "select_session" => ControlCommand::SessionSelect(parse_args(arguments)?),
+            "open_diff" => ControlCommand::UiOpenDiff(parse_args::<UiOpenDiffParams>(arguments)?),
             "kill_session" => {
                 let params: SessionIdParams = parse_args(arguments)?;
                 ControlCommand::SessionClose(CloseSessionParams {
@@ -569,6 +570,30 @@ fn tool_definitions() -> Vec<Value> {
             "Select session",
             "Show and focus one exact session.",
             schema(&[("sessionId", string())], &["sessionId"]),
+        ),
+        tool(
+            "open_diff",
+            "Open file diff",
+            "Open a read-only diff from the selected agent worktree in agmux.",
+            schema(
+                &[
+                    ("sessionId", string()),
+                    (
+                        "scope",
+                        enum_values(&[
+                            "all",
+                            "staged",
+                            "unstaged",
+                            "untracked",
+                            "committed",
+                            "commit",
+                        ]),
+                    ),
+                    ("path", string()),
+                    ("commitId", string()),
+                ],
+                &["sessionId", "scope", "path"],
+            ),
         ),
         tool(
             "kill_session",
