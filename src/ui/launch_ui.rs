@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 const PROJECT_PLACEHOLDER: &str = "Search projects or type a path…";
 const WORKTREE_PLACEHOLDER: &str = "Search worktrees…";
+// One width for every location control so their edges line up.
+const LOCATION_CONTROL_WIDTH: i32 = 320;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WorktreeModePresentation {
@@ -36,14 +38,14 @@ pub(super) struct LaunchDialog {
     pub(super) agent_choices: gtk::StringList,
     pub(super) agent_buttons: Rc<Vec<(SessionKind, gtk::ToggleButton)>>,
     pub(super) agent_options: gtk::Stack,
-    pub(super) claude_permission: gtk::DropDown,
-    pub(super) claude_danger: gtk::CheckButton,
-    pub(super) codex_approval: gtk::DropDown,
-    pub(super) codex_sandbox: gtk::DropDown,
-    pub(super) codex_full_auto: gtk::CheckButton,
-    pub(super) codex_bypass: gtk::CheckButton,
-    pub(super) gemini_approval: gtk::DropDown,
-    pub(super) gemini_yolo: gtk::CheckButton,
+    pub(super) claude_permission: adw::ComboRow,
+    pub(super) claude_danger: adw::SwitchRow,
+    pub(super) codex_approval: adw::ComboRow,
+    pub(super) codex_sandbox: adw::ComboRow,
+    pub(super) codex_full_auto: adw::SwitchRow,
+    pub(super) codex_bypass: adw::SwitchRow,
+    pub(super) gemini_approval: adw::ComboRow,
+    pub(super) gemini_yolo: adw::SwitchRow,
     pub(super) cwd: gtk::Entry,
     pub(super) project: gtk::Entry,
     pub(super) project_dropdown: gtk::DropDown,
@@ -120,13 +122,13 @@ impl LaunchDialog {
         claude_danger.set_active(true);
         codex_full_auto.set_active(true);
         let bypass = codex_bypass.clone();
-        codex_full_auto.connect_toggled(move |toggle| {
+        codex_full_auto.connect_active_notify(move |toggle| {
             if toggle.is_active() {
                 bypass.set_active(false);
             }
         });
         let full_auto = codex_full_auto.clone();
-        codex_bypass.connect_toggled(move |toggle| {
+        codex_bypass.connect_active_notify(move |toggle| {
             if toggle.is_active() {
                 full_auto.set_active(false);
             }
@@ -136,34 +138,20 @@ impl LaunchDialog {
             .vhomogeneous(false)
             .build();
         agent_options.add_named(
-            &option_list(&[
-                dropdown_row("Permission mode", &claude_permission),
-                check_row(
-                    "Skip permission prompts",
-                    "--dangerously-skip-permissions",
-                    &claude_danger,
-                ),
-            ]),
+            &option_list(&[claude_permission.upcast_ref(), claude_danger.upcast_ref()]),
             Some("claude"),
         );
         agent_options.add_named(
             &option_list(&[
-                dropdown_row("Ask for approval", &codex_approval),
-                dropdown_row("Sandbox", &codex_sandbox),
-                check_row("Full auto", "--full-auto", &codex_full_auto),
-                check_row(
-                    "Bypass approvals and sandbox",
-                    "--dangerously-bypass-approvals-and-sandbox",
-                    &codex_bypass,
-                ),
+                codex_approval.upcast_ref(),
+                codex_sandbox.upcast_ref(),
+                codex_full_auto.upcast_ref(),
+                codex_bypass.upcast_ref(),
             ]),
             Some("codex"),
         );
         agent_options.add_named(
-            &option_list(&[
-                dropdown_row("Approval mode", &gemini_approval),
-                check_row("YOLO", "--yolo", &gemini_yolo),
-            ]),
+            &option_list(&[gemini_approval.upcast_ref(), gemini_yolo.upcast_ref()]),
             Some("gemini"),
         );
         agent_options.add_named(&gtk::Box::new(gtk::Orientation::Vertical, 0), Some("shell"));
@@ -187,11 +175,8 @@ impl LaunchDialog {
             project_completion_items.clone(),
             true,
         );
-        let project_control = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        project_control.add_css_class("linked");
-        project_control.set_valign(gtk::Align::Center);
-        project_control.append(&project);
-        project_control.append(&project_dropdown);
+        let project_control =
+            editable_choice_control(&project, &project_dropdown, "Choose a project");
         let project_row = adw::ActionRow::builder().title("Project").build();
         project_row.add_suffix(&project_control);
 
@@ -240,8 +225,7 @@ impl LaunchDialog {
             &base_branch_dropdown,
             "Choose the base branch",
         );
-        base_control.set_valign(gtk::Align::Center);
-        branch.set_valign(gtk::Align::Center);
+        fit_location_control(&branch);
         let new_worktree_mode = adw::ActionRow::builder()
             .title("New worktree")
             .activatable_widget(&new_worktree_radio)
@@ -342,33 +326,36 @@ impl LaunchDialog {
     }
 }
 
-fn option_list(rows: &[adw::ActionRow]) -> gtk::ListBox {
+fn option_list(rows: &[&gtk::ListBoxRow]) -> gtk::ListBox {
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::None);
     list.add_css_class("boxed-list");
     for row in rows {
-        list.append(row);
+        list.append(*row);
     }
     list
 }
 
-fn dropdown_row(title: &str, dropdown: &gtk::DropDown) -> adw::ActionRow {
-    dropdown.set_valign(gtk::Align::Center);
-    dropdown.set_hexpand(false);
-    let row = adw::ActionRow::builder().title(title).build();
-    row.add_suffix(dropdown);
-    row
-}
-
-fn check_row(title: &str, flag: &str, check: &gtk::CheckButton) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
+fn combo_row(title: &str, flag: &str, values: &[&str]) -> adw::ComboRow {
+    adw::ComboRow::builder()
         .title(title)
         .subtitle(flag)
-        .activatable_widget(check)
-        .build();
-    check.set_valign(gtk::Align::Center);
-    row.add_prefix(check);
-    row
+        .model(&gtk::StringList::new(values))
+        .enable_search(true)
+        .build()
+}
+
+fn switch_row(title: &str, flag: &str) -> adw::SwitchRow {
+    adw::SwitchRow::builder()
+        .title(title)
+        .subtitle(flag)
+        .build()
+}
+
+fn fit_location_control(widget: &impl IsA<gtk::Widget>) {
+    widget.set_size_request(LOCATION_CONTROL_WIDTH, -1);
+    widget.set_hexpand(false);
+    widget.set_valign(gtk::Align::Center);
 }
 
 fn path_entry(label: &str, placeholder: &str, width: i32) -> gtk::Entry {
@@ -1160,7 +1147,7 @@ fn parse_arguments(entry: &impl IsA<gtk::Editable>) -> Result<Vec<String>, Strin
         .map_err(|error| format!("Arguments must be a JSON string array: {error}"))
 }
 
-fn dropdown_value(dropdown: &gtk::DropDown) -> String {
+fn dropdown_value(dropdown: &adw::ComboRow) -> String {
     dropdown
         .selected_item()
         .and_then(|item| item.downcast::<gtk::StringObject>().ok())
@@ -1168,7 +1155,7 @@ fn dropdown_value(dropdown: &gtk::DropDown) -> String {
         .unwrap_or_default()
 }
 
-fn set_dropdown_value(dropdown: &gtk::DropDown, value: Option<&Value>) {
+fn set_dropdown_value(dropdown: &adw::ComboRow, value: Option<&Value>) {
     let Some(value) = value.and_then(Value::as_str) else {
         return;
     };
@@ -1185,7 +1172,7 @@ fn set_dropdown_value(dropdown: &gtk::DropDown, value: Option<&Value>) {
     }
 }
 
-fn set_check_value(check: &gtk::CheckButton, value: Option<&Value>) {
+fn set_check_value(check: &adw::SwitchRow, value: Option<&Value>) {
     if let Some(value) = value.and_then(Value::as_bool) {
         check.set_active(value);
     }
@@ -1257,7 +1244,9 @@ fn editable_choice_control(
 
     let control = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     control.add_css_class("linked");
-    control.set_hexpand(true);
+    fit_location_control(&control);
+    entry.set_hexpand(true);
+    entry.set_width_chars(1);
     control.append(entry);
     control.append(dropdown);
     control
@@ -1321,39 +1310,45 @@ fn install_choice_completion(
     });
 }
 
-fn launch_dropdown(values: &[&str]) -> gtk::DropDown {
-    let model = gtk::StringList::new(values);
-    let dropdown = gtk::DropDown::new(Some(model), None::<&gtk::Expression>);
-    dropdown.set_enable_search(true);
-    dropdown.set_hexpand(true);
-    dropdown
-}
-
-fn claude_launch_options() -> (gtk::DropDown, gtk::CheckButton) {
+fn claude_launch_options() -> (adw::ComboRow, adw::SwitchRow) {
     (
-        launch_dropdown(&["default", "acceptEdits", "bypassPermissions", "plan"]),
-        gtk::CheckButton::new(),
+        combo_row(
+            "Permission mode",
+            "--permission-mode",
+            &["default", "acceptEdits", "bypassPermissions", "plan"],
+        ),
+        switch_row("Skip permission prompts", "--dangerously-skip-permissions"),
     )
 }
 
-fn codex_launch_options() -> (
-    gtk::DropDown,
-    gtk::DropDown,
-    gtk::CheckButton,
-    gtk::CheckButton,
-) {
+fn codex_launch_options() -> (adw::ComboRow, adw::ComboRow, adw::SwitchRow, adw::SwitchRow) {
     (
-        launch_dropdown(&["untrusted", "on-failure", "on-request", "never"]),
-        launch_dropdown(&["read-only", "workspace-write", "danger-full-access"]),
-        gtk::CheckButton::new(),
-        gtk::CheckButton::new(),
+        combo_row(
+            "Ask for approval",
+            "--ask-for-approval",
+            &["untrusted", "on-failure", "on-request", "never"],
+        ),
+        combo_row(
+            "Sandbox",
+            "--sandbox",
+            &["read-only", "workspace-write", "danger-full-access"],
+        ),
+        switch_row("Full auto", "--full-auto"),
+        switch_row(
+            "Bypass approvals and sandbox",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ),
     )
 }
 
-fn gemini_launch_options() -> (gtk::DropDown, gtk::CheckButton) {
+fn gemini_launch_options() -> (adw::ComboRow, adw::SwitchRow) {
     (
-        launch_dropdown(&["default", "auto_edit", "yolo", "plan"]),
-        gtk::CheckButton::new(),
+        combo_row(
+            "Approval mode",
+            "--approval-mode",
+            &["default", "auto_edit", "yolo", "plan"],
+        ),
+        switch_row("YOLO", "--yolo"),
     )
 }
 
@@ -1362,7 +1357,6 @@ fn searchable_path_dropdown(model: &gtk::StringList) -> gtk::DropDown {
     dropdown.set_enable_search(true);
     dropdown.set_show_arrow(true);
     dropdown.set_tooltip_text(Some("Search known paths or choose one"));
-    dropdown.set_size_request(220, -1);
     dropdown
 }
 
