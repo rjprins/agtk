@@ -2,6 +2,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -13,6 +14,7 @@ pub struct SessionLaunchPlan {
     pub kind: SessionKind,
     pub program: PathBuf,
     pub args: Vec<String>,
+    pub path: OsString,
     pub cwd: Option<PathBuf>,
     pub name: Option<String>,
     pub initial_input: Option<String>,
@@ -54,7 +56,14 @@ impl SessionLaunchPlan {
                 "custom sessions require an executable".to_owned(),
             ));
         }
-        let program = resolve_executable(&command, cwd.as_deref()).ok_or_else(|| {
+        let path = interactive_shell_path()?;
+        let program = resolve_executable_from(
+            &command,
+            cwd.as_deref(),
+            Some(&path),
+            env::var_os("HOME").as_deref(),
+        )
+        .ok_or_else(|| {
             LaunchPlanError(format!(
                 "executable was not found or is not executable: {command}"
             ))
@@ -73,6 +82,7 @@ impl SessionLaunchPlan {
             kind: params.kind,
             program,
             args: params.args,
+            path,
             cwd,
             name: params.name,
             initial_input: params.initial_input,
@@ -191,6 +201,51 @@ impl fmt::Display for LaunchPlanError {
 }
 
 impl std::error::Error for LaunchPlanError {}
+
+fn interactive_shell_path() -> Result<OsString, LaunchPlanError> {
+    let Some(shell) = env::var_os("SHELL") else {
+        return env::var_os("PATH")
+            .ok_or_else(|| LaunchPlanError("PATH is unavailable".to_owned()));
+    };
+    let shell_name = Path::new(&shell)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let command = match shell_name {
+        "zsh" | "bash" => r#"printf '%s\n' "$PATH""#,
+        "fish" => "string join : $PATH",
+        _ => {
+            return env::var_os("PATH")
+                .ok_or_else(|| LaunchPlanError("PATH is unavailable".to_owned()));
+        }
+    };
+    let output = Command::new(&shell)
+        .args(["-lic", command])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_err(|error| {
+            LaunchPlanError(format!("could not read PATH from login shell: {error}"))
+        })?;
+    if !output.status.success() {
+        return Err(LaunchPlanError(
+            "login shell failed while reading PATH".to_owned(),
+        ));
+    }
+    let path = output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .filter(|line| {
+            let value = OsString::from_vec(line.to_vec());
+            env::split_paths(&value).all(|part| part.is_absolute()) && line.contains(&b':')
+        })
+        .next_back()
+        .map(|line| OsString::from_vec(line.to_vec()))
+        .filter(|path| !env::split_paths(path).next().is_none())
+        .ok_or_else(|| LaunchPlanError("login shell did not return a valid PATH".to_owned()))?;
+    Ok(path)
+}
 
 fn resolve_executable(command: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     resolve_executable_from(

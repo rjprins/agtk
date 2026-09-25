@@ -418,6 +418,7 @@ impl Workspace {
                 record.kind = plan.kind;
                 record.program = plan.program;
                 record.args = plan.args;
+                let session_path = plan.path;
                 record.cwd = plan.cwd;
                 record.project_root = plan.project_root;
                 record.worktree_path = plan.worktree_path;
@@ -448,6 +449,7 @@ impl Workspace {
                         .env("AGMUX_INSTANCE", paths.name().as_str())
                         .env("AGMUX_SESSION_ID", &id)
                         .env("AGMUX_CONTROL_SOCKET", paths.control_socket());
+                    command.env("PATH", &session_path);
                     if let Some(cwd) = &record.cwd {
                         command.current_dir(cwd);
                     }
