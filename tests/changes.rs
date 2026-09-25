@@ -1,0 +1,103 @@
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+use agmux_native::changes::{DiffDocumentResult, read_changes_snapshot, read_diff_document};
+
+fn git(root: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn repository() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    for content in ["original\n", "committed\n"] {
+        fs::write(dir.path().join("file.txt"), content).unwrap();
+        git(dir.path(), &["add", "."]);
+        git(
+            dir.path(),
+            &["-c", "commit.gpgsign=false", "commit", "-m", "Change"],
+        );
+    }
+    dir
+}
+
+#[test]
+fn commits_ago_compares_ancestor_to_worktree_including_uncommitted_files() {
+    let dir = repository();
+    let root = dir.path();
+    fs::write(root.join("file.txt"), "staged\n").unwrap();
+    git(root, &["add", "."]);
+    fs::write(root.join("file.txt"), "working\n").unwrap();
+    fs::write(root.join("new.txt"), "untracked\n").unwrap();
+    let snapshot = read_changes_snapshot(root, Some("HEAD~1"), 0, 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        snapshot.context.merge_base_oid.as_deref(),
+        Some(git(root, &["rev-parse", "HEAD~1"]).as_str())
+    );
+    assert_eq!(snapshot.commits.len(), 1);
+    assert_eq!(snapshot.staged.len(), 1);
+    assert_eq!(snapshot.unstaged.len(), 1);
+    assert_eq!(snapshot.untracked.len(), 1);
+    assert_eq!(snapshot.all_changes.len(), 2);
+    let file = snapshot
+        .all_changes
+        .iter()
+        .find(|file| file.new_path.as_deref() == Some(b"file.txt"))
+        .unwrap();
+    let DiffDocumentResult::Text(document) = read_diff_document(&snapshot.context, file).unwrap()
+    else {
+        panic!("expected a text comparison");
+    };
+    assert_eq!(document.original, "original\n");
+    assert_eq!(document.modified, "working\n");
+
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "Next change"],
+    );
+    let snapshot = read_changes_snapshot(root, Some("HEAD~2"), 1, 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.commits.len(), 2);
+    assert_eq!(
+        snapshot.context.merge_base_oid.as_deref(),
+        Some(git(root, &["rev-parse", "HEAD~2"]).as_str())
+    );
+    assert_eq!(snapshot.branch_changes.len(), 2);
+}
+
+#[test]
+fn unavailable_ancestor_keeps_selection_instead_of_falling_back_to_main() {
+    let dir = repository();
+    let snapshot = read_changes_snapshot(dir.path(), Some("HEAD~10"), 0, 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.context.base_ref.as_deref(), Some("HEAD~10"));
+    assert!(snapshot.context.base_oid.is_none());
+    assert!(snapshot.context.merge_base_oid.is_none());
+    assert!(
+        snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("10 commits ago"))
+    );
+    assert!(snapshot.commits.is_empty());
+}

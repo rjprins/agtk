@@ -31,6 +31,12 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - App-only PNG capture and structural UI inspection for isolated agent-driven testing
 - Local CLI and MCP control without exposing a network listener
 
+In the Changes sidebar, choose **Compared with → Commits ago…** and enter a
+positive count to compare the current worktree with `HEAD~N`. The count defaults
+to 1 and is remembered across restarts. This follows first-parent history and
+includes staged, unstaged, and untracked changes under **All changes**. If that
+much history is unavailable, the sidebar shows a message so you can lower the count.
+
 ## Requirements
 
 The current build targets recent GTK APIs. The tested Arch packages are `gtk4`, `libadwaita`, `vte4`, and `sqlite`, plus a Rust toolchain. The observed baseline is GTK 4.22, libadwaita 1.9, VTE 0.84, and Rust 1.98. Building the bundled Changes viewer also requires Node.js and npm when viewer assets need to be prepared. Node.js is not needed when running the built application.

@@ -2,7 +2,7 @@ mod base;
 mod content;
 mod git;
 
-pub use base::{resolve_worktree_context, validate_base_ref};
+pub use base::{commits_ago_count, resolve_worktree_context, validate_base_ref};
 pub use content::{DiffDocumentResult, DiffPlaceholder, display_changed_path, read_diff_document};
 pub use git::{
     ChangeStatus, DiffScope, GitStatusFile, parse_name_status_z, parse_status_porcelain_v2_z,

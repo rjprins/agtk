@@ -624,6 +624,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     changes
         .base
         .connect_selected_notify(move |_| base_workspace.select_changes_base());
+    let base_workspace = workspace.clone();
+    changes
+        .commits_ago
+        .connect_value_changed(move |_| base_workspace.select_changes_base());
     let diff_workspace = workspace.clone();
     diff_previous.connect_clicked(move |_| {
         if let Some(viewer) = diff_workspace.diff_viewer.borrow().as_ref() {

@@ -68,7 +68,13 @@ pub fn resolve_worktree_context(
         merge_base_oid.is_none(),
     ) {
         (true, _, _) => None,
-        (false, false, _) => Some("Choose a comparison base".to_owned()),
+        (false, false, _) => Some(match preferred_base.and_then(commits_ago_count) {
+            Some(count) => format!(
+                "Cannot compare with {count} {} ago. That history is not available in this repository. Choose a smaller number.",
+                if count == 1 { "commit" } else { "commits" }
+            ),
+            None => "Choose a comparison base".to_owned(),
+        }),
         (false, true, true) => {
             Some("The selected base has no common ancestor with this worktree".to_owned())
         }
@@ -79,7 +85,14 @@ pub fn resolve_worktree_context(
         root,
         branch,
         head_oid: head_oid.clone(),
-        base_ref: selected.as_ref().map(|(reference, _)| reference.clone()),
+        base_ref: selected
+            .as_ref()
+            .map(|(reference, _)| reference.clone())
+            .or_else(|| {
+                preferred_base
+                    .filter(|reference| commits_ago_count(reference).is_some())
+                    .map(str::to_owned)
+            }),
         base_oid: selected.map(|(_, oid)| oid),
         merge_base_oid,
         comparison_warning,
@@ -87,6 +100,15 @@ pub fn resolve_worktree_context(
         unborn: head_oid.is_none(),
         generation,
     }))
+}
+
+/// Recognize the bounded positive ancestor counts offered by the Changes sidebar.
+pub fn commits_ago_count(reference: &str) -> Option<i32> {
+    let count = reference.strip_prefix("HEAD~")?;
+    if count.is_empty() || !count.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    count.parse::<i32>().ok().filter(|count| *count > 0)
 }
 
 pub fn validate_base_ref(root: &Path, reference: &str) -> Result<Option<String>, String> {
@@ -113,10 +135,14 @@ fn select_base(
     root: &Path,
     preferred_base: Option<&str>,
 ) -> Result<Option<(String, String)>, String> {
-    if let Some(reference) = preferred_base
-        && let Some(oid) = validate_base_ref(root, reference)?
-    {
-        return Ok(Some((reference.to_owned(), oid)));
+    if let Some(reference) = preferred_base {
+        if let Some(oid) = validate_base_ref(root, reference)? {
+            return Ok(Some((reference.to_owned(), oid)));
+        }
+        // An unavailable ancestor must not silently select an unrelated branch.
+        if commits_ago_count(reference).is_some() {
+            return Ok(None);
+        }
     }
 
     for key in BASE_CONFIG_KEYS {

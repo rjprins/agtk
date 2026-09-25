@@ -201,6 +201,11 @@ impl Workspace {
                     .map(serde_json::from_value::<std::collections::HashMap<String, String>>)
                     .transpose()?
                     .unwrap_or_default();
+                let changes_commits_ago = store
+                    .preference("changesCommitsAgo")?
+                    .and_then(|value| value.as_i64())
+                    .filter(|count| (1..=i64::from(i32::MAX)).contains(count))
+                    .unwrap_or(1);
                 let mut records = store.sessions()?;
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
@@ -261,6 +266,7 @@ impl Workspace {
                     claude_presets,
                     changes_sidebar_open,
                     changes_base_refs,
+                    changes_commits_ago,
                     recovered,
                 ))
             },
@@ -277,6 +283,7 @@ impl Workspace {
                     claude_presets,
                     changes_sidebar_open,
                     changes_base_refs,
+                    changes_commits_ago,
                     recovered,
                 )) => {
                     *workspace.store.borrow_mut() = Some(store);
@@ -289,6 +296,12 @@ impl Workspace {
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
                     workspace.changes.state.borrow_mut().base_ref_by_context = changes_base_refs;
+                    workspace.changes.updating_base.set(true);
+                    workspace
+                        .changes
+                        .commits_ago
+                        .set_value(changes_commits_ago as f64);
+                    workspace.changes.updating_base.set(false);
                     if let Some(open) = changes_sidebar_open {
                         workspace.changes.split.set_show_sidebar(open);
                         workspace.changes.toggle.set_active(open);

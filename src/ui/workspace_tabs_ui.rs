@@ -478,6 +478,7 @@ impl Workspace {
         if self.changes.updating_base.get() {
             return;
         }
+        self.changes.update_comparison_hint();
         let Some(context_key) = self
             .workspace_tabs
             .borrow()
@@ -493,6 +494,14 @@ impl Workspace {
             "changesBaseRefs",
             serde_json::to_value(self.changes.base_preferences()).unwrap_or_default(),
         );
+        self.save_preference(
+            "changesCommitsAgo",
+            serde_json::json!(self.changes.commits_ago.value_as_int()),
+        );
+        // Discard any in-flight response for the previous comparison, including
+        // its dropdown selection, before scheduling the replacement snapshot.
+        self.invalidate_changes(&context_key, "Comparison changed");
+        self.changes.set_loading("Reading worktree changes…");
         self.refresh_changes();
     }
 

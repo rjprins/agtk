@@ -330,6 +330,16 @@ impl Workspace {
                 children: Vec::new(),
             },
             UiNode {
+                id: "changes-commits-ago".to_owned(),
+                role: "spinbutton".to_owned(),
+                label: Some(self.changes.comparison_hint.text().to_string()),
+                is_visible: self.changes.commits_ago_row.is_visible(),
+                is_enabled: self.changes.commits_ago.is_sensitive(),
+                is_selected: false,
+                bounds: widget_bounds(&self.changes.commits_ago, &self.window),
+                children: Vec::new(),
+            },
+            UiNode {
                 id: "changes-refresh".to_owned(),
                 role: "button".to_owned(),
                 label: Some("Refresh changes".to_owned()),

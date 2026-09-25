@@ -9,6 +9,7 @@ use crate::changes::{
 };
 
 const INITIAL_FILE_LIMIT: usize = 200;
+const COMMITS_AGO_OPTION: &str = "Commits ago…";
 
 #[derive(Clone)]
 pub(super) struct ChangesSidebar {
@@ -18,6 +19,9 @@ pub(super) struct ChangesSidebar {
     pub header: gtk::Label,
     pub branch: gtk::Label,
     pub base: gtk::DropDown,
+    pub commits_ago: gtk::SpinButton,
+    pub commits_ago_row: gtk::Box,
+    pub comparison_hint: gtk::Label,
     pub refresh: gtk::Button,
     pub rows: gtk::Box,
     pub(crate) state: Rc<RefCell<ChangesSidebarState>>,
@@ -99,8 +103,37 @@ impl ChangesSidebar {
         base.set_margin_start(12);
         base.set_margin_end(12);
         base.set_margin_bottom(8);
-        base.set_tooltip_text(Some("Choose the branch used to compare committed changes"));
+        base.set_tooltip_text(Some("Compare with a branch or an earlier commit"));
         root.append(&base);
+
+        let commits_ago_row = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        commits_ago_row.set_margin_start(12);
+        commits_ago_row.set_margin_end(12);
+        commits_ago_row.set_margin_bottom(8);
+        let count_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let count_label = gtk::Label::new(Some("Commits ago"));
+        count_label.set_xalign(0.0);
+        count_label.set_hexpand(true);
+        let commits_ago = gtk::SpinButton::with_range(1.0, i32::MAX as f64, 1.0);
+        commits_ago.set_numeric(true);
+        commits_ago.set_width_chars(4);
+        commits_ago.set_max_width_chars(10);
+        commits_ago.set_value(1.0);
+        commits_ago.update_property(&[gtk::accessible::Property::Label("Commits ago")]);
+        commits_ago.set_tooltip_text(Some(
+            "Number of commits before HEAD, following the first parent",
+        ));
+        count_row.append(&count_label);
+        count_row.append(&commits_ago);
+        commits_ago_row.append(&count_row);
+        let comparison_hint = gtk::Label::new(None);
+        comparison_hint.set_xalign(0.0);
+        comparison_hint.set_wrap(true);
+        comparison_hint.add_css_class("caption");
+        comparison_hint.add_css_class("dim-label");
+        commits_ago_row.append(&comparison_hint);
+        commits_ago_row.set_visible(false);
+        root.append(&commits_ago_row);
 
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -133,6 +166,9 @@ impl ChangesSidebar {
             header,
             branch,
             base,
+            commits_ago,
+            commits_ago_row,
+            comparison_hint,
             refresh,
             rows,
             state: Rc::new(RefCell::new(ChangesSidebarState::default())),
@@ -174,8 +210,17 @@ impl ChangesSidebar {
     }
 
     pub fn set_base_refs(&self, refs: Vec<String>, selected: Option<&str>) {
+        let count = selected.and_then(crate::changes::commits_ago_count);
         let selected = selected.unwrap_or("Choose comparison base");
-        let mut options = vec!["Choose comparison base".to_owned()];
+        let selected = if count.is_some() {
+            COMMITS_AGO_OPTION
+        } else {
+            selected
+        };
+        let mut options = vec![
+            "Choose comparison base".to_owned(),
+            COMMITS_AGO_OPTION.to_owned(),
+        ];
         for reference in refs {
             if !options.contains(&reference) {
                 options.push(reference);
@@ -186,6 +231,11 @@ impl ChangesSidebar {
         }
         let strings = options.iter().map(String::as_str).collect::<Vec<_>>();
         self.updating_base.set(true);
+        if let Some(count) = count
+            && self.commits_ago.value_as_int() != count
+        {
+            self.commits_ago.set_value(f64::from(count));
+        }
         self.base.set_model(Some(&gtk::StringList::new(&strings)));
         self.base.set_selected(
             options
@@ -194,13 +244,26 @@ impl ChangesSidebar {
                 .unwrap_or(0) as u32,
         );
         self.state.borrow_mut().base_refs = options;
+        self.update_comparison_hint();
         self.updating_base.set(false);
+    }
+
+    pub fn update_comparison_hint(&self) {
+        let relative = self.base.selected() == 1;
+        self.commits_ago_row.set_visible(relative);
+        let count = self.commits_ago.value_as_int();
+        let unit = if count == 1 { "commit" } else { "commits" };
+        self.comparison_hint
+            .set_text(&format!("Changes since {count} {unit} ago"));
     }
 
     pub fn selected_base(&self) -> Option<String> {
         let index = self.base.selected() as usize;
         if index == 0 {
             return None;
+        }
+        if index == 1 {
+            return Some(format!("HEAD~{}", self.commits_ago.value_as_int()));
         }
         self.state.borrow().base_refs.get(index).cloned()
     }
@@ -240,6 +303,7 @@ impl ChangesSidebar {
         self.branch
             .set_tooltip_text(Some(&snapshot.context.root.to_string_lossy()));
         self.base.set_sensitive(!snapshot.context.unborn);
+        self.commits_ago.set_sensitive(!snapshot.context.unborn);
         {
             let mut state = self.state.borrow_mut();
             state.active_expansion_context =
@@ -247,6 +311,15 @@ impl ChangesSidebar {
             state.snapshot = Some(snapshot.clone());
         }
         clear(&self.rows);
+        for warning in &snapshot.warnings {
+            let message = gtk::Label::new(Some(warning));
+            message.set_wrap(true);
+            message.set_xalign(0.0);
+            message.set_margin_start(8);
+            message.set_margin_end(8);
+            message.set_margin_bottom(8);
+            self.rows.append(&message);
+        }
 
         let all_expanded = self.expanded("all", true);
         self.add_group(
@@ -315,7 +388,17 @@ impl ChangesSidebar {
 
         self.add_group(
             "committed",
-            "Committed on branch",
+            if snapshot
+                .context
+                .base_ref
+                .as_deref()
+                .and_then(crate::changes::commits_ago_count)
+                .is_some()
+            {
+                "Committed since comparison"
+            } else {
+                "Committed on branch"
+            },
             snapshot.branch_changes.clone(),
             self.expanded("committed", false),
             DiffScope::Committed,
@@ -334,6 +417,7 @@ impl ChangesSidebar {
             && snapshot.untracked.is_empty()
             && snapshot.branch_changes.is_empty()
             && snapshot.commits.is_empty()
+            && snapshot.warnings.is_empty()
         {
             let empty = gtk::Label::new(Some(
                 snapshot
