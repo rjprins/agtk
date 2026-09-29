@@ -1,7 +1,13 @@
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
-use agmux_native::agent_hooks::{claude_hook_settings, ensure_claude_hook_settings};
+use agmux_native::agent_hooks::{
+    HOOK_TIMEOUT_SECONDS, claude_hook_settings, ensure_claude_hook_settings,
+};
+use agmux_native::control::{
+    AgentSignalState, ControlCommand, SessionSetStateParams, control_timeout,
+};
 
 fn command(settings: &serde_json::Value, event: &str) -> String {
     settings["hooks"][event][0]["hooks"][0]["command"]
@@ -37,6 +43,23 @@ fn claude_hooks_report_each_turn_boundary() {
         settings["hooks"]["Notification"][0]["matcher"],
         "permission_prompt|elicitation_dialog"
     );
+}
+
+#[test]
+fn hooks_outlast_the_agmuxctl_reply_deadline() {
+    let settings = claude_hook_settings(Path::new("/opt/agmux/agmuxctl"));
+    let deadline = control_timeout(&ControlCommand::SessionSetState(SessionSetStateParams {
+        session_id: "claude-1".to_owned(),
+        state: AgentSignalState::Busy,
+    }));
+    // Otherwise Claude Code kills a hook that agmuxctl would have given up on quietly.
+    assert!(Duration::from_secs(HOOK_TIMEOUT_SECONDS) > deadline);
+    for event in ["UserPromptSubmit", "PreToolUse", "Stop"] {
+        assert_eq!(
+            settings["hooks"][event][0]["hooks"][0]["timeout"],
+            HOOK_TIMEOUT_SECONDS
+        );
+    }
 }
 
 #[test]

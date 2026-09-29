@@ -15,6 +15,10 @@ const SETTINGS_NAME: &str = "claude-hooks.json";
 /// also fires Notification but does not block, so it is not listed.
 const BLOCKING_NOTIFICATIONS: &str = "permission_prompt|elicitation_dialog";
 
+/// Longer than agmuxctl's own reply deadline, so a slow app fails quietly
+/// through `|| true` instead of Claude Code killing the hook with a warning.
+pub const HOOK_TIMEOUT_SECONDS: u64 = 10;
+
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
@@ -33,7 +37,7 @@ pub fn claude_hook_settings(agmuxctl: &Path) -> Value {
             "hooks": [{
                 "type": "command",
                 "command": state_command(agmuxctl, state),
-                "timeout": 5,
+                "timeout": HOOK_TIMEOUT_SECONDS,
             }],
         }])
     };
