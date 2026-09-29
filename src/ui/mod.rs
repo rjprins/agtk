@@ -603,6 +603,15 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             );
         }
     });
+    let changes_width_workspace = workspace.clone();
+    changes
+        .split
+        .connect_max_sidebar_width_notify(move |split| {
+            changes_width_workspace.save_preference(
+                sidebar::CHANGES_WIDTH_PREFERENCE,
+                serde_json::json!(split.max_sidebar_width() as i32),
+            );
+        });
     let pr_context_workspace = workspace.clone();
     workspace.context_pr_number.connect_clicked(move |_| {
         pr_context_workspace.open_selected_pr_context();

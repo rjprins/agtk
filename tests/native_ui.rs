@@ -446,6 +446,46 @@ fn sidebar_width_is_restored_on_ui_restart() {
 
 #[test]
 #[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn changes_sidebar_width_is_restored_on_ui_restart() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
+    let mut app = App::new();
+    app.stop();
+    let store = Store::open(&app.paths.database()).unwrap();
+    store
+        .set_preference("changesSidebarOpen", &json!(true))
+        .unwrap();
+    store
+        .set_preference("changesSidebarWidth", &json!(300))
+        .unwrap();
+    app.start();
+
+    // The sidebar slides open, so wait for the layout to settle.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut bounds = Value::Null;
+    while Instant::now() < deadline {
+        let inspection = app.request("ui.inspect", json!({}));
+        let changes = find(&inspection["root"], "changes-sidebar").unwrap();
+        assert_eq!(changes["isVisible"], true);
+        bounds = changes["bounds"].clone();
+        if bounds["width"] == 300.0 && bounds["x"] == 900.0 {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    panic!("changes sidebar did not settle at 300 px: {bounds}");
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
 fn launch_surface_populates_project_and_git_worktree_choices() {
     let app = App::new();
     let project = app.directory.path().join("launch-project");

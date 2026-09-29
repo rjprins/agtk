@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
+use super::sidebar::{DEFAULT_CHANGES_WIDTH, MAX_CHANGES_WIDTH, MIN_CHANGES_WIDTH};
 use crate::changes::{
     ChangeStatus, ChangedFile, ChangesSnapshot, CommitSummary, DiffScope, display_changed_path,
 };
@@ -48,15 +49,16 @@ impl ChangesSidebar {
         let split = adw::OverlaySplitView::new();
         split.set_content(Some(center));
         split.set_sidebar_position(gtk::PackType::End);
-        split.set_sidebar_width_unit(adw::LengthUnit::Sp);
-        split.set_sidebar_width_fraction(0.28);
-        split.set_min_sidebar_width(240.0);
-        split.set_max_sidebar_width(420.0);
+        // The max holds the dragged width; a high fraction lets it win over the window share.
+        split.set_sidebar_width_unit(adw::LengthUnit::Px);
+        split.set_sidebar_width_fraction(0.9);
+        split.set_min_sidebar_width(f64::from(MIN_CHANGES_WIDTH));
+        split.set_max_sidebar_width(f64::from(DEFAULT_CHANGES_WIDTH));
         split.set_show_sidebar(false);
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.add_css_class("sidebar-pane");
-        root.set_size_request(240, -1);
+        root.set_size_request(MIN_CHANGES_WIDTH, -1);
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         toolbar.set_margin_top(8);
         toolbar.set_margin_bottom(8);
@@ -145,7 +147,10 @@ impl ChangesSidebar {
         rows.set_margin_bottom(8);
         scroll.set_child(Some(&rows));
         root.append(&scroll);
-        split.set_sidebar(Some(&root));
+        let sidebar = gtk::Overlay::new();
+        sidebar.set_child(Some(&root));
+        sidebar.add_overlay(&resize_handle(&split));
+        split.set_sidebar(Some(&sidebar));
 
         let toggle = gtk::ToggleButton::with_label("Changes");
         toggle.add_css_class("flat");
@@ -557,6 +562,44 @@ impl ChangesSidebar {
             .copied()
             .unwrap_or(default)
     }
+}
+
+/// A strip on the sidebar's inner edge that drags its width, like the paned handle on the left.
+fn resize_handle(split: &adw::OverlaySplitView) -> gtk::Box {
+    let handle = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    handle.set_halign(gtk::Align::Start);
+    handle.set_width_request(6);
+    handle.set_cursor_from_name(Some("col-resize"));
+    let drag = gtk::GestureDrag::new();
+    let split = split.clone();
+    drag.connect_drag_update(move |drag, offset_x, offset_y| {
+        let (Some((start_x, start_y)), Some(handle)) = (drag.start_point(), drag.widget()) else {
+            return;
+        };
+        // The handle moves with the edge, so measure the pointer against the split.
+        let current =
+            gtk::graphene::Point::new((start_x + offset_x) as f32, (start_y + offset_y) as f32);
+        let Some(pointer) = handle.compute_point(&split, &current) else {
+            return;
+        };
+        let width = f64::from(split.width()) - f64::from(pointer.x()) + start_x;
+        // Keep only what fits beside the content, so a wider window later doesn't jump.
+        let content_min = split
+            .content()
+            .filter(|_| !split.is_collapsed())
+            .map_or(0, |content| {
+                content.measure(gtk::Orientation::Horizontal, -1).0
+            });
+        let room = f64::from(split.width() - content_min);
+        split.set_max_sidebar_width(
+            width
+                .min(room)
+                .clamp(f64::from(MIN_CHANGES_WIDTH), f64::from(MAX_CHANGES_WIDTH))
+                .round(),
+        );
+    });
+    handle.add_controller(drag);
+    handle
 }
 
 fn append_file_group(

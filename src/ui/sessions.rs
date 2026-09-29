@@ -1,4 +1,6 @@
-use super::sidebar::{SIDEBAR_WIDTH_PREFERENCE, sidebar_width};
+use super::sidebar::{
+    CHANGES_WIDTH_PREFERENCE, SIDEBAR_WIDTH_PREFERENCE, changes_width, sidebar_width,
+};
 use super::*;
 use crate::persist::now_millis;
 use crate::session::Attachment;
@@ -169,6 +171,8 @@ impl Workspace {
                     .unwrap_or_default();
                 let loaded_sidebar_width =
                     sidebar_width(store.preference(SIDEBAR_WIDTH_PREFERENCE)?.as_ref());
+                let loaded_changes_width =
+                    changes_width(store.preference(CHANGES_WIDTH_PREFERENCE)?.as_ref());
                 let shortcuts = store
                     .preference("shortcuts")?
                     .map(serde_json::from_value::<ShortcutPreferences>)
@@ -259,6 +263,7 @@ impl Workspace {
                     selected,
                     appearance,
                     loaded_sidebar_width,
+                    loaded_changes_width,
                     shortcuts,
                     projects,
                     quick_launch,
@@ -276,6 +281,7 @@ impl Workspace {
                     selected,
                     appearance,
                     sidebar_width,
+                    changes_width,
                     shortcuts,
                     projects,
                     quick_launch,
@@ -289,6 +295,10 @@ impl Workspace {
                     *workspace.store.borrow_mut() = Some(store);
                     workspace.load_dialog_sizes();
                     workspace.sidebar_split.set_position(sidebar_width);
+                    workspace
+                        .changes
+                        .split
+                        .set_max_sidebar_width(f64::from(changes_width));
                     workspace.load_appearance(appearance);
                     workspace.load_shortcuts(shortcuts);
                     workspace.load_projects(projects);
