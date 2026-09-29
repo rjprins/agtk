@@ -569,6 +569,21 @@ impl Workspace {
         self.launch.modal.present();
     }
 
+    pub(super) fn open_launch_for_selected_project(&self) {
+        let root = self.selected_session_id().and_then(|id| {
+            self.sessions
+                .borrow()
+                .get(&id)
+                .and_then(|session| session.record.project_root.clone())
+        });
+        if let Some(root) = root {
+            self.open_launch_for_project(root.to_string_lossy().as_ref());
+        } else {
+            self.prepare_launch_panel();
+            self.launch.modal.present();
+        }
+    }
+
     pub(super) fn open_launch_for_worktree(&self, project_root: &Path, worktree: &Path) {
         self.launch.project_custom.set(false);
         self.launch

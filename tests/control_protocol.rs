@@ -114,7 +114,7 @@ fn every_core_method_decodes_to_a_typed_command() {
         ),
         (
             "shortcut.set",
-            r#"{"action":"new-shell","accelerator":"<Control><Shift>n"}"#,
+            r#"{"action":"launch-in-project","accelerator":"<Control><Shift>n"}"#,
             "ShortcutSet",
         ),
         (

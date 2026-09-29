@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ShortcutAction {
-    NewShell,
+    // Saved bindings still use the key of the shell shortcut this replaced.
+    #[serde(alias = "new-shell")]
+    LaunchInProject,
     CloseSession,
     ToggleSidebar,
     NextSession,
@@ -20,7 +22,7 @@ pub enum ShortcutAction {
 
 impl ShortcutAction {
     pub const ALL: [Self; 11] = [
-        Self::NewShell,
+        Self::LaunchInProject,
         Self::CloseSession,
         Self::ToggleSidebar,
         Self::NextSession,
@@ -35,7 +37,7 @@ impl ShortcutAction {
 
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::NewShell => "new-shell",
+            Self::LaunchInProject => "launch-in-project",
             Self::CloseSession => "close-session",
             Self::ToggleSidebar => "toggle-sidebar",
             Self::NextSession => "next-session",
@@ -51,7 +53,7 @@ impl ShortcutAction {
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::NewShell => "New shell",
+            Self::LaunchInProject => "Launch in current project",
             Self::CloseSession => "Close selected session",
             Self::ToggleSidebar => "Toggle sidebar",
             Self::NextSession => "Next session",
@@ -67,7 +69,7 @@ impl ShortcutAction {
 
     pub const fn default_accelerator(self) -> &'static str {
         match self {
-            Self::NewShell => "<Control><Shift>grave",
+            Self::LaunchInProject => "<Control><Shift>grave",
             Self::CloseSession => "<Control><Shift>q",
             Self::ToggleSidebar => "<Control><Shift>backslash",
             Self::NextSession => "<Control><Shift>bracketright",
@@ -84,7 +86,7 @@ impl ShortcutAction {
     pub const fn is_active(self) -> bool {
         matches!(
             self,
-            Self::NewShell
+            Self::LaunchInProject
                 | Self::CloseSession
                 | Self::ToggleSidebar
                 | Self::NextSession

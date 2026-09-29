@@ -33,7 +33,12 @@ pub(super) fn accelerator_label(accelerator: &str) -> String {
 
 impl Workspace {
     pub(super) fn install_shortcut_actions(&self) {
-        self.add_action("new-shell", true, |workspace| workspace.launch_shell());
+        self.add_action("launch-in-project", true, |workspace| {
+            // Like the Launch button, wait until the workspace has loaded.
+            if workspace.launch_button.is_sensitive() {
+                workspace.open_launch_for_selected_project();
+            }
+        });
         self.add_action("close-session", true, |workspace| {
             if let Some(id) = workspace.selected_session_id() {
                 workspace.stop_session(&id, None);

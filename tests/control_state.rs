@@ -20,8 +20,8 @@ fn application_state_has_a_stable_machine_readable_shape() {
             available_themes: ThemeKey::ALL.to_vec(),
         },
         shortcuts: vec![ShortcutSummary {
-            action: ShortcutAction::NewShell,
-            label: "New shell".to_owned(),
+            action: ShortcutAction::LaunchInProject,
+            label: "Launch in current project".to_owned(),
             accelerator: "<Control><Shift>grave".to_owned(),
             default_accelerator: "<Control><Shift>grave".to_owned(),
             is_active: true,
@@ -77,8 +77,8 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 ]
             },
             "shortcuts": [{
-                "action": "new-shell",
-                "label": "New shell",
+                "action": "launch-in-project",
+                "label": "Launch in current project",
                 "accelerator": "<Control><Shift>grave",
                 "defaultAccelerator": "<Control><Shift>grave",
                 "isActive": true

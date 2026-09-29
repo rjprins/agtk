@@ -959,7 +959,7 @@ fn shortcut_overrides_are_validated_and_survive_ui_restart() {
 
     let duplicate = app.request_body(
         "shortcut.set",
-        json!({"action":"new-shell","accelerator":"<Alt>b"}),
+        json!({"action":"launch-in-project","accelerator":"<Alt>b"}),
     );
     assert!(matches!(
         duplicate,
@@ -967,7 +967,7 @@ fn shortcut_overrides_are_validated_and_survive_ui_restart() {
     ));
     let unmodified = app.request_body(
         "shortcut.set",
-        json!({"action":"new-shell","accelerator":"n"}),
+        json!({"action":"launch-in-project","accelerator":"n"}),
     );
     assert!(matches!(
         unmodified,
