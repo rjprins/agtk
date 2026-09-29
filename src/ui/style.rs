@@ -39,6 +39,15 @@ const CHROME_CSS: &str = r#"
 .navigation-sidebar row.session-waiting:not(:selected) {
   background: color-mix(in srgb, var(--warning-color) 14%, transparent);
 }
+/* The stock selection is a faint gray; use the accent so the active session stands out. */
+.session-list row:selected {
+  background: color-mix(in srgb, var(--accent-bg-color) 35%, transparent);
+  box-shadow: inset 4px 0 var(--accent-bg-color);
+}
+.session-list row:selected:hover {
+  background: color-mix(in srgb, var(--accent-bg-color) 42%, transparent);
+}
+.session-list row:selected .session-title { font-weight: bold; }
 .session-state { min-width: 12px; font-weight: bold; }
 vte-terminal { padding: 6px 10px; }
 .session-state.state-busy { color: var(--warning-color); }

@@ -190,6 +190,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     list.set_selection_mode(gtk::SelectionMode::Single);
     list.set_focus_on_click(false);
     list.add_css_class("navigation-sidebar");
+    list.add_css_class("session-list");
 
     let sidebar = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)

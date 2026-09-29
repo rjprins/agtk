@@ -948,6 +948,7 @@ impl Workspace {
         let label = gtk::Label::new(Some(&name));
         label.set_xalign(0.0);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.add_css_class("session-title");
         primary.append(&label);
         mainline.append(&primary);
         if let Some(worktree) = record.worktree_path.as_ref().or(record.cwd.as_ref()) {
