@@ -517,7 +517,7 @@ impl Workspace {
             let purpose = name.clone().unwrap_or_else(|| branch.clone());
             let manager = WorktreeManager::new(self.paths.attic_dir());
             self.launch.modal.hide();
-            self.run_io(
+            self.run_slow(
                 move || manager.create(&root, &branch, base.as_deref(), &purpose),
                 move |workspace, result| match result {
                     Ok(created) => workspace.launch_controlled(
@@ -711,7 +711,7 @@ impl Workspace {
         );
         self.launch.updating_choices.set(false);
         let worker_root = root.clone();
-        self.run_io(
+        self.run_slow(
             move || manager.linked_paths(Path::new(&worker_root)),
             move |workspace, result| {
                 if workspace.launch.choice_sequence.get() != sequence
@@ -928,7 +928,7 @@ impl Workspace {
             return;
         }
         let manager = WorktreeManager::new(self.paths.attic_dir());
-        self.run_io(
+        self.run_slow(
             move || manager.branch_names(Path::new(&root)),
             move |workspace, result| {
                 let Ok(branches) = result else {

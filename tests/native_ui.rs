@@ -47,7 +47,7 @@ impl App {
         let fake_az = directory.path().join("fake-az");
         std::fs::write(
             &fake_az,
-            "#!/bin/sh\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGMUX_AZURE_PRS_FILE\" ;;\n  'devops invoke --org') cat \"$AGMUX_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\n[ -e \"$AGMUX_AZURE_PRS_FILE.slow\" ] && sleep 10\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGMUX_AZURE_PRS_FILE\" ;;\n  'devops invoke --org') cat \"$AGMUX_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         std::fs::set_permissions(&fake_az, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -893,6 +893,49 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     };
     app.request("session.close", json!({"sessionId":review_id}));
     app.request("session.close", json!({"sessionId":auto_review_id}));
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn closing_a_session_does_not_wait_for_a_slow_pr_lookup() {
+    let app = App::new();
+    let project = app.directory.path().join("azure-project");
+    std::fs::create_dir(&project).unwrap();
+    for args in [
+        &["init", "-q"][..],
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://dev.azure.com/org/project/_git/repo",
+        ][..],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    // Selecting a session in an Azure project looks up its PR through the slow fake az.
+    let slow = app.directory.path().join("azure-prs.json.slow");
+    std::fs::write(&slow, "").unwrap();
+    let session = app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":project,"projectRoot":project}),
+    );
+    let id = session["id"].as_str().unwrap().to_owned();
+
+    let started = Instant::now();
+    app.request("session.close", json!({"sessionId":id}));
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "close waited {:?} behind the PR lookup",
+        started.elapsed()
+    );
+    std::fs::remove_file(slow).unwrap();
 }
 
 #[test]

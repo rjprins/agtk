@@ -10,6 +10,8 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -143,6 +145,10 @@ struct Workspace {
     sequence: Rc<Cell<u64>>,
     control_server: Rc<RefCell<Option<ControlServer>>>,
     io: IoWorker,
+    // Git, Azure and log scans take seconds; kept off `io` so closes and hooks stay prompt.
+    slow_io: IoWorker,
+    // Bumped on each session selection so queued PR lookups for older selections skip.
+    pr_context_generation: Arc<AtomicU64>,
     store: Rc<RefCell<Option<Store>>>,
     appearance: Rc<RefCell<AppearancePreferences>>,
     chrome_style: style::ChromeStyle,
@@ -547,6 +553,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         sequence: Rc::new(Cell::new(0)),
         control_server: Rc::new(RefCell::new(None)),
         io: IoWorker::default(),
+        slow_io: IoWorker::default(),
+        pr_context_generation: Arc::new(AtomicU64::new(0)),
         store: Rc::new(RefCell::new(None)),
         appearance: Rc::new(RefCell::new(AppearancePreferences::default())),
         chrome_style,
@@ -835,6 +843,22 @@ impl Workspace {
         done: impl FnOnce(&Self, PersistResult<T>) + 'static,
     ) {
         let result = self.io.submit(work);
+        let workspace = self.clone();
+        glib::spawn_future_local(async move {
+            let result = result
+                .await
+                .unwrap_or_else(|_| Err("I/O worker stopped".into()));
+            done(&workspace, result);
+        });
+    }
+
+    /// Like `run_io`, but for slow external work that must not delay durable writes.
+    fn run_slow<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> PersistResult<T> + Send + 'static,
+        done: impl FnOnce(&Self, PersistResult<T>) + 'static,
+    ) {
+        let result = self.slow_io.submit(work);
         let workspace = self.clone();
         glib::spawn_future_local(async move {
             let result = result

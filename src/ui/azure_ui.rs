@@ -144,8 +144,13 @@ impl Workspace {
         let attic = self.paths.attic_dir();
         let preferences = self.pr_preferences.borrow().clone();
         let live_paths = self.live_worktree_paths();
-        self.run_io(
+        let generation = self.pr_context_generation.clone();
+        let requested = generation.fetch_add(1, Ordering::Relaxed) + 1;
+        self.run_slow(
             move || {
+                if generation.load(Ordering::Relaxed) != requested {
+                    return Err("a newer session was selected".into());
+                }
                 let manager = WorktreeManager::new(attic);
                 let project_root = match project_root {
                     Some(project_root) => project_root,
@@ -345,7 +350,64 @@ impl Workspace {
         let requested_key = pr_cache_key(&params.project_root);
         let had_cached = self.pr_context_cache.borrow().contains_key(&requested_key);
         self.prs.loading.set_visible(!had_cached);
-        self.run_io(
+        let finish = move |workspace: &Self, result: PersistResult<LoadedPrContext>| match result {
+            Ok(loaded) => {
+                workspace.prs.loading.set_visible(false);
+                *workspace.pr_preferences.borrow_mut() = loaded.preferences;
+                workspace.update_pr_indicator();
+                workspace.prs.updating_toggle.set(true);
+                workspace
+                    .prs
+                    .auto_review
+                    .set_active(loaded.context.auto_review);
+                workspace.prs.updating_toggle.set(false);
+                workspace.cache_pr_context(&loaded.context);
+                if pr_cache_key(Path::new(workspace.prs.root.text().trim()))
+                    == pr_cache_key(&loaded.context.project_root)
+                {
+                    workspace.render_pr_context(&loaded.context);
+                }
+
+                if let Some(pending) = pending {
+                    let id = pending.request.id.clone();
+                    match serde_json::to_value(&loaded.context) {
+                        Ok(value) => {
+                            let _ = pending.respond(ControlResponse::success(id, value));
+                        }
+                        Err(error) => workspace.report_launch_failure(
+                            Some(pending),
+                            "Could not describe pull requests",
+                            error.to_string(),
+                        ),
+                    }
+                }
+
+                if loaded.context.auto_review {
+                    for item in loaded.context.pull_requests.iter().filter(|item| {
+                        loaded.changed.contains(&item.pull_request.id)
+                            && !item.pull_request.is_draft
+                            && !item.pull_request.is_own_author
+                    }) {
+                        workspace.launch_pr_review(&loaded.context.project_root, item, None);
+                    }
+                }
+            }
+            Err(error) => {
+                workspace.prs.loading.set_visible(false);
+                if !had_cached
+                    && pr_cache_key(Path::new(workspace.prs.root.text().trim())) == requested_key
+                {
+                    workspace.render_pr_message(&format!("ERROR  {error}"));
+                }
+                workspace.report_failure(
+                    pending,
+                    ErrorCode::OperationRefused,
+                    "Could not list pull requests",
+                    error.to_string(),
+                );
+            }
+        };
+        self.run_slow(
             move || {
                 let project_root = params.project_root.canonicalize()?;
                 let root_key = project_root.to_string_lossy().to_string();
@@ -358,7 +420,6 @@ impl Workspace {
                 let mut preferences = preferences;
                 preferences.set_project(root_key, reconciliation.state.clone());
                 let value = serde_json::to_value(&preferences)?;
-                store.set_preference("pullRequests", &value)?;
 
                 let worktrees = WorktreeManager::new(attic)
                     .list(&project_root, &live_paths)
@@ -388,7 +449,7 @@ impl Workspace {
                         }
                     })
                     .collect();
-                Ok(LoadedPrContext {
+                let loaded = LoadedPrContext {
                     preferences,
                     context: PrContext {
                         project_root,
@@ -398,65 +459,20 @@ impl Workspace {
                         pull_requests,
                     },
                     changed,
-                })
+                };
+                Ok((loaded, value))
             },
             move |workspace, result| match result {
-                Ok(loaded) => {
-                    workspace.prs.loading.set_visible(false);
-                    *workspace.pr_preferences.borrow_mut() = loaded.preferences;
-                    workspace.update_pr_indicator();
-                    workspace.prs.updating_toggle.set(true);
-                    workspace
-                        .prs
-                        .auto_review
-                        .set_active(loaded.context.auto_review);
-                    workspace.prs.updating_toggle.set(false);
-                    workspace.cache_pr_context(&loaded.context);
-                    if pr_cache_key(Path::new(workspace.prs.root.text().trim()))
-                        == pr_cache_key(&loaded.context.project_root)
-                    {
-                        workspace.render_pr_context(&loaded.context);
-                    }
-
-                    if let Some(pending) = pending {
-                        let id = pending.request.id.clone();
-                        match serde_json::to_value(&loaded.context) {
-                            Ok(value) => {
-                                let _ = pending.respond(ControlResponse::success(id, value));
-                            }
-                            Err(error) => workspace.report_launch_failure(
-                                Some(pending),
-                                "Could not describe pull requests",
-                                error.to_string(),
-                            ),
-                        }
-                    }
-
-                    if loaded.context.auto_review {
-                        for item in loaded.context.pull_requests.iter().filter(|item| {
-                            loaded.changed.contains(&item.pull_request.id)
-                                && !item.pull_request.is_draft
-                                && !item.pull_request.is_own_author
-                        }) {
-                            workspace.launch_pr_review(&loaded.context.project_root, item, None);
-                        }
-                    }
-                }
-                Err(error) => {
-                    workspace.prs.loading.set_visible(false);
-                    if !had_cached
-                        && pr_cache_key(Path::new(workspace.prs.root.text().trim()))
-                            == requested_key
-                    {
-                        workspace.render_pr_message(&format!("ERROR  {error}"));
-                    }
-                    workspace.report_failure(
-                        pending,
-                        ErrorCode::OperationRefused,
-                        "Could not list pull requests",
-                        error.to_string(),
-                    );
-                }
+                // The preference write stays on the durable queue with the other writes.
+                Ok((loaded, value)) => workspace.run_io(
+                    move || {
+                        store
+                            .set_preference("pullRequests", &value)
+                            .map(|()| loaded)
+                    },
+                    finish,
+                ),
+                Err(error) => finish(workspace, Err(error)),
             },
         );
     }
@@ -698,7 +714,7 @@ impl Workspace {
         let pull_request_id = params.pull_request_id;
         let attic = self.paths.attic_dir();
         let live_paths = self.live_worktree_paths();
-        self.run_io(
+        self.run_slow(
             move || {
                 let Some(list) = AzureClient::from_environment().list_active(&load_root)? else {
                     return Err("project origin is not an Azure DevOps repository".into());

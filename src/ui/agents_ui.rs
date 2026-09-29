@@ -527,7 +527,7 @@ impl Workspace {
             .map(|project| PathBuf::from(project.root))
             .collect::<Vec<_>>();
         let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
-        self.run_io(
+        self.run_slow(
             move || {
                 discovery.discover(now_millis(), &live).map(|sessions| {
                     classify_agent_sessions(sessions, &known_project_roots, &manager)
@@ -599,7 +599,7 @@ impl Workspace {
                 self.agents.restore_button.set_sensitive(false);
                 self.agents.restore_button.set_label("Restoring...");
                 self.agents.modal.hide();
-                self.run_io(
+                self.run_slow(
                     move || {
                         let root = manager.repository_root(&cwd)?;
                         let created = manager.create(&root, &branch, None, &purpose)?;
@@ -633,7 +633,7 @@ impl Workspace {
         self.agents.restore_button.set_sensitive(false);
         self.agents.restore_button.set_label("Restoring...");
         self.agents.modal.hide();
-        self.run_io(
+        self.run_slow(
             move || {
                 let target =
                     restore_target_for_location(cwd, project_root, &known_project_roots, &manager);
@@ -669,7 +669,7 @@ impl Workspace {
             u64::from(params.max_age_days) * 24 * 60 * 60 * 1_000,
         );
         let live = self.live_provider_sessions();
-        self.run_io(
+        self.run_slow(
             move || discovery.discover(now_millis(), &live),
             move |workspace, result| {
                 workspace.respond_agent_result(pending, "Could not discover agent sessions", result)
@@ -679,7 +679,7 @@ impl Workspace {
 
     fn preview_agent(&self, params: AgentPreviewParams, pending: PendingRequest) {
         let discovery = ProviderDiscovery::from_environment();
-        self.run_io(
+        self.run_slow(
             move || {
                 discovery.preview(
                     params.provider,
@@ -701,7 +701,7 @@ impl Workspace {
             worktree_path: params.worktree_path,
             name: params.name,
         };
-        self.run_io(
+        self.run_slow(
             move || {
                 let preview = discovery.preview(params.provider, &params.provider_session_id, 1)?;
                 Ok(preview.session.restore_plan(target))
@@ -942,7 +942,7 @@ impl Workspace {
         let discovery = ProviderDiscovery::from_environment();
         let provider = session.provider;
         let provider_session_id = session.provider_session_id.clone();
-        self.run_io(
+        self.run_slow(
             move || discovery.preview(provider, &provider_session_id, 12),
             |workspace, result| match result {
                 Ok(preview) => workspace.render_agent_preview(preview),
@@ -1080,7 +1080,7 @@ impl Workspace {
             return;
         };
         let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
-        self.run_io(
+        self.run_slow(
             move || {
                 let root = manager.repository_root(&cwd)?;
                 manager.linked_paths(&root)

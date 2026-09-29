@@ -25,7 +25,7 @@ impl Workspace {
             );
             return;
         };
-        self.run_io(
+        self.run_slow(
             move || EmacsIntegration::from_environment().open(&cwd, action),
             move |workspace, result| match result {
                 Ok(opened) => match serde_json::to_value(opened) {

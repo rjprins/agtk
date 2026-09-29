@@ -141,7 +141,7 @@ impl Workspace {
         self.render_worktree_message("Scanning Git state…");
         let manager = WorktreeManager::new(self.paths.attic_dir());
         let live_paths = self.live_worktree_paths();
-        self.run_io(
+        self.run_slow(
             move || manager.list(Path::new(&root), &live_paths),
             |workspace, result| match result {
                 Ok(inventory) => workspace.render_worktree_inventory(inventory),
@@ -160,7 +160,7 @@ impl Workspace {
         let purpose = self.worktrees.purpose.text().trim().to_owned();
         let manager = WorktreeManager::new(self.paths.attic_dir());
         self.render_worktree_message("Creating worktree…");
-        self.run_io(
+        self.run_slow(
             move || {
                 manager.create(
                     &project_root,
@@ -196,7 +196,7 @@ impl Workspace {
     fn list_worktrees(&self, params: WorktreeListParams, pending: PendingRequest) {
         let manager = WorktreeManager::new(self.paths.attic_dir());
         let live_paths = self.live_worktree_paths();
-        self.run_io(
+        self.run_slow(
             move || manager.list(&params.project_root, &live_paths),
             move |workspace, result| {
                 workspace.respond_worktree_result(pending, "Could not list worktrees", result)
@@ -206,7 +206,7 @@ impl Workspace {
 
     fn create_worktree(&self, params: WorktreeCreateParams, pending: PendingRequest) {
         let manager = WorktreeManager::new(self.paths.attic_dir());
-        self.run_io(
+        self.run_slow(
             move || {
                 manager.create(
                     &params.project_root,
@@ -244,7 +244,7 @@ impl Workspace {
             expected_status_hash: params.expected_status_hash,
             delete_branch: params.delete_branch,
         };
-        self.run_io(
+        self.run_slow(
             move || manager.reap(request, &live_paths),
             move |workspace, result| {
                 workspace.respond_worktree_result(pending, "Worktree operation was refused", result)
@@ -381,7 +381,7 @@ impl Workspace {
             delete_branch: DeleteBranch::Auto,
         };
         self.render_worktree_message("Removing with preview guards…");
-        self.run_io(
+        self.run_slow(
             move || manager.reap(request, &live_paths),
             |workspace, result| match result {
                 Ok(result) if result.ok => {

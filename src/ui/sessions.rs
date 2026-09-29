@@ -800,7 +800,7 @@ impl Workspace {
                 }),
         );
         let home = glib::home_dir();
-        self.run_io(
+        self.run_slow(
             move || {
                 // Agents usually print paths from the repository root.
                 for base in bases.clone() {
@@ -828,7 +828,7 @@ impl Workspace {
     }
 
     fn open_file_in_emacs(&self, path: PathBuf, line: Option<u32>, column: Option<u32>) {
-        self.run_io(
+        self.run_slow(
             move || EmacsIntegration::from_environment().open_file(&path, line, column),
             |workspace, result| {
                 if let Err(error) = result {
