@@ -486,6 +486,55 @@ fn reap_aborts_on_drift_then_salvages_and_attic_tags_dirty_work() {
     assert!(result.branch_deleted);
 }
 
+#[test]
+fn staged_deletions_do_not_block_listing_or_reaping() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let created = manager
+        .create(
+            fixture.root(),
+            "drop-readme",
+            Some("main"),
+            "stage a deletion",
+        )
+        .unwrap();
+    git(&created.path, &["rm", "-q", "README.md"]);
+    git(
+        fixture.root(),
+        &["config", "branch.drop-readme.remote", "origin"],
+    );
+    git(
+        fixture.root(),
+        &[
+            "config",
+            "branch.drop-readme.merge",
+            "refs/heads/drop-readme",
+        ],
+    );
+
+    let preview = manager.list(fixture.root(), &[]).unwrap();
+    let worktree = preview
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.path == created.path)
+        .unwrap();
+    assert!(worktree.dirty);
+
+    let result = manager
+        .reap(
+            ReapRequest {
+                path: created.path.clone(),
+                expected_head: worktree.head.clone().unwrap(),
+                expected_status_hash: worktree.status_hash.clone(),
+                delete_branch: DeleteBranch::Force,
+            },
+            &[],
+        )
+        .expect("reap worktree");
+    assert!(result.ok, "{:?}", result.reason);
+    assert!(!created.path.exists());
+}
+
 struct Repository {
     directory: tempfile::TempDir,
     root: std::path::PathBuf,

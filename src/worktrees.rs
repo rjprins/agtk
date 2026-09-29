@@ -1046,7 +1046,8 @@ fn salvageable_paths(worktree: &Path, raw_status: &str) -> WorktreeResult<Vec<Pa
             "--exclude-standard",
             "-z",
         ],
-        vec!["diff", "--name-only", "--cached", "-z"],
+        // A staged deletion has no content to salvage; status already records it.
+        vec!["diff", "--name-only", "--cached", "--diff-filter=d", "-z"],
     ] {
         if let Ok(output) = run_git(worktree, os_args(&args)) {
             for path in output
