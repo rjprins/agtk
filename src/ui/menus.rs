@@ -169,6 +169,9 @@ impl Workspace {
                 workspace.open_launch_for_worktree(&root, &worktree);
             }
         });
+        self.add_target_action("session-resume", |workspace, id| {
+            workspace.resume_exited_session(id)
+        });
         self.add_target_action("session-close", |workspace, id| {
             workspace.stop_session(id, None)
         });

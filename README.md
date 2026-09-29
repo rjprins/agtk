@@ -25,6 +25,7 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Safe purpose-aware worktree creation and guarded reap with salvage and attic tags
 - A Resume Session dialog (`Ctrl+Shift+R`) that lists closed Claude and Codex conversations newest first under their own titles (your `/rename` name, else the provider's title), with where each one left off and the files it changed
 - Busy, waiting, ready, and idle agent states from Claude hooks and screen reading
+- An agent row that exited, for example after a reboot, resumes its conversation in place: press Enter in its terminal or choose Resume Conversation from the row menu
 - Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
 - Emacs Magit and branch-review integration for the selected session
 - Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in Emacs at that line, or a URL to open it in the browser. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select. Ctrl+click opens immediately.

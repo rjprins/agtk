@@ -875,13 +875,35 @@ impl Workspace {
             route_wheel_to_fullscreen_app(&terminal);
         }
         self.install_terminal_shortcuts(&terminal);
+        // Capture, because VTE takes keys itself even without a child.
+        let resume_keys = gtk::EventControllerKey::new();
+        resume_keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let resume_workspace = self.clone();
+        let resume_id = id.clone();
+        resume_keys.connect_key_pressed(move |_, key, _, modifiers| {
+            let resumable = resume_workspace
+                .sessions
+                .borrow()
+                .get(&resume_id)
+                .is_some_and(|session| is_resumable(&session.record));
+            if resumable
+                && matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter)
+                && !modifiers.intersects(gtk::accelerator_get_default_mod_mask())
+            {
+                resume_workspace.resume_exited_session(&resume_id);
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        terminal.add_controller(resume_keys);
         let pty = if let Some(attachment) = attachment {
             terminal.feed(&attachment.replay);
             let pty = vte::Pty::foreign_sync(attachment.pty, None::<&gio::Cancellable>)?;
             terminal.set_pty(Some(&pty));
             Some(pty)
         } else {
-            terminal.feed(b"This session has exited. Close its row to dismiss it.\r\n");
+            terminal.feed(exited_message(&record).as_bytes());
             None
         };
         let eof_workspace = self.clone();
@@ -903,6 +925,13 @@ impl Workspace {
             if let Some(record) = record
                 && !eof_workspace.closing_sessions.borrow().contains(&eof_id)
             {
+                if is_resumable(&record)
+                    && let Some(session) = eof_workspace.sessions.borrow().get(&eof_id)
+                {
+                    session
+                        .terminal
+                        .feed(format!("\r\n{}", exited_message(&record)).as_bytes());
+                }
                 eof_workspace.persist_record(record);
             }
         });
@@ -997,6 +1026,13 @@ impl Workspace {
         let menu = gio::Menu::new();
         let edit_section = gio::Menu::new();
         edit_section.append_item(&menus::targeted_item("Rename…", "win.session-rename", &id));
+        if matches!(record.kind, SessionKind::Claude | SessionKind::Codex) {
+            edit_section.append_item(&menus::targeted_item(
+                "Resume Conversation",
+                "win.session-resume",
+                &id,
+            ));
+        }
         if record.project_root.is_some() {
             edit_section.append_item(&menus::targeted_item(
                 "Launch in This Worktree…",
@@ -1128,6 +1164,25 @@ fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
         glib::Propagation::Stop
     });
     terminal.add_controller(scroll);
+}
+
+/// An exited agent whose conversation agmux knows can start again in its row.
+pub(super) fn is_resumable(record: &SessionRecord) -> bool {
+    record.state == SessionState::Exited
+        && matches!(record.kind, SessionKind::Claude | SessionKind::Codex)
+        && record.conversation_id.is_some()
+}
+
+fn exited_message(record: &SessionRecord) -> String {
+    let resumable = SessionRecord {
+        state: SessionState::Exited,
+        ..record.clone()
+    };
+    if is_resumable(&resumable) {
+        "This session has exited. Press Enter to resume the conversation, or close the row to dismiss it.\r\n".to_owned()
+    } else {
+        "This session has exited. Close its row to dismiss it.\r\n".to_owned()
+    }
 }
 
 // Unscoped hosts share the app's cgroup, so its memory figures include the agents.

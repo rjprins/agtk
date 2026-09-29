@@ -1317,3 +1317,35 @@ fn recent_agent_surface_uses_isolated_logs_and_readiness_survives_restart() {
     app.request("session.close", json!({"sessionId":other_id}));
     app.request("session.close", json!({"sessionId":id}));
 }
+
+#[test]
+#[ignore = "requires a private display"]
+fn an_exited_agent_offers_to_resume_its_reported_conversation() {
+    let mut app = App::new();
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"codex",
+            "command":"/bin/sh",
+            "args":["-c","printf '__READY__\\n'; read line"],
+            "cwd":app.directory.path(),
+            "name":"resumable"
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    app.wait_text(id, "__READY__");
+    app.request(
+        "session.set_state",
+        json!({"sessionId":id,"state":"busy","conversationId":"codex-conv-1"}),
+    );
+    app.request(
+        "session.send_input",
+        json!({"sessionId":id,"text":"done","appendEnter":true}),
+    );
+    app.wait_text(id, "Press Enter to resume the conversation");
+
+    // The reported conversation is saved with the row, so it outlives the UI.
+    app.stop();
+    app.start();
+    app.wait_text(id, "Press Enter to resume the conversation");
+}

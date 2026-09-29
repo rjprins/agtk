@@ -936,6 +936,41 @@ impl Workspace {
             .collect()
     }
 
+    /// Starts an exited agent's conversation again in place of its row.
+    pub(super) fn resume_exited_session(&self, id: &str) {
+        let Some(record) = self.sessions.borrow().get(id).map(|s| s.record.clone()) else {
+            return;
+        };
+        if record.state != SessionState::Exited {
+            self.show_error("This session is still running");
+            return;
+        }
+        let provider = match record.kind {
+            SessionKind::Claude => AgentProvider::Claude,
+            SessionKind::Codex => AgentProvider::Codex,
+            _ => return,
+        };
+        let Some(conversation_id) = record.conversation_id.clone() else {
+            self.show_error(
+                "agmux does not know this session's conversation. Find it with Resume Session.",
+            );
+            return;
+        };
+        let existing = |path: Option<PathBuf>| path.filter(|path| path.exists());
+        let params = crate::control::CreateSessionParams {
+            kind: provider.kind(),
+            command: None,
+            args: provider.resume_args(&conversation_id),
+            cwd: existing(record.cwd.clone()).or(existing(record.project_root.clone())),
+            name: Some(record.name.clone()),
+            project_root: record.project_root.clone(),
+            worktree_path: existing(record.worktree_path.clone()),
+            initial_input: None,
+        };
+        self.stop_session(id, None);
+        self.launch_controlled_with_conversation(params, Some(conversation_id), None);
+    }
+
     /// Records the conversation of running agents that never reported one, and
     /// drops those conversations from the list since they are open already.
     fn claim_live_conversations(&self, items: &mut Vec<AgentSessionItem>) {
