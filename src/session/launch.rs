@@ -6,6 +6,8 @@ use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
+use std::thread;
 
 use crate::control::{CreateSessionParams, SessionKind};
 
@@ -56,7 +58,7 @@ impl SessionLaunchPlan {
                 "custom sessions require an executable".to_owned(),
             ));
         }
-        let path = interactive_shell_path()?;
+        let path = cached_shell_path()?;
         let program = resolve_executable_from(
             &command,
             cwd.as_deref(),
@@ -201,6 +203,24 @@ impl fmt::Display for LaunchPlanError {
 }
 
 impl std::error::Error for LaunchPlanError {}
+
+// A login shell takes about a second, so read PATH once per process.
+static SHELL_PATH: OnceLock<OsString> = OnceLock::new();
+
+/// Reads the login shell PATH in the background so the first launch does not wait.
+pub fn warm_shell_path() {
+    thread::spawn(|| {
+        let _ = cached_shell_path();
+    });
+}
+
+fn cached_shell_path() -> Result<OsString, LaunchPlanError> {
+    if let Some(path) = SHELL_PATH.get() {
+        return Ok(path.clone());
+    }
+    let path = interactive_shell_path()?;
+    Ok(SHELL_PATH.get_or_init(|| path).clone())
+}
 
 fn interactive_shell_path() -> Result<OsString, LaunchPlanError> {
     let Some(shell) = env::var_os("SHELL") else {

@@ -33,7 +33,9 @@ use crate::io_worker::IoWorker;
 use crate::launch_preferences::QuickLaunchPreferences;
 use crate::persist::{PersistResult, SessionRecord, Store};
 use crate::projects::ProjectPreferences;
-use crate::session::{SessionHostLaunchPlan, SessionLaunchPlan, receive_attachment};
+use crate::session::{
+    SessionHostLaunchPlan, SessionLaunchPlan, receive_attachment, warm_shell_path,
+};
 use crate::shortcuts::{ShortcutAction, ShortcutPreferences};
 use crate::terminal_text::{bounded_terminal_text, copyable_selection};
 
@@ -179,6 +181,7 @@ struct SessionView {
 }
 
 pub fn build(app: &adw::Application, paths: InstancePaths) {
+    warm_shell_path();
     let display = gtk::gdk::Display::default().expect("GTK application has no display");
     let style_manager = adw::StyleManager::for_display(&display);
     let chrome_style = style::ChromeStyle::install(&display);
