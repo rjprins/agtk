@@ -371,7 +371,7 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
     assert_eq!(launch_child("launch-base-branch")["isVisible"], true);
     assert_eq!(launch_child("launch-base-branch")["isEnabled"], false);
     thread::sleep(Duration::from_millis(50));
-    // Dialogs render inside the main window, so the capture shows both.
+    // The capture shows the open dialog window.
     let transient = app.request("ui.capture", json!({}));
     assert!(transient["path"].as_str().is_some());
 }

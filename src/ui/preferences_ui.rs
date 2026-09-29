@@ -9,7 +9,7 @@ const CLAUDE_PAGE: &str = "claude";
 #[derive(Clone)]
 pub(super) struct PreferencesDialog {
     pub(super) modal: modal::Modal,
-    dialog: adw::PreferencesDialog,
+    pages: adw::ViewStack,
     theme: adw::ComboRow,
     follow_system: adw::SwitchRow,
     font: adw::EntryRow,
@@ -23,11 +23,7 @@ pub(super) struct PreferencesDialog {
 
 impl PreferencesDialog {
     pub(super) fn build(parent: &adw::ApplicationWindow) -> Self {
-        let dialog = adw::PreferencesDialog::builder()
-            .title("Preferences")
-            .content_width(640)
-            .content_height(620)
-            .build();
+        let pages = adw::ViewStack::new();
 
         let theme_names = ThemeKey::ALL.map(|key| theme(key).name);
         let theme_row = adw::ComboRow::builder()
@@ -70,7 +66,12 @@ impl PreferencesDialog {
             .build();
         appearance.add(&terminal);
         appearance.add(&interface);
-        dialog.add(&appearance);
+        pages.add_titled_with_icon(
+            &appearance,
+            Some(APPEARANCE_PAGE),
+            &appearance.title(),
+            "preferences-desktop-appearance-symbolic",
+        );
 
         let shortcuts_group = adw::PreferencesGroup::builder()
             .title("Application Shortcuts")
@@ -113,7 +114,12 @@ impl PreferencesDialog {
             .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
             .build();
         shortcuts.add(&shortcuts_group);
-        dialog.add(&shortcuts);
+        pages.add_titled_with_icon(
+            &shortcuts,
+            Some(SHORTCUTS_PAGE),
+            &shortcuts.title(),
+            "preferences-desktop-keyboard-shortcuts-symbolic",
+        );
 
         let claude_presets = adw::EntryRow::builder()
             .title("Presets JSON")
@@ -132,11 +138,23 @@ impl PreferencesDialog {
             .icon_name("applications-science-symbolic")
             .build();
         claude.add(&claude_group);
-        dialog.add(&claude);
+        pages.add_titled_with_icon(
+            &claude,
+            Some(CLAUDE_PAGE),
+            &claude.title(),
+            "applications-science-symbolic",
+        );
+
+        let modal = modal::Modal::new(parent, "Preferences", 640, 620, &pages);
+        let switcher = adw::ViewSwitcher::builder()
+            .stack(&pages)
+            .policy(adw::ViewSwitcherPolicy::Wide)
+            .build();
+        modal.header().set_title_widget(Some(&switcher));
 
         Self {
-            modal: modal::Modal::wrap(parent, &dialog, None),
-            dialog,
+            modal,
+            pages,
             theme: theme_row,
             follow_system,
             font,
@@ -149,12 +167,12 @@ impl PreferencesDialog {
     }
 
     pub(super) fn open(&self, page: &str) {
-        self.dialog.set_visible_page_name(page);
+        self.pages.set_visible_child_name(page);
         self.modal.present();
     }
 
     pub(super) fn is_showing(&self, page: &str) -> bool {
-        self.modal.is_visible() && self.dialog.visible_page_name().as_deref() == Some(page)
+        self.modal.is_visible() && self.pages.visible_child_name().as_deref() == Some(page)
     }
 
     /// Mirrors saved appearance settings without treating them as user edits.

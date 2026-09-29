@@ -80,6 +80,12 @@ pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, 
 }
 
 fn active_surface(workspace: &Workspace) -> gtk::Widget {
-    // Dialogs live inside the main window, so the window shows them over the workspace.
-    workspace.window.clone().upcast()
+    workspace
+        .modals()
+        .into_iter()
+        .find(|modal| modal.is_visible())
+        .map_or_else(
+            || workspace.window.clone().upcast(),
+            |modal| modal.window().clone().upcast(),
+        )
 }

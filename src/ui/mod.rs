@@ -69,6 +69,7 @@ mod worktrees_ui;
 
 const EMPTY_PAGE: &str = "empty";
 const MAX_INSPECTED_SESSIONS: usize = 500;
+const DIALOG_SIZES_PREFERENCE: &str = "dialogSizes";
 const PCRE2_LITERAL: u32 = 0x0200_0000;
 const PCRE2_UTF: u32 = 0x0008_0000;
 const PCRE2_MULTILINE: u32 = 0x0000_0400;
@@ -877,6 +878,51 @@ impl Workspace {
             |workspace, result| {
                 if let Err(error) = result {
                     workspace.show_error(&format!("Could not save preference: {error}"));
+                }
+            },
+        );
+    }
+
+    fn modals(&self) -> [&modal::Modal; 7] {
+        [
+            &self.launch.modal,
+            &self.worktrees.modal,
+            &self.agents.modal,
+            &self.prs.modal,
+            &self.preferences.modal,
+            &self.history_window,
+            &self.claude_model_window,
+        ]
+    }
+
+    /// Restores dialog sizes the user chose and saves new ones as they change.
+    fn load_dialog_sizes(&self) {
+        let Some(store) = self.store.borrow().clone() else {
+            return;
+        };
+        self.run_io(
+            move || store.preference(DIALOG_SIZES_PREFERENCE),
+            |workspace, result| {
+                let sizes = result
+                    .ok()
+                    .flatten()
+                    .and_then(|value| {
+                        serde_json::from_value::<HashMap<String, (i32, i32)>>(value).ok()
+                    })
+                    .unwrap_or_default();
+                let sizes = Rc::new(RefCell::new(sizes));
+                for modal in workspace.modals() {
+                    let title = modal.title();
+                    modal.set_saved_size(sizes.borrow().get(&title).copied());
+                    let sizes = sizes.clone();
+                    let saving = workspace.clone();
+                    modal.connect_resized(move |width, height| {
+                        sizes.borrow_mut().insert(title.clone(), (width, height));
+                        saving.save_preference(
+                            DIALOG_SIZES_PREFERENCE,
+                            serde_json::json!(*sizes.borrow()),
+                        );
+                    });
                 }
             },
         );

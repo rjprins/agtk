@@ -287,6 +287,7 @@ impl Workspace {
                     recovered,
                 )) => {
                     *workspace.store.borrow_mut() = Some(store);
+                    workspace.load_dialog_sizes();
                     workspace.sidebar_split.set_position(sidebar_width);
                     workspace.load_appearance(appearance);
                     workspace.load_shortcuts(shortcuts);
