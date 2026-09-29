@@ -17,6 +17,10 @@ fn shortcut_defaults_preserve_the_approved_keyboard_contract() {
         "<Control><Shift>bracketright"
     );
     assert_eq!(
+        preferences.binding(ShortcutAction::LastSession),
+        "<Control><Shift>l"
+    );
+    assert_eq!(
         preferences.binding(ShortcutAction::IncreaseFontSize),
         "<Control>plus"
     );
@@ -34,6 +38,7 @@ fn shortcut_preferences_have_stable_serialized_action_keys() {
 
     assert_eq!(value["bindings"]["new-shell"], "<Control><Shift>grave");
     assert_eq!(value["bindings"]["reopen-pr-list"], "<Alt><Shift>p");
+    assert_eq!(value["bindings"]["last-session"], "<Control><Shift>l");
     assert_eq!(value["bindings"]["increase-font-size"], "<Control>plus");
     assert_eq!(
         serde_json::from_value::<ShortcutPreferences>(value).expect("deserialize shortcuts"),

@@ -32,6 +32,8 @@ pub struct WorkspaceTabs {
     active_context: Option<String>,
     selected_session: Option<String>,
     visible_tab: Option<WorkspaceTabId>,
+    /// Sessions in the order they were last selected, most recent last.
+    session_history: Vec<String>,
 }
 
 impl WorkspaceTabs {
@@ -57,6 +59,7 @@ impl WorkspaceTabs {
     pub fn select_session(&mut self, session_id: &str) -> Option<WorkspaceTabId> {
         let context = self.session_context.get(session_id)?.clone();
         self.selected_session = Some(session_id.to_owned());
+        self.record_visit(session_id);
         self.active_context = Some(context.clone());
         let tab = WorkspaceTabId::Session(session_id.to_owned());
         self.activate(&context, tab.clone());
@@ -74,6 +77,7 @@ impl WorkspaceTabs {
         tabs.recent
             .retain(|tab| matches!(tab, WorkspaceTabId::Session(_)));
         self.selected_session = Some(context_owner.to_owned());
+        self.record_visit(context_owner);
         self.active_context = Some(context.clone());
         let tab = WorkspaceTabId::Diff(key);
         self.activate(&context, tab.clone());
@@ -142,6 +146,7 @@ impl WorkspaceTabs {
 
     pub fn remove_session(&mut self, session_id: &str) -> Option<String> {
         let context = self.session_context.remove(session_id)?;
+        self.session_history.retain(|id| id != session_id);
         let tabs = self.contexts.get_mut(&context)?;
         tabs.sessions.retain(|id| id != session_id);
         let session_tab = WorkspaceTabId::Session(session_id.to_owned());
@@ -193,6 +198,15 @@ impl WorkspaceTabs {
         self.selected_session.as_deref()
     }
 
+    /// The most recently selected session other than the current one.
+    pub fn last_session(&self) -> Option<&str> {
+        self.session_history
+            .iter()
+            .rev()
+            .map(String::as_str)
+            .find(|id| Some(*id) != self.selected_session.as_deref())
+    }
+
     pub fn session_context(&self, session_id: &str) -> Option<&str> {
         self.session_context.get(session_id).map(String::as_str)
     }
@@ -205,6 +219,11 @@ impl WorkspaceTabs {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         key.hash(&mut hasher);
         format!("diff-{:016x}", hasher.finish())
+    }
+
+    fn record_visit(&mut self, session_id: &str) {
+        self.session_history.retain(|id| id != session_id);
+        self.session_history.push(session_id.to_owned());
     }
 
     fn activate(&mut self, context: &str, tab: WorkspaceTabId) {
@@ -221,5 +240,41 @@ fn tab_exists(tabs: &ContextTabs, tab: &WorkspaceTabId) -> bool {
     match tab {
         WorkspaceTabId::Session(id) => tabs.sessions.contains(id),
         WorkspaceTabId::Diff(key) => tabs.diffs.contains(key),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkspaceTabs;
+
+    fn tabs_with(sessions: &[&str]) -> WorkspaceTabs {
+        let mut tabs = WorkspaceTabs::default();
+        for id in sessions {
+            tabs.attach_session(*id, "/repo");
+        }
+        tabs
+    }
+
+    #[test]
+    fn last_session_toggles_between_the_two_most_recent() {
+        let mut tabs = tabs_with(&["a", "b", "c"]);
+        assert_eq!(tabs.last_session(), None);
+        tabs.select_session("a");
+        assert_eq!(tabs.last_session(), None);
+        tabs.select_session("b");
+        tabs.select_session("c");
+        assert_eq!(tabs.last_session(), Some("b"));
+        tabs.select_session("b");
+        assert_eq!(tabs.last_session(), Some("c"));
+    }
+
+    #[test]
+    fn last_session_skips_closed_sessions() {
+        let mut tabs = tabs_with(&["a", "b", "c"]);
+        tabs.select_session("a");
+        tabs.select_session("b");
+        tabs.select_session("c");
+        tabs.remove_session("b");
+        assert_eq!(tabs.last_session(), Some("a"));
     }
 }

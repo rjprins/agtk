@@ -51,6 +51,9 @@ impl Workspace {
         self.add_action("next-ready-session", true, |workspace| {
             workspace.select_next_ready_session();
         });
+        self.add_action("last-session", true, |workspace| {
+            workspace.select_last_session();
+        });
         self.add_action("reopen-pr-list", true, |workspace| {
             if let Some(root) = workspace.preferred_project_root() {
                 workspace.prs.root.set_text(&root);
@@ -369,6 +372,26 @@ impl Workspace {
             None => rows.len() - 1,
         };
         self.list.select_row(Some(&rows[index]));
+    }
+
+    fn select_last_session(&self) {
+        let Some(id) = self
+            .workspace_tabs
+            .borrow()
+            .last_session()
+            .map(str::to_owned)
+        else {
+            self.show_error("No earlier session to go back to");
+            return;
+        };
+        let row = self
+            .sessions
+            .borrow()
+            .get(&id)
+            .map(|session| session.row.clone());
+        if let Some(row) = row {
+            self.list.select_row(Some(&row));
+        }
     }
 
     fn select_next_ready_session(&self) {

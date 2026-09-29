@@ -11,6 +11,7 @@ pub enum ShortcutAction {
     NextSession,
     PreviousSession,
     NextReadySession,
+    LastSession,
     ReopenPrList,
     ClaudeModelPreset,
     IncreaseFontSize,
@@ -18,13 +19,14 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::NewShell,
         Self::CloseSession,
         Self::ToggleSidebar,
         Self::NextSession,
         Self::PreviousSession,
         Self::NextReadySession,
+        Self::LastSession,
         Self::ReopenPrList,
         Self::ClaudeModelPreset,
         Self::IncreaseFontSize,
@@ -39,6 +41,7 @@ impl ShortcutAction {
             Self::NextSession => "next-session",
             Self::PreviousSession => "previous-session",
             Self::NextReadySession => "next-ready-session",
+            Self::LastSession => "last-session",
             Self::ReopenPrList => "reopen-pr-list",
             Self::ClaudeModelPreset => "claude-model-preset",
             Self::IncreaseFontSize => "increase-font-size",
@@ -54,6 +57,7 @@ impl ShortcutAction {
             Self::NextSession => "Next session",
             Self::PreviousSession => "Previous session",
             Self::NextReadySession => "Next ready session",
+            Self::LastSession => "Back to last visited session",
             Self::ReopenPrList => "Reopen PR list",
             Self::ClaudeModelPreset => "Switch Claude model",
             Self::IncreaseFontSize => "Increase UI and terminal font size",
@@ -69,6 +73,7 @@ impl ShortcutAction {
             Self::NextSession => "<Control><Shift>bracketright",
             Self::PreviousSession => "<Control><Shift>bracketleft",
             Self::NextReadySession => "<Control><Shift>space",
+            Self::LastSession => "<Control><Shift>l",
             Self::ReopenPrList => "<Alt><Shift>p",
             Self::ClaudeModelPreset => "<Control><Shift>m",
             Self::IncreaseFontSize => "<Control>plus",
@@ -85,6 +90,7 @@ impl ShortcutAction {
                 | Self::NextSession
                 | Self::PreviousSession
                 | Self::NextReadySession
+                | Self::LastSession
                 | Self::ReopenPrList
                 | Self::ClaudeModelPreset
                 | Self::IncreaseFontSize

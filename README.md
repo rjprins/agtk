@@ -96,6 +96,7 @@ These shortcuts work while VTE has focus and can be changed through `[keys]`:
 | Toggle sidebar | `Ctrl+Shift+Backslash` |
 | Next or previous session | `Ctrl+Shift+]` or `Ctrl+Shift+[` |
 | Next ready session | `Ctrl+Shift+Space` |
+| Back to last visited session | `Ctrl+Shift+L` |
 | Reopen PR list | `Alt+Shift+P` |
 | Switch Claude model preset | `Ctrl+Shift+M` |
 | Copy or paste | `Ctrl+Shift+C` or `Ctrl+Shift+V` |
