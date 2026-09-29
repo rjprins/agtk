@@ -61,6 +61,7 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "spawn_shell",
             "launch_agent",
             "select_session",
+            "open_diff",
             "kill_session",
             "rename_session",
             "open_magit",
