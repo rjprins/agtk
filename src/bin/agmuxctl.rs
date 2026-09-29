@@ -264,7 +264,17 @@ fn run_wait(client: &ControlClient, options: WaitOptions) -> Result<(), Failure>
                 },
                 remaining,
             )
-            .map_err(Failure::Client)?;
+            .map_err(|error| {
+                // The request only gets the time left, so a slow reply is the wait deadline.
+                if error.is_timeout() {
+                    Failure::Timeout(format!(
+                        "wait timed out after {} ms",
+                        options.timeout.as_millis()
+                    ))
+                } else {
+                    Failure::Client(error)
+                }
+            })?;
         match response.body {
             ResponseBody::Success(result) => {
                 if options.condition.is_satisfied(&result) {
