@@ -189,12 +189,19 @@ impl WorktreeManager {
     /// and repositories with many worktrees must not wait for full inventory
     /// hashing before showing their choices.
     pub fn linked_paths(&self, repo_root: &Path) -> WorktreeResult<Vec<PathBuf>> {
-        let repo_root = canonical_repo(repo_root)?;
-        let output = git_text(&repo_root, ["worktree", "list", "--porcelain"])?;
-        Ok(parse_worktree_porcelain(&output)
+        Ok(self
+            .linked_worktrees(repo_root)?
             .into_iter()
             .map(|worktree| worktree.path)
             .collect())
+    }
+
+    /// Like `linked_paths`, with branches. PR matching only needs these, and a
+    /// full `list` hashes files in every worktree.
+    pub fn linked_worktrees(&self, repo_root: &Path) -> WorktreeResult<Vec<PorcelainWorktree>> {
+        let repo_root = canonical_repo(repo_root)?;
+        let output = git_text(&repo_root, ["worktree", "list", "--porcelain"])?;
+        Ok(parse_worktree_porcelain(&output))
     }
 
     pub fn list(

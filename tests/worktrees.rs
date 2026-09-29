@@ -42,6 +42,38 @@ fn linked_worktree_paths_include_every_checkout_without_status_scanning() {
 }
 
 #[test]
+fn linked_worktrees_report_each_checkout_branch() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let extra = fixture.root().parent().unwrap().join("demo-linked-branch");
+    git(
+        fixture.root(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "linked-work",
+            extra.to_str().unwrap(),
+            "main",
+        ],
+    );
+
+    let worktrees = manager.linked_worktrees(fixture.root()).unwrap();
+
+    let branches = worktrees
+        .iter()
+        .map(|worktree| (worktree.path.clone(), worktree.branch.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        branches,
+        vec![
+            (fixture.root().to_path_buf(), Some("main".to_owned())),
+            (extra, Some("linked-work".to_owned())),
+        ]
+    );
+}
+
+#[test]
 fn worktree_root_resolves_nested_directories_in_linked_checkouts() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic());

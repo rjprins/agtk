@@ -8,7 +8,7 @@ use crate::control::{
 };
 use crate::persist::now_millis;
 use crate::providers::{AgentProvider, ProviderDiscovery, recent_mutated_paths};
-use crate::worktrees::{WorktreeInfo, WorktreeManager};
+use crate::worktrees::{PorcelainWorktree, WorktreeManager};
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
@@ -143,7 +143,6 @@ impl Workspace {
         let session_id = session_id.to_owned();
         let attic = self.paths.attic_dir();
         let preferences = self.pr_preferences.borrow().clone();
-        let live_paths = self.live_worktree_paths();
         let generation = self.pr_context_generation.clone();
         let requested = generation.fetch_add(1, Ordering::Relaxed) + 1;
         self.run_slow(
@@ -162,11 +161,7 @@ impl Workspace {
                 };
                 let root_key = project_root.to_string_lossy().to_string();
                 let state = preferences.project(&root_key);
-                let worktrees = manager
-                    .list(&project_root, &live_paths)
-                    .ok()
-                    .map(|inventory| inventory.worktrees)
-                    .unwrap_or_default();
+                let worktrees = manager.linked_worktrees(&project_root).unwrap_or_default();
                 let context = pr_context_from_list(project_root, list, &state, &worktrees);
                 let mut selected = branch.as_deref().and_then(|branch| {
                     context
@@ -346,7 +341,6 @@ impl Workspace {
         };
         let preferences = self.pr_preferences.borrow().clone();
         let attic = self.paths.attic_dir();
-        let live_paths = self.live_worktree_paths();
         let requested_key = pr_cache_key(&params.project_root);
         let had_cached = self.pr_context_cache.borrow().contains_key(&requested_key);
         self.prs.loading.set_visible(!had_cached);
@@ -422,21 +416,14 @@ impl Workspace {
                 let value = serde_json::to_value(&preferences)?;
 
                 let worktrees = WorktreeManager::new(attic)
-                    .list(&project_root, &live_paths)
-                    .ok()
-                    .map(|inventory| inventory.worktrees)
+                    .linked_worktrees(&project_root)
                     .unwrap_or_default();
                 let pull_requests = list
                     .pull_requests
                     .into_iter()
                     .map(|pull_request| {
-                        let worktree_path = worktrees
-                            .iter()
-                            .find(|worktree| {
-                                worktree.branch.as_deref()
-                                    == Some(pull_request.source_branch.as_str())
-                            })
-                            .map(|worktree| worktree.path.clone());
+                        let worktree_path =
+                            worktree_for_branch(&worktrees, &pull_request.source_branch);
                         let attention = reconciliation
                             .state
                             .attention
@@ -713,7 +700,6 @@ impl Workspace {
         let load_root = project_root.clone();
         let pull_request_id = params.pull_request_id;
         let attic = self.paths.attic_dir();
-        let live_paths = self.live_worktree_paths();
         self.run_slow(
             move || {
                 let Some(list) = AzureClient::from_environment().list_active(&load_root)? else {
@@ -724,19 +710,10 @@ impl Workspace {
                     .into_iter()
                     .find(|pull_request| pull_request.id == pull_request_id)
                     .ok_or("active pull request was not found")?;
-                let worktree_path = WorktreeManager::new(attic)
-                    .list(&load_root, &live_paths)
-                    .ok()
-                    .and_then(|inventory| {
-                        inventory
-                            .worktrees
-                            .into_iter()
-                            .find(|worktree| {
-                                worktree.branch.as_deref()
-                                    == Some(pull_request.source_branch.as_str())
-                            })
-                            .map(|worktree| worktree.path)
-                    });
+                let worktrees = WorktreeManager::new(attic)
+                    .linked_worktrees(&load_root)
+                    .unwrap_or_default();
+                let worktree_path = worktree_for_branch(&worktrees, &pull_request.source_branch);
                 Ok(PrItem {
                     pull_request,
                     attention: None,
@@ -809,18 +786,13 @@ fn pr_context_from_list(
     project_root: PathBuf,
     list: AzurePrList,
     state: &PrProjectState,
-    worktrees: &[WorktreeInfo],
+    worktrees: &[PorcelainWorktree],
 ) -> PrContext {
     let pull_requests = list
         .pull_requests
         .into_iter()
         .map(|pull_request| {
-            let worktree_path = worktrees
-                .iter()
-                .find(|worktree| {
-                    worktree.branch.as_deref() == Some(pull_request.source_branch.as_str())
-                })
-                .map(|worktree| worktree.path.clone());
+            let worktree_path = worktree_for_branch(worktrees, &pull_request.source_branch);
             PrItem {
                 attention: state.attention.get(&pull_request.id).copied(),
                 pull_request,
@@ -835,6 +807,13 @@ fn pr_context_from_list(
         auto_review: state.auto_review,
         pull_requests,
     }
+}
+
+fn worktree_for_branch(worktrees: &[PorcelainWorktree], branch: &str) -> Option<PathBuf> {
+    worktrees
+        .iter()
+        .find(|worktree| worktree.branch.as_deref() == Some(branch))
+        .map(|worktree| worktree.path.clone())
 }
 
 fn pr_cache_key(root: &Path) -> String {
