@@ -1,3 +1,5 @@
+// The preview only uses part of the viewer API.
+#[allow(dead_code)]
 #[path = "../src/ui/diff_viewer.rs"]
 mod diff_viewer;
 
@@ -6,6 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
+use webkit6::prelude::*;
 use diff_viewer::{DiffViewer, ViewerEvent};
 
 fn main() -> glib::ExitCode {
@@ -60,13 +63,30 @@ fn main() -> glib::ExitCode {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp/agmux-diff-viewer-preview.png"));
         glib::timeout_add_local_once(Duration::from_secs(5), move || {
-            viewer.snapshot_to_png(capture_path.clone(), move |result| {
-                match result {
-                    Ok(()) => println!("Captured viewer to {}", capture_path.display()),
-                    Err(error) => eprintln!("Could not capture viewer: {error}"),
-                }
-                app.quit();
-            });
+            // The app never captures the viewer, so the preview snapshots the WebView itself.
+            let web_view = viewer
+                .widget()
+                .downcast::<webkit6::WebView>()
+                .expect("the viewer widget is a WebView");
+            web_view.snapshot(
+                webkit6::SnapshotRegion::Visible,
+                webkit6::SnapshotOptions::NONE,
+                None::<&gio::Cancellable>,
+                move |result| {
+                    let result = result
+                        .map_err(|error| error.to_string())
+                        .and_then(|texture| {
+                            texture
+                                .save_to_png(&capture_path)
+                                .map_err(|error| error.to_string())
+                        });
+                    match result {
+                        Ok(()) => println!("Captured viewer to {}", capture_path.display()),
+                        Err(error) => eprintln!("Could not capture viewer: {error}"),
+                    }
+                    app.quit();
+                },
+            );
         });
     });
     app.run()
