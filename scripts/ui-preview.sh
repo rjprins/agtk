@@ -36,6 +36,7 @@ out="$work/captures"
 mkdir -p "$runtime" "$out" "$work/state" "$work/claude" "$work/codex"
 
 pids=()
+compositor=""
 cleanup() {
   if ((keep)); then return; fi
   if [[ -S "$runtime/agmux-native/preview/control.sock" ]]; then
@@ -44,6 +45,8 @@ cleanup() {
     done
   fi
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  # dbus-run-session does not pass the signal on, so stop its whole group.
+  [[ -n $compositor ]] && kill -- "-$compositor" 2>/dev/null || true
   rm -rf "$runtime"
 }
 trap cleanup EXIT
@@ -138,9 +141,9 @@ export AGMUX_AZURE_THREADS_FILE="$work/azure-threads.json" AGMUX_EMACSCLIENT=/bi
 ctl() { "$bin/agmuxctl" --instance preview "$@"; }
 id_of() { ctl state | grep -o "\"id\":\"[^\"]*\"[^}]*\"name\":\"$1\"" | head -1 | cut -d'"' -f4; }
 
-dbus-run-session -- mutter --headless --wayland --no-x11 --virtual-monitor 1400x900 \
+setsid dbus-run-session -- mutter --headless --wayland --no-x11 --virtual-monitor 1400x900 \
   --wayland-display "$display" >"$work/mutter.log" 2>&1 &
-pids+=($!)
+compositor=$!
 for _ in $(seq 50); do [[ -S "${XDG_RUNTIME_DIR:-/tmp}/$display" ]] && break; sleep 0.2; done
 
 start_ui() {
@@ -210,5 +213,5 @@ pids+=("$ui_pid")
 if ((keep)); then
   echo "Instance still running. Drive it with:"
   echo "  AGMUX_RUNTIME_ROOT=$runtime $bin/agmuxctl --instance preview state"
-  echo "Stop it with: kill ${pids[*]}"
+  echo "Stop it with: kill ${pids[*]}; kill -- -$compositor"
 fi
