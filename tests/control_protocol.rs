@@ -271,6 +271,7 @@ fn provider_commands_are_bounded_and_typed() {
         ControlCommand::SessionSetState(SessionSetStateParams {
             session_id: "claude-1".to_owned(),
             state: AgentSignalState::Waiting,
+            conversation_id: None,
         })
     );
 

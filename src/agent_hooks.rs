@@ -25,7 +25,7 @@ fn shell_quote(value: &str) -> String {
 
 fn state_command(agmuxctl: &Path, state: &str) -> String {
     format!(
-        r#"[ -z "$AGMUX_SESSION_ID" ] || {} session state "$AGMUX_SESSION_ID" {state} >/dev/null 2>&1 || true"#,
+        r#"[ -z "$AGMUX_SESSION_ID" ] || {} session state "$AGMUX_SESSION_ID" {state} --hook-input >/dev/null 2>&1 || true"#,
         shell_quote(&agmuxctl.to_string_lossy())
     )
 }

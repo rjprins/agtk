@@ -34,7 +34,7 @@ fn claude_hooks_report_each_turn_boundary() {
             "{event}: {command}"
         );
         assert!(
-            command.ends_with(&format!(" {state} >/dev/null 2>&1 || true")),
+            command.ends_with(&format!(" {state} --hook-input >/dev/null 2>&1 || true")),
             "{event}: {command}"
         );
     }
@@ -51,6 +51,7 @@ fn hooks_outlast_the_agmuxctl_reply_deadline() {
     let deadline = control_timeout(&ControlCommand::SessionSetState(SessionSetStateParams {
         session_id: "claude-1".to_owned(),
         state: AgentSignalState::Busy,
+        conversation_id: None,
     }));
     // Otherwise Claude Code kills a hook that agmuxctl would have given up on quietly.
     assert!(Duration::from_secs(HOOK_TIMEOUT_SECONDS) > deadline);

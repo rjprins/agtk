@@ -150,6 +150,8 @@ agmuxctl session state "$AGMUX_SESSION_ID" ready
 agmuxctl session state "$AGMUX_SESSION_ID" idle
 ```
 
+Add `--hook-input` when the command runs as a Claude Code hook. agmuxctl then reads the hook's JSON from stdin and records its `session_id`, so agmux knows which conversation the session holds and leaves it out of the Resume Session list.
+
 ### Agent states
 
 | Glyph | State | Meaning |

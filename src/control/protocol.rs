@@ -269,6 +269,9 @@ pub enum AgentSignalState {
 pub struct SessionSetStateParams {
     pub session_id: String,
     pub state: AgentSignalState,
+    /// The provider conversation the agent is on now, as its hook reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -556,6 +559,9 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
         "session.set_state" => {
             let params: SessionSetStateParams = decode_params(wire.params)?;
             validate_session_id(&params.session_id)?;
+            if let Some(conversation_id) = &params.conversation_id {
+                validate_provider_session_id(conversation_id)?;
+            }
             ControlCommand::SessionSetState(params)
         }
         "session.open_magit" => {

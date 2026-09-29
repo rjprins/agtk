@@ -99,6 +99,47 @@ fn classify_agent_sessions(
         .collect()
 }
 
+/// A running agent row whose conversation agmux does not know yet.
+#[derive(Debug, Clone)]
+struct UnclaimedAgent {
+    session_id: String,
+    provider: AgentProvider,
+    cwd: PathBuf,
+    launched_at: u64,
+}
+
+/// Pairs each running agent with the earliest log in its directory that
+/// began after it launched. Codex has no hook to say which log is its own.
+fn match_unclaimed_agents(
+    agents: &[UnclaimedAgent],
+    items: &[AgentSessionItem],
+) -> Vec<(String, usize)> {
+    // Logs start at the first prompt, a little after launch at the earliest.
+    const CLOCK_SLACK_MILLIS: u64 = 5_000;
+    let mut agents = agents.to_vec();
+    agents.sort_by_key(|agent| agent.launched_at);
+    let mut claimed = BTreeSet::new();
+    let mut matches = Vec::new();
+    for agent in agents {
+        let best = items
+            .iter()
+            .enumerate()
+            .filter(|(index, item)| {
+                !claimed.contains(index)
+                    && item.session.provider == agent.provider
+                    && item.session.cwd.as_deref() == Some(agent.cwd.as_path())
+                    && item.session.created_at + CLOCK_SLACK_MILLIS >= agent.launched_at
+            })
+            .min_by_key(|(_, item)| item.session.created_at)
+            .map(|(index, _)| index);
+        if let Some(index) = best {
+            claimed.insert(index);
+            matches.push((agent.session_id, index));
+        }
+    }
+    matches
+}
+
 fn restore_target_for_location(
     cwd: Option<PathBuf>,
     project_root: Option<PathBuf>,
@@ -676,8 +717,9 @@ impl Workspace {
                 })
             },
             |workspace, result| match result {
-                Ok(sessions) => {
+                Ok(mut sessions) => {
                     workspace.agents.loading.set(false);
+                    workspace.claim_live_conversations(&mut sessions);
                     workspace.agents.sessions.replace(sessions);
                     workspace.agents.selected.borrow_mut().take();
                     workspace.refresh_agent_project_choices();
@@ -892,6 +934,49 @@ impl Workspace {
                 Some((provider, session.record.conversation_id.clone()?))
             })
             .collect()
+    }
+
+    /// Records the conversation of running agents that never reported one, and
+    /// drops those conversations from the list since they are open already.
+    fn claim_live_conversations(&self, items: &mut Vec<AgentSessionItem>) {
+        let agents = self
+            .sessions
+            .borrow()
+            .values()
+            .filter(|session| {
+                session.record.state != SessionState::Exited
+                    && session.record.conversation_id.is_none()
+            })
+            .filter_map(|session| {
+                Some(UnclaimedAgent {
+                    session_id: session.record.id.clone(),
+                    provider: match session.record.kind {
+                        SessionKind::Codex => AgentProvider::Codex,
+                        SessionKind::Claude => AgentProvider::Claude,
+                        _ => return None,
+                    },
+                    cwd: session.record.cwd.clone()?,
+                    launched_at: session.record.created_at,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut matches = match_unclaimed_agents(&agents, items);
+        for (session_id, index) in &matches {
+            let record = {
+                let mut sessions = self.sessions.borrow_mut();
+                let Some(session) = sessions.get_mut(session_id) else {
+                    continue;
+                };
+                session.record.conversation_id =
+                    Some(items[*index].session.provider_session_id.clone());
+                session.record.clone()
+            };
+            self.persist_record(record);
+        }
+        matches.sort_by_key(|(_, index)| std::cmp::Reverse(*index));
+        for (_, index) in matches {
+            items.remove(index);
+        }
     }
 
     fn render_agent_sessions(&self) {
@@ -1668,9 +1753,9 @@ fn compact_agent_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentSessionItem, agent_day_heading, agent_location_label, agent_row_time,
+        AgentSessionItem, UnclaimedAgent, agent_day_heading, agent_location_label, agent_row_time,
         agent_worktree_name, classify_agent_sessions, days_between, filter_agent_sessions,
-        restore_target_for_location,
+        match_unclaimed_agents, restore_target_for_location,
     };
     use crate::providers::{AgentProvider, ProviderSession};
     use crate::worktrees::WorktreeManager;
@@ -1823,6 +1908,32 @@ mod tests {
             classified[0].project_root,
             Some(PathBuf::from("/work/agmux"))
         );
+    }
+
+    #[test]
+    fn running_agents_claim_the_first_log_after_their_launch() {
+        let log = |id: &str, cwd: &str, created_at: u64| {
+            let mut item = item(id, id, cwd, Some("/work"));
+            item.session.created_at = created_at;
+            item
+        };
+        let items = vec![
+            log("older", "/work/a", 1_000),
+            log("second", "/work/a", 60_000),
+            log("first", "/work/a", 30_000),
+            log("elsewhere", "/work/b", 30_000),
+        ];
+        let agent = |id: &str, launched_at: u64| UnclaimedAgent {
+            session_id: id.to_owned(),
+            provider: AgentProvider::Codex,
+            cwd: PathBuf::from("/work/a"),
+            launched_at,
+        };
+
+        let matches =
+            match_unclaimed_agents(&[agent("late", 50_000), agent("early", 20_000)], &items);
+
+        assert_eq!(matches, [("early".to_owned(), 2), ("late".to_owned(), 1)]);
     }
 
     #[test]

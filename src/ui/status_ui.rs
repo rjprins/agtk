@@ -54,6 +54,7 @@ impl Workspace {
             AgentSignalState::Waiting => Signal::Waiting,
             AgentSignalState::Idle => Signal::Idle,
         };
+        let mut changed_record = None;
         let state = {
             let mut sessions = self.sessions.borrow_mut();
             let Some(session) = sessions.get_mut(&params.session_id) else {
@@ -65,8 +66,18 @@ impl Workspace {
             if session.record.state != SessionState::Exited {
                 session.hook_signal = Some(signal);
             }
+            // After /clear or /resume the agent is on another conversation.
+            if let Some(conversation_id) = params.conversation_id.clone()
+                && session.record.conversation_id.as_ref() != Some(&conversation_id)
+            {
+                session.record.conversation_id = Some(conversation_id);
+                changed_record = Some(session.record.clone());
+            }
             session.record.state
         };
+        if let Some(record) = changed_record {
+            self.persist_record(record);
+        }
         if state == SessionState::Exited {
             self.report_failure(
                 Some(pending),
