@@ -31,6 +31,9 @@ pub struct SessionRecord {
     #[serde(default)]
     pub state_changed_at: u64,
     pub position: i64,
+    /// True once the user named the session, as opposed to a generated name.
+    #[serde(default)]
+    pub renamed: bool,
 }
 
 impl SessionRecord {
@@ -50,6 +53,7 @@ impl SessionRecord {
             state: SessionState::Running,
             state_changed_at: 0,
             position: 0,
+            renamed: false,
         }
     }
 }

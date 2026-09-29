@@ -17,6 +17,7 @@ serde_json = "1"
 rusqlite = "0.40.2"
 vte = { package = "vte4", version = "0.10.0", features = ["gtk_v4_18", "v0_84"] }
 regex = "1"
+memchr = "2"
 webkit6 = "=0.6.1"
 
 [dependencies.adw]
@@ -29,3 +30,10 @@ tempfile = "3.23"
 
 [build-dependencies]
 glib-build-tools = "=0.22.8"
+
+# Scanning agent logs is slow unoptimized, and start.sh runs debug builds.
+[profile.dev.package.memchr]
+opt-level = 3
+
+[profile.dev.package.serde_json]
+opt-level = 3

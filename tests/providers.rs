@@ -159,3 +159,99 @@ fn recent_mutated_paths_only_tracks_claude_file_mutations_newest_first() {
         ]
     );
 }
+
+#[test]
+fn titles_prefer_the_given_name_then_the_provider_title_then_the_command() {
+    let fixture = tempfile::tempdir().unwrap();
+    let claude = fixture.path().join("claude");
+    let codex = fixture.path().join("codex");
+    let project = fixture.path().join("project");
+    fs::create_dir_all(claude.join("projects/demo")).unwrap();
+    fs::create_dir_all(codex.join("sessions/2026/09/29")).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let cwd = serde_json::to_string(&project).unwrap();
+    let line = |value: serde_json::Value| format!("{value}\n");
+    // Claude writes the role before the content, which a sorted json! map would not.
+    let prompt = |text: &str| {
+        format!(
+            "{{\"type\":\"user\",\"sessionId\":\"named\",\"cwd\":{cwd},\"gitBranch\":\"cleanup\",\"message\":{{\"role\":\"user\",\"content\":{}}}}}\n",
+            serde_json::to_string(text).unwrap()
+        )
+    };
+    let mut named = prompt("Why do we even have the metrics flag?");
+    named += &line(
+        serde_json::json!({"type":"assistant","message":{"content":[{"type":"text","text":"It guards the exporter."}]}}),
+    );
+    named += "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"t\",\"type\":\"tool_result\",\"content\":\"ok\"}]}}\n";
+    named += &prompt("Write a plan for it");
+    named +=
+        &line(serde_json::json!({"type":"ai-title","aiTitle":"Metrics flag","sessionId":"named"}));
+    named += &line(
+        serde_json::json!({"type":"custom-title","customTitle":"Alerting","sessionId":"named"}),
+    );
+    named += &line(
+        serde_json::json!({"type":"last-prompt","lastPrompt":"Write a plan for it","sessionId":"named"}),
+    );
+    fs::write(claude.join("projects/demo/named.jsonl"), named).unwrap();
+
+    let command = format!(
+        "{{\"type\":\"user\",\"sessionId\":\"command\",\"cwd\":{cwd},\"message\":{{\"role\":\"user\",\"content\":\"<command-message>review-pr</command-message>\\n<command-name>/review-pr</command-name>\\n<command-args>103601</command-args>\"}}}}\n"
+    );
+    fs::write(claude.join("projects/demo/command.jsonl"), command).unwrap();
+
+    fs::write(
+        codex.join("sessions/2026/09/29/rollout.jsonl"),
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"codex-7\",\"cwd\":{cwd},\"git\":{{\"branch\":\"dashboards\"}}}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"Build a Grafana dashboard\"}}]}}}}\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        codex.join("session_index.jsonl"),
+        "{\"id\":\"codex-7\",\"thread_name\":\"Old name\"}\n{\"id\":\"codex-7\",\"thread_name\":\"Grafana Log Dashboard\"}\n",
+    )
+    .unwrap();
+
+    let cache = fixture.path().join("cache.json");
+    let discovery = ProviderDiscovery::new(
+        DiscoveryRoots {
+            claude_config_dir: claude,
+            codex_home_dir: codex,
+        },
+        50,
+        90 * 24 * 60 * 60 * 1_000,
+    )
+    .with_cache(cache.clone());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let sessions = discovery.discover(now, &BTreeSet::new()).unwrap();
+    let find = |id: &str| {
+        sessions
+            .iter()
+            .find(|session| session.provider_session_id == id)
+            .unwrap()
+    };
+
+    let named = find("named");
+    assert_eq!(named.name, "Alerting");
+    assert_eq!(named.ai_title.as_deref(), Some("Metrics flag"));
+    assert_eq!(
+        named.first_prompt.as_deref(),
+        Some("Why do we even have the metrics flag?")
+    );
+    assert_eq!(named.last_prompt.as_deref(), Some("Write a plan for it"));
+    assert_eq!(named.branch.as_deref(), Some("cleanup"));
+    assert_eq!(named.prompt_count, 2);
+
+    let command = find("command");
+    assert_eq!(command.name, "/review-pr 103601");
+    assert_eq!(command.prompt_count, 1);
+
+    let codex = find("codex-7");
+    assert_eq!(codex.name, "Grafana Log Dashboard");
+    assert_eq!(codex.branch.as_deref(), Some("dashboards"));
+    assert_eq!(codex.prompt_count, 1);
+    assert!(cache.exists());
+}

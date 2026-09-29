@@ -23,7 +23,8 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Persisted session metadata, ordering, project pins, collapsed groups, launch preferences, terminal themes, fonts, and keyboard overrides
 - Ctrl-plus and Ctrl-minus font scaling for the application chrome and every embedded terminal, persisted with appearance settings
 - Safe purpose-aware worktree creation and guarded reap with salvage and attic tags
-- Recent Codex and Claude conversation discovery, preview, direct restore, and busy, waiting, ready, and idle agent states from Claude hooks and screen reading
+- A Resume Session dialog (`Ctrl+Shift+R`) that lists closed Claude and Codex conversations newest first under their own titles (your `/rename` name, else the provider's title), with where each one left off and the files it changed
+- Busy, waiting, ready, and idle agent states from Claude hooks and screen reading
 - Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
 - Emacs Magit and branch-review integration for the selected session
 - Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in Emacs at that line, or a URL to open it in the browser. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select. Ctrl+click opens immediately.
@@ -97,6 +98,7 @@ These shortcuts work while VTE has focus and can be changed through `[keys]`:
 | Next or previous session | `Ctrl+Shift+]` or `Ctrl+Shift+[` |
 | Next ready session | `Ctrl+Shift+Space` |
 | Back to last visited session | `Ctrl+Shift+L` |
+| Resume a closed agent session | `Ctrl+Shift+R` |
 | Reopen PR list | `Alt+Shift+P` |
 | Switch Claude model preset | `Ctrl+Shift+M` |
 | Copy or paste | `Ctrl+Shift+C` or `Ctrl+Shift+V` |

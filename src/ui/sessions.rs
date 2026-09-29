@@ -45,6 +45,7 @@ impl Workspace {
             return true;
         }
         record.name = name;
+        record.renamed = true;
         let updated = record.clone();
         let Some(store) = self.store.borrow().clone() else {
             self.report_launch_failure(
@@ -60,6 +61,7 @@ impl Workspace {
                 Ok(()) => {
                     if let Some(session) = workspace.sessions.borrow_mut().get_mut(&updated.id) {
                         session.record.name = updated.name.clone();
+                        session.record.renamed = true;
                         session.label.set_text(&updated.name);
                         if matches!(
                             session.record.kind,
@@ -609,6 +611,7 @@ impl Workspace {
         };
         let id = id.to_owned();
         self.closing_sessions.borrow_mut().insert(id.clone());
+        let closed = record.clone();
         self.run_io(
             move || {
                 if let Some(mut control) = control? {
@@ -635,6 +638,7 @@ impl Workspace {
             },
             move |workspace, result| match result {
                 Ok(()) => {
+                    workspace.remember_agent_name(&closed);
                     workspace.remove_session_view(&id);
                     workspace.closing_sessions.borrow_mut().remove(&id);
                     if let Some(pending) = pending {

@@ -14,6 +14,7 @@ pub enum ShortcutAction {
     PreviousSession,
     NextReadySession,
     LastSession,
+    ResumeSession,
     ReopenPrList,
     ClaudeModelPreset,
     IncreaseFontSize,
@@ -21,7 +22,7 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::LaunchInProject,
         Self::CloseSession,
         Self::ToggleSidebar,
@@ -29,6 +30,7 @@ impl ShortcutAction {
         Self::PreviousSession,
         Self::NextReadySession,
         Self::LastSession,
+        Self::ResumeSession,
         Self::ReopenPrList,
         Self::ClaudeModelPreset,
         Self::IncreaseFontSize,
@@ -44,6 +46,7 @@ impl ShortcutAction {
             Self::PreviousSession => "previous-session",
             Self::NextReadySession => "next-ready-session",
             Self::LastSession => "last-session",
+            Self::ResumeSession => "resume-session",
             Self::ReopenPrList => "reopen-pr-list",
             Self::ClaudeModelPreset => "claude-model-preset",
             Self::IncreaseFontSize => "increase-font-size",
@@ -60,6 +63,7 @@ impl ShortcutAction {
             Self::PreviousSession => "Previous session",
             Self::NextReadySession => "Next ready session",
             Self::LastSession => "Back to last visited session",
+            Self::ResumeSession => "Resume a closed agent session",
             Self::ReopenPrList => "Reopen PR list",
             Self::ClaudeModelPreset => "Switch Claude model",
             Self::IncreaseFontSize => "Increase UI and terminal font size",
@@ -76,6 +80,7 @@ impl ShortcutAction {
             Self::PreviousSession => "<Control><Shift>bracketleft",
             Self::NextReadySession => "<Control><Shift>space",
             Self::LastSession => "<Control><Shift>l",
+            Self::ResumeSession => "<Control><Shift>r",
             Self::ReopenPrList => "<Alt><Shift>p",
             Self::ClaudeModelPreset => "<Control><Shift>m",
             Self::IncreaseFontSize => "<Control>plus",
@@ -93,6 +98,7 @@ impl ShortcutAction {
                 | Self::PreviousSession
                 | Self::NextReadySession
                 | Self::LastSession
+                | Self::ResumeSession
                 | Self::ReopenPrList
                 | Self::ClaudeModelPreset
                 | Self::IncreaseFontSize

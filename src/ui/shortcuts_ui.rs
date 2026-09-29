@@ -59,6 +59,9 @@ impl Workspace {
         self.add_action("last-session", true, |workspace| {
             workspace.select_last_session();
         });
+        self.add_action("resume-session", true, |workspace| {
+            workspace.open_agents();
+        });
         self.add_action("reopen-pr-list", true, |workspace| {
             if let Some(root) = workspace.preferred_project_root() {
                 workspace.prs.root.set_text(&root);

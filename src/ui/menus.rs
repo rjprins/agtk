@@ -114,11 +114,7 @@ impl Workspace {
         let menus = &self.menus;
         let workspace = self.clone();
         menus.agents.connect_activate(move |_, _| {
-            if let Some(root) = workspace.preferred_project_root() {
-                workspace.open_agent_for_project(&root);
-            } else {
-                workspace.agents.modal.present();
-            }
+            workspace.open_agents();
         });
         let workspace = self.clone();
         menus.worktrees.connect_activate(move |_, _| {

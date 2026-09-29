@@ -9,19 +9,13 @@ use crate::providers::{
     ProviderSession, RestoreTarget,
 };
 
-const AGENT_FILTER_MIN_SESSIONS: usize = 6;
+const LIST_WIDTH: i32 = 440;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AgentSessionItem {
     session: ProviderSession,
     project_root: Option<PathBuf>,
     worktree_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AgentSessionGroup {
-    project_root: Option<PathBuf>,
-    sessions: Vec<AgentSessionItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,67 +26,51 @@ pub(super) enum AgentRestoreDestination {
     CustomDirectory,
 }
 
+/// Every word must appear in one of the session's texts.
 fn filter_agent_sessions(
     sessions: &[AgentSessionItem],
     project_root: Option<&Path>,
     filter: &str,
+    names: &HashMap<String, String>,
 ) -> Vec<AgentSessionItem> {
-    let filter = filter.trim().to_lowercase();
+    let words = filter
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>();
     sessions
         .iter()
         .filter(|item| {
-            let worktree_name = agent_worktree_name(item);
-            project_root.is_none_or(|root| item.project_root.as_deref() == Some(root))
-                && (filter.is_empty()
-                    || [
-                        item.session.name.as_str(),
-                        item.session.provider.command(),
-                        item.session.provider_session_id.as_str(),
-                        item.session
-                            .cwd
-                            .as_deref()
-                            .and_then(Path::to_str)
-                            .unwrap_or(""),
-                        item.project_root
-                            .as_deref()
-                            .and_then(Path::to_str)
-                            .unwrap_or(""),
-                        worktree_name.as_deref().unwrap_or(""),
-                    ]
-                    .into_iter()
-                    .any(|field| field.to_lowercase().contains(&filter)))
+            if project_root.is_some_and(|root| item.project_root.as_deref() != Some(root)) {
+                return false;
+            }
+            if words.is_empty() {
+                return true;
+            }
+            let session = &item.session;
+            let texts = [
+                names.get(&agent_session_key(session)).map(String::as_str),
+                Some(session.name.as_str()),
+                session.custom_title.as_deref(),
+                session.ai_title.as_deref(),
+                session.first_prompt.as_deref(),
+                session.last_prompt.as_deref(),
+                session.branch.as_deref(),
+                Some(session.provider.command()),
+                Some(session.provider_session_id.as_str()),
+                session.cwd.as_deref().and_then(Path::to_str),
+                item.project_root.as_deref().and_then(Path::to_str),
+                agent_worktree_name(item).as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .map(str::to_lowercase)
+            .collect::<Vec<_>>();
+            words
+                .iter()
+                .all(|word| texts.iter().any(|text| text.contains(word.as_str())))
         })
         .cloned()
         .collect()
-}
-
-fn group_agent_sessions(sessions: &[AgentSessionItem]) -> Vec<AgentSessionGroup> {
-    let mut groups = Vec::<AgentSessionGroup>::new();
-    for item in sessions {
-        if let Some(group) = groups
-            .iter_mut()
-            .find(|group| group.project_root == item.project_root)
-        {
-            group.sessions.push(item.clone());
-        } else {
-            groups.push(AgentSessionGroup {
-                project_root: item.project_root.clone(),
-                sessions: vec![item.clone()],
-            });
-        }
-    }
-    groups.sort_by(
-        |left, right| match (&left.project_root, &right.project_root) {
-            (Some(left), Some(right)) => agent_project_name(left)
-                .to_lowercase()
-                .cmp(&agent_project_name(right).to_lowercase())
-                .then_with(|| left.cmp(right)),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        },
-    );
-    groups
 }
 
 fn classify_agent_sessions(
@@ -143,11 +121,20 @@ fn restore_target_for_location(
 }
 
 fn agent_project_name(root: &Path) -> String {
-    root.file_name()
+    let leaf = root
+        .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| root.to_str().unwrap_or("Other locations"))
-        .to_owned()
+        .unwrap_or_else(|| root.to_str().unwrap_or("Other locations"));
+    // A checkout called main says little without the folder it sits in.
+    let parent = root
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str());
+    match parent {
+        Some(parent) if is_default_branch(leaf) => format!("{parent}/{leaf}"),
+        _ => leaf.to_owned(),
+    }
 }
 
 fn agent_worktree_name(item: &AgentSessionItem) -> Option<String> {
@@ -159,36 +146,130 @@ fn agent_worktree_name(item: &AgentSessionItem) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn format_agent_elapsed(now: u64, last_seen_at: u64) -> String {
-    if now < last_seen_at {
-        return String::new();
-    }
-    let seconds = (now - last_seen_at) / 1_000;
-    if seconds < 5 {
-        "now".to_owned()
-    } else if seconds < 60 {
-        format!("{}s", seconds)
-    } else if seconds < 3_600 {
-        format!("{}m", seconds / 60)
-    } else if seconds < 86_400 {
-        format!("{}h", seconds / 3_600)
-    } else {
-        format!("{}d", seconds / 86_400)
+fn is_default_branch(branch: &str) -> bool {
+    matches!(branch, "main" | "master")
+}
+
+/// Where the session ran, leaving out what every main-checkout session shares.
+fn agent_location_label(item: &AgentSessionItem) -> String {
+    let project = item
+        .project_root
+        .as_deref()
+        .or(item.session.cwd.as_deref())
+        .map(agent_project_name)
+        .unwrap_or_else(|| "Unknown location".to_owned());
+    let in_worktree = item.worktree_path.is_some() && item.worktree_path != item.project_root;
+    let place = match item.session.branch.as_deref() {
+        Some(branch) if !is_default_branch(branch) => Some(branch.to_owned()),
+        _ if in_worktree => agent_worktree_name(item),
+        _ => None,
+    };
+    match place {
+        Some(place) => format!("{project} · {place}"),
+        None => project,
     }
 }
 
-/// The recent agent sessions dialog and what it remembers between openings.
+fn prompt_count_label(count: u32) -> String {
+    match count {
+        0 => "no prompts".to_owned(),
+        1 => "1 prompt".to_owned(),
+        count => format!("{count} prompts"),
+    }
+}
+
+/// Calendar days between two local times, so 23:50 yesterday is one day ago.
+fn days_between(then: &glib::DateTime, now: &glib::DateTime) -> i64 {
+    let midnight = |time: &glib::DateTime| {
+        let (year, month, day) = time.ymd();
+        glib::DateTime::from_local(year, month, day, 0, 0, 0.0)
+            .map(|midnight| midnight.to_unix())
+            .unwrap_or_else(|_| time.to_unix())
+    };
+    // Rounding absorbs daylight saving hours.
+    ((midnight(now) - midnight(then)) as f64 / 86_400.0).round() as i64
+}
+
+fn local_time(millis: u64) -> Option<glib::DateTime> {
+    glib::DateTime::from_unix_local((millis / 1_000) as i64).ok()
+}
+
+fn format_time(time: &glib::DateTime, format: &str) -> String {
+    time.format(format).map(String::from).unwrap_or_default()
+}
+
+/// The list heading for a session's day.
+fn agent_day_heading(days: i64, then: &glib::DateTime) -> String {
+    match days {
+        ..=0 => "Today".to_owned(),
+        1 => "Yesterday".to_owned(),
+        2..=6 => format_time(then, "%A"),
+        _ => "Older".to_owned(),
+    }
+}
+
+/// The time on a row; the heading already names the day of recent ones.
+fn agent_row_time(days: i64, then: &glib::DateTime) -> String {
+    if days <= 6 {
+        format_time(then, "%H:%M")
+    } else {
+        format_time(then, "%b %-d")
+    }
+}
+
+/// When the session ran, as one time or a span when it lasted a while.
+fn agent_span_label(now: &glib::DateTime, start: u64, end: u64) -> String {
+    let (Some(first), Some(last)) = (local_time(start), local_time(end)) else {
+        return agent_when_label(now, end);
+    };
+    if end.saturating_sub(start) < 60_000 {
+        agent_when_label(now, end)
+    } else if days_between(&first, &last) == 0 {
+        format!(
+            "{} {} to {}",
+            agent_day_label(now, &last),
+            format_time(&first, "%H:%M"),
+            format_time(&last, "%H:%M")
+        )
+    } else {
+        format!(
+            "{} to {}",
+            agent_when_label(now, start),
+            agent_when_label(now, end)
+        )
+    }
+}
+
+fn agent_day_label(now: &glib::DateTime, then: &glib::DateTime) -> String {
+    match days_between(then, now) {
+        days @ ..=6 => agent_day_heading(days, then),
+        _ => format_time(then, "%b %-d, %Y"),
+    }
+}
+
+fn agent_when_label(now: &glib::DateTime, millis: u64) -> String {
+    let Some(then) = local_time(millis) else {
+        return String::new();
+    };
+    format!(
+        "{} {}",
+        agent_day_label(now, &then),
+        format_time(&then, "%H:%M")
+    )
+}
+
+/// The resume dialog and what it remembers between openings.
 #[derive(Clone)]
 pub(super) struct AgentDialog {
     pub(super) modal: modal::Modal,
     pub(super) list: gtk::ListBox,
+    list_scroller: gtk::ScrolledWindow,
     pub(super) project_filter: gtk::DropDown,
     pub(super) project_choices: gtk::StringList,
     pub(super) project_values: Rc<RefCell<Vec<Option<PathBuf>>>>,
     pub(super) filter: gtk::SearchEntry,
-    pub(super) count: adw::WindowTitle,
-    pub(super) refresh: gtk::Button,
     pub(super) preview: gtk::Box,
+    title: gtk::EditableLabel,
     pub(super) restore_destination: adw::ComboRow,
     pub(super) restore_destination_choices: gtk::StringList,
     pub(super) restore_destination_values: Rc<RefCell<Vec<AgentRestoreDestination>>>,
@@ -196,9 +277,17 @@ pub(super) struct AgentDialog {
     pub(super) restore_custom_cwd: adw::EntryRow,
     pub(super) restore_button: gtk::Button,
     pub(super) sessions: Rc<RefCell<Vec<AgentSessionItem>>>,
+    /// The rows on screen, in order, with the session each one shows.
+    rows: Rc<RefCell<Vec<(gtk::ListBoxRow, ProviderSession)>>>,
+    /// Set while the list changes its selection itself.
+    selecting: Rc<Cell<bool>>,
     pub(super) hidden: Rc<RefCell<HashSet<String>>>,
+    /// Names given in agmux, by session key. They win over the log's title.
+    pub(super) names: Rc<RefCell<HashMap<String, String>>>,
     pub(super) hidden_loaded: Rc<Cell<bool>>,
     pub(super) selected: Rc<RefCell<Option<ProviderSession>>>,
+    /// True while the logs are being read.
+    loading: Rc<Cell<bool>>,
 }
 
 impl AgentDialog {
@@ -206,16 +295,17 @@ impl AgentDialog {
         let project_choices = gtk::StringList::new(&["All projects"]);
         let project_filter =
             gtk::DropDown::new(Some(project_choices.clone()), None::<&gtk::Expression>);
-        project_filter.set_tooltip_text(Some("Filter recent sessions by project"));
+        project_filter.set_tooltip_text(Some("Show sessions from one project"));
         let filter = gtk::SearchEntry::builder()
-            .placeholder_text("Filter sessions")
+            .placeholder_text("Search titles, prompts, and branches")
             .margin_start(6)
             .margin_end(6)
             .margin_top(6)
+            .margin_bottom(6)
             .build();
-        filter.set_visible(false);
         let list = gtk::ListBox::new();
         list.add_css_class("navigation-sidebar");
+        list.set_activate_on_single_click(false);
         let list_scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
@@ -223,11 +313,14 @@ impl AgentDialog {
             .build();
         let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
         sidebar.add_css_class("sidebar-pane");
-        sidebar.set_size_request(340, -1);
+        sidebar.set_size_request(LIST_WIDTH, -1);
         sidebar.append(&filter);
         sidebar.append(&list_scroller);
 
-        let preview = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        let title = gtk::EditableLabel::new("");
+        title.add_css_class("title-2");
+        title.set_tooltip_text(Some("Rename (F2)"));
+        let preview = gtk::Box::new(gtk::Orientation::Vertical, 18);
         preview.set_margin_top(18);
         preview.set_margin_bottom(18);
         preview.set_margin_start(24);
@@ -237,9 +330,9 @@ impl AgentDialog {
             .vexpand(true)
             .child(&preview)
             .build();
-        let restore_destination_choices = gtk::StringList::new(&["Last known location"]);
+        let restore_destination_choices = gtk::StringList::new(&["Last location"]);
         let restore_destination = adw::ComboRow::builder()
-            .title("Resume In")
+            .title("Resumes in")
             .model(&restore_destination_choices)
             .build();
         let restore_branch = adw::EntryRow::builder().title("Branch Name").build();
@@ -265,31 +358,24 @@ impl AgentDialog {
         content.append(&gtk::Separator::new(gtk::Orientation::Vertical));
         content.append(&detail);
 
-        let count = adw::WindowTitle::new("Recent Sessions", "");
-        let refresh = gtk::Button::builder()
-            .icon_name("view-refresh-symbolic")
-            .tooltip_text("Refresh recent agent sessions")
-            .build();
-        let restore_button = gtk::Button::with_label("Restore");
+        let restore_button = gtk::Button::with_label("Resume");
         restore_button.add_css_class("suggested-action");
         restore_button.set_sensitive(false);
-        let modal = modal::Modal::new(parent, "Recent Sessions", 1100, 720, &content);
+        let modal = modal::Modal::new(parent, "Resume Session", 1100, 720, &content);
         let header = modal.header();
-        header.set_title_widget(Some(&count));
         header.pack_start(&project_filter);
-        header.pack_start(&refresh);
         header.pack_end(&restore_button);
 
         Self {
             modal,
             list,
+            list_scroller,
             project_filter,
             project_choices,
             project_values: Rc::new(RefCell::new(vec![None])),
             filter,
-            count,
-            refresh,
             preview,
+            title,
             restore_destination,
             restore_destination_choices,
             restore_destination_values: Rc::new(RefCell::new(vec![
@@ -299,9 +385,13 @@ impl AgentDialog {
             restore_custom_cwd,
             restore_button,
             sessions: Rc::new(RefCell::new(Vec::new())),
+            rows: Rc::default(),
+            selecting: Rc::default(),
             hidden: Rc::new(RefCell::new(HashSet::new())),
+            names: Rc::default(),
             hidden_loaded: Rc::new(Cell::new(false)),
             selected: Rc::new(RefCell::new(None)),
+            loading: Rc::default(),
         }
     }
 }
@@ -310,16 +400,54 @@ impl Workspace {
     pub(super) fn connect_agents(&self) {
         let agent_workspace = self.clone();
         self.agents
-            .refresh
-            .connect_clicked(move |_| agent_workspace.refresh_agent_panel());
+            .filter
+            .connect_search_changed(move |_| agent_workspace.filter_agent_panel());
         let agent_workspace = self.clone();
         self.agents
             .filter
-            .connect_changed(move |_| agent_workspace.filter_agent_panel());
+            .connect_activate(move |_| agent_workspace.restore_agent_from_panel());
+        // Escape clears the search first and closes the dialog second.
+        let agent_workspace = self.clone();
+        self.agents.filter.connect_stop_search(move |filter| {
+            if filter.text().is_empty() {
+                agent_workspace.agents.modal.hide();
+            } else {
+                filter.set_text("");
+            }
+        });
         let agent_workspace = self.clone();
         self.agents
             .project_filter
             .connect_selected_notify(move |_| agent_workspace.filter_agent_panel());
+        let agent_workspace = self.clone();
+        self.agents.list.connect_row_selected(move |_, row| {
+            if agent_workspace.agents.selecting.get() {
+                return;
+            }
+            if let Some(session) = row.and_then(|row| agent_workspace.agent_row_session(row)) {
+                agent_workspace.preview_agent_for_panel(session);
+            }
+        });
+        let agent_workspace = self.clone();
+        self.agents.list.connect_row_activated(move |_, row| {
+            if let Some(session) = agent_workspace.agent_row_session(row) {
+                let is_selected = agent_workspace
+                    .agents
+                    .selected
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|selected| same_agent_session(selected, &session));
+                if is_selected {
+                    agent_workspace.restore_agent_from_panel();
+                }
+            }
+        });
+        let agent_workspace = self.clone();
+        self.agents.title.connect_editing_notify(move |title| {
+            if !title.is_editing() {
+                agent_workspace.rename_selected_agent(title.text().trim());
+            }
+        });
         let agent_workspace = self.clone();
         self.agents
             .restore_destination
@@ -329,32 +457,45 @@ impl Workspace {
             .restore_button
             .connect_clicked(move |_| agent_workspace.restore_agent_from_panel());
         let agent_workspace = self.clone();
-        self.agents
-            .modal
-            .connect_show(move || agent_workspace.refresh_agent_panel());
+        self.agents.modal.connect_show(move || {
+            agent_workspace.agents.filter.set_text("");
+            agent_workspace.agents.filter.grab_focus();
+            agent_workspace.refresh_agent_panel();
+        });
         let agent_navigation = gtk::EventControllerKey::new();
         agent_navigation.set_propagation_phase(gtk::PropagationPhase::Capture);
         let agent_workspace = self.clone();
         agent_navigation.connect_key_pressed(move |_, key, _, _| {
-            let control_has_focus = agent_workspace.agents.restore_destination.has_focus()
-                || agent_workspace.agents.project_filter.has_focus()
-                || agent_workspace.agents.filter.has_focus()
-                || agent_workspace.agents.restore_branch.has_focus()
-                || agent_workspace.agents.restore_custom_cwd.has_focus();
+            let agents = &agent_workspace.agents;
+            let editing = agents.restore_destination.has_focus()
+                || agents.project_filter.has_focus()
+                || agents.restore_branch.has_focus()
+                || agents.restore_custom_cwd.has_focus()
+                || agents.title.is_editing();
             let handled = match key {
-                gtk::gdk::Key::Down if !control_has_focus => {
+                gtk::gdk::Key::Down if !editing => {
                     agent_workspace.navigate_agent_selection(1);
                     true
                 }
-                gtk::gdk::Key::Up if !control_has_focus => {
+                gtk::gdk::Key::Up if !editing => {
                     agent_workspace.navigate_agent_selection(-1);
                     true
                 }
-                gtk::gdk::Key::Return
-                    if !control_has_focus
-                        && agent_workspace.agents.restore_button.is_sensitive() =>
-                {
-                    agent_workspace.restore_agent_from_panel();
+                gtk::gdk::Key::Page_Down if !editing => {
+                    agent_workspace.navigate_agent_selection(8);
+                    true
+                }
+                gtk::gdk::Key::Page_Up if !editing => {
+                    agent_workspace.navigate_agent_selection(-8);
+                    true
+                }
+                gtk::gdk::Key::F2 if !editing && agents.selected.borrow().is_some() => {
+                    agents.title.start_editing();
+                    true
+                }
+                // Delete in an empty search box has nothing else to do.
+                gtk::gdk::Key::Delete if !editing && agents.filter.text().is_empty() => {
+                    agent_workspace.hide_selected_agent();
                     true
                 }
                 _ => false,
@@ -370,79 +511,87 @@ impl Workspace {
 }
 
 impl Workspace {
+    fn agent_row_session(&self, row: &gtk::ListBoxRow) -> Option<ProviderSession> {
+        self.agents
+            .rows
+            .borrow()
+            .iter()
+            .find(|(candidate, _)| candidate == row)
+            .map(|(_, session)| session.clone())
+    }
+
     pub(super) fn filter_agent_panel(&self) {
-        let sessions = self.visible_agent_sessions();
+        self.render_agent_sessions();
+        let rows = self.agents.rows.borrow().clone();
         let selected = self.agents.selected.borrow().clone();
-        if selected.as_ref().is_none_or(|current| {
-            !sessions
-                .iter()
-                .any(|item| same_agent_session(item, current))
-        }) {
-            if let Some(session) = sessions.first() {
-                self.preview_agent_for_panel(session.clone());
-            } else {
-                self.agents.selected.borrow_mut().take();
-                self.agents.restore_button.set_sensitive(false);
-                self.render_agent_preview_message("Select a Codex or Claude session");
-                self.render_agent_sessions();
-            }
+        let still_shown = selected.as_ref().is_some_and(|current| {
+            rows.iter()
+                .any(|(_, session)| same_agent_session(session, current))
+        });
+        if still_shown {
             return;
         }
-        self.render_agent_sessions();
+        match rows.first() {
+            Some((_, session)) => self.preview_agent_for_panel(session.clone()),
+            None => {
+                self.agents.selected.borrow_mut().take();
+                self.agents.restore_button.set_sensitive(false);
+                self.render_agent_preview_message("No session selected");
+            }
+        }
     }
 
     pub(super) fn navigate_agent_selection(&self, delta: i32) {
-        let sessions = self.visible_agent_sessions();
-        if sessions.is_empty() {
+        let rows = self.agents.rows.borrow().clone();
+        if rows.is_empty() {
             return;
         }
         let current = self.agents.selected.borrow().clone();
         let index = current
             .as_ref()
             .and_then(|selected| {
-                sessions
-                    .iter()
-                    .position(|item| same_agent_session(item, selected))
+                rows.iter()
+                    .position(|(_, session)| same_agent_session(session, selected))
             })
-            .unwrap_or(0);
-        let next = (index as i32 + delta).clamp(0, sessions.len() as i32 - 1) as usize;
-        if let Some(session) = sessions.get(next) {
-            self.preview_agent_for_panel(session.clone());
-        }
+            .map_or(0, |index| index as i32 + delta);
+        let next = index.clamp(0, rows.len() as i32 - 1) as usize;
+        self.preview_agent_for_panel(rows[next].1.clone());
     }
 
-    fn visible_agent_sessions(&self) -> Vec<ProviderSession> {
+    fn visible_agent_items(&self) -> Vec<AgentSessionItem> {
+        let hidden = self.agents.hidden.borrow();
         let sessions = self
             .agents
             .sessions
             .borrow()
             .iter()
-            .filter(|item| {
-                !self
-                    .agents
-                    .hidden
-                    .borrow()
-                    .contains(&agent_session_key(&item.session))
-            })
+            .filter(|item| !hidden.contains(&agent_session_key(&item.session)))
             .cloned()
             .collect::<Vec<_>>();
         filter_agent_sessions(
             &sessions,
             self.selected_agent_project().as_deref(),
             self.agents.filter.text().as_str(),
+            &self.agents.names.borrow(),
         )
-        .into_iter()
-        .map(|item| item.session)
-        .collect()
+    }
+
+    /// Opens the dialog on every project.
+    pub(super) fn open_agents(&self) {
+        self.rebuild_agent_project_choices(None);
+        self.present_agents();
     }
 
     pub(super) fn open_agent_for_project(&self, root: &str) {
-        self.agents.filter.set_text("");
-        self.set_agent_project_filter(Some(PathBuf::from(root)));
-        if !self.agents.modal.is_visible() {
-            self.agents.modal.present();
-        } else {
+        self.rebuild_agent_project_choices(Some(PathBuf::from(root)));
+        self.present_agents();
+    }
+
+    fn present_agents(&self) {
+        if self.agents.modal.is_visible() {
             self.refresh_agent_panel();
+        } else {
+            self.agents.modal.present();
         }
     }
 
@@ -453,11 +602,6 @@ impl Workspace {
             .get(self.agents.project_filter.selected() as usize)
             .cloned()
             .flatten()
-    }
-
-    fn set_agent_project_filter(&self, project_root: Option<PathBuf>) {
-        self.rebuild_agent_project_choices(project_root);
-        self.filter_agent_panel();
     }
 
     fn refresh_agent_project_choices(&self) {
@@ -490,10 +634,6 @@ impl Workspace {
         let mut labels = vec!["All projects".to_owned()];
         labels.extend(roots.iter().map(|root| agent_project_name(root)));
         let labels = labels.iter().map(String::as_str).collect::<Vec<_>>();
-        self.agents
-            .project_choices
-            .splice(0, self.agents.project_choices.n_items(), &labels);
-
         let mut values = vec![None];
         values.extend(roots.into_iter().map(Some));
         let selected_index = selected
@@ -504,22 +644,24 @@ impl Workspace {
                     .position(|value| value.as_ref() == Some(selected))
             })
             .unwrap_or(0);
+        // Rebuilding fires the filter handler, which must see the new values.
         *self.agents.project_values.borrow_mut() = values;
+        self.agents
+            .project_choices
+            .splice(0, self.agents.project_choices.n_items(), &labels);
         self.agents
             .project_filter
             .set_selected(selected_index as u32);
     }
 
     pub(super) fn refresh_agent_panel(&self) {
-        self.load_hidden_agent_sessions();
-        self.render_agent_list_message("Scanning local provider logs…");
-        self.render_agent_preview_message("Select a Codex or Claude session");
-        self.agents.count.set_subtitle("Scanning…");
-        self.agents.restore_button.set_sensitive(false);
-        self.agents.restore_button.set_label("Restore session");
-        self.agents.selected.borrow_mut().take();
-        self.agents.sessions.borrow_mut().clear();
-        let discovery = ProviderDiscovery::from_environment();
+        self.load_agent_preferences();
+        self.agents.loading.set(true);
+        if self.agents.sessions.borrow().is_empty() {
+            self.render_agent_list_message("Reading agent logs…");
+            self.render_agent_preview_message("");
+        }
+        let discovery = self.provider_discovery();
         let live = self.live_provider_sessions();
         let known_project_roots = self
             .project_summaries()
@@ -535,28 +677,38 @@ impl Workspace {
             },
             |workspace, result| match result {
                 Ok(sessions) => {
+                    workspace.agents.loading.set(false);
                     workspace.agents.sessions.replace(sessions);
+                    workspace.agents.selected.borrow_mut().take();
                     workspace.refresh_agent_project_choices();
-                    workspace.render_agent_sessions();
-                    if let Some(first) = workspace.visible_agent_sessions().first().cloned() {
-                        workspace.preview_agent_for_panel(first);
-                    }
+                    workspace.filter_agent_panel();
                 }
                 Err(error) => {
-                    workspace
-                        .render_agent_list_message(&format!("Could not load the preview: {error}"));
-                    workspace.agents.count.set_subtitle("Could not scan");
+                    workspace.agents.loading.set(false);
+                    workspace.render_agent_list_message(&format!(
+                        "Could not read the agent logs: {error}"
+                    ));
                     workspace.show_error(&format!("Could not discover agent sessions: {error}"));
                 }
             },
         );
     }
 
+    pub(super) fn provider_discovery(&self) -> ProviderDiscovery {
+        ProviderDiscovery::from_environment().with_cache(self.paths.provider_log_cache())
+    }
+
     pub(super) fn restore_agent_from_panel(&self) {
-        let Some(session) = self.agents.selected.borrow().clone() else {
+        if !self.agents.restore_button.is_sensitive() {
+            return;
+        }
+        let Some(mut session) = self.agents.selected.borrow().clone() else {
             self.show_error("Select an agent session first");
             return;
         };
+        if let Some(name) = self.agents.names.borrow().get(&agent_session_key(&session)) {
+            session.name = name.clone();
+        }
         let project_root = self
             .agents
             .sessions
@@ -583,7 +735,12 @@ impl Workspace {
                 Some(cwd)
             }
             AgentRestoreDestination::NewWorktree => {
-                let Some(cwd) = session.cwd.clone() else {
+                let Some(cwd) = session
+                    .cwd
+                    .clone()
+                    .filter(|cwd| cwd.exists())
+                    .or(project_root.clone())
+                else {
                     self.show_error("This session has no known location for a new worktree");
                     return;
                 };
@@ -597,7 +754,6 @@ impl Workspace {
                 let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
                 let project_root = project_root.clone();
                 self.agents.restore_button.set_sensitive(false);
-                self.agents.restore_button.set_label("Restoring...");
                 self.agents.modal.hide();
                 self.run_slow(
                     move || {
@@ -631,7 +787,6 @@ impl Workspace {
             .collect::<Vec<_>>();
         let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
         self.agents.restore_button.set_sensitive(false);
-        self.agents.restore_button.set_label("Restoring...");
         self.agents.modal.hide();
         self.run_slow(
             move || {
@@ -667,7 +822,8 @@ impl Workspace {
             DiscoveryRoots::from_environment(),
             params.limit as usize,
             u64::from(params.max_age_days) * 24 * 60 * 60 * 1_000,
-        );
+        )
+        .with_cache(self.paths.provider_log_cache());
         let live = self.live_provider_sessions();
         self.run_slow(
             move || discovery.discover(now_millis(), &live),
@@ -678,7 +834,7 @@ impl Workspace {
     }
 
     fn preview_agent(&self, params: AgentPreviewParams, pending: PendingRequest) {
-        let discovery = ProviderDiscovery::from_environment();
+        let discovery = self.provider_discovery();
         self.run_slow(
             move || {
                 discovery.preview(
@@ -694,7 +850,7 @@ impl Workspace {
     }
 
     fn restore_agent(&self, params: AgentRestoreParams, pending: PendingRequest) {
-        let discovery = ProviderDiscovery::from_environment();
+        let discovery = self.provider_discovery();
         let target = RestoreTarget {
             cwd: params.cwd,
             project_root: params.project_root,
@@ -742,69 +898,58 @@ impl Workspace {
         while let Some(child) = self.agents.list.first_child() {
             self.agents.list.remove(&child);
         }
-        let all_sessions = self
-            .agents
-            .sessions
-            .borrow()
-            .iter()
-            .filter(|item| {
-                !self
-                    .agents
-                    .hidden
-                    .borrow()
-                    .contains(&agent_session_key(&item.session))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        let sessions = filter_agent_sessions(
-            &all_sessions,
-            self.selected_agent_project().as_deref(),
-            self.agents.filter.text().as_str(),
-        );
-        self.agents
-            .count
-            .set_subtitle(&format!("{} available", sessions.len()));
-        self.agents.filter.set_visible(
-            self.agents.sessions.borrow().len() >= AGENT_FILTER_MIN_SESSIONS
-                || !self.agents.filter.text().is_empty(),
-        );
-        if sessions.is_empty() {
-            self.render_agent_list_message(if all_sessions.is_empty() {
-                "No recent Codex or Claude sessions"
+        self.agents.rows.borrow_mut().clear();
+        let items = self.visible_agent_items();
+        if items.is_empty() {
+            let has_any = !self.agents.sessions.borrow().is_empty();
+            self.render_agent_list_message(if self.agents.loading.get() && !has_any {
+                "Reading agent logs…"
+            } else if has_any {
+                "No sessions match"
             } else {
-                "No sessions match the filter"
+                "No recent Claude or Codex sessions"
             });
             return;
         }
-        for group in group_agent_sessions(&sessions) {
-            let name = group
-                .project_root
-                .as_deref()
-                .map(agent_project_name)
-                .unwrap_or_else(|| "Other locations".to_owned());
-            let label = gtk::Label::new(Some(&name));
-            label.set_xalign(0.0);
-            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            label.add_css_class("heading");
-            label.add_css_class("dim-label");
-            label.set_margin_top(6);
-            if let Some(root) = group.project_root.as_ref() {
-                label.set_tooltip_text(Some(&root.to_string_lossy()));
+        let Ok(now) = glib::DateTime::now_local() else {
+            return;
+        };
+        let mut heading = None::<String>;
+        for item in items {
+            let then = local_time(item.session.last_seen_at).unwrap_or_else(|| now.clone());
+            let days = days_between(&then, &now);
+            let day = agent_day_heading(days, &then);
+            if heading.as_deref() != Some(day.as_str()) {
+                let label = gtk::Label::new(Some(&day));
+                label.set_xalign(0.0);
+                label.add_css_class("heading");
+                label.add_css_class("dim-label");
+                label.set_margin_top(if heading.is_some() { 12 } else { 0 });
+                let row = gtk::ListBoxRow::builder()
+                    .child(&label)
+                    .selectable(false)
+                    .activatable(false)
+                    .focusable(false)
+                    .build();
+                self.agents.list.append(&row);
+                heading = Some(day);
             }
-            let heading = gtk::ListBoxRow::builder()
-                .child(&label)
-                .selectable(false)
-                .activatable(false)
-                .build();
-            self.agents.list.append(&heading);
-            for session in group.sessions {
-                self.append_agent_session_row(session);
-            }
+            self.append_agent_session_row(item, &agent_row_time(days, &then));
         }
+        self.select_agent_row();
     }
 
-    fn append_agent_session_row(&self, item: AgentSessionItem) {
-        let worktree_name = agent_worktree_name(&item);
+    fn agent_title(&self, session: &ProviderSession) -> String {
+        self.agents
+            .names
+            .borrow()
+            .get(&agent_session_key(session))
+            .cloned()
+            .unwrap_or_else(|| session.name.clone())
+    }
+
+    fn append_agent_session_row(&self, item: AgentSessionItem, time: &str) {
+        let location = agent_location_label(&item);
         let session = item.session;
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         let icon = provider_icons::agent_icon(session.provider);
@@ -812,118 +957,264 @@ impl Workspace {
         content.append(&icon);
         let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
         text.set_hexpand(true);
-        let title = gtk::Label::new(Some(&session.name));
+        let top = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let title = gtk::Label::new(Some(&self.agent_title(&session)));
         title.set_xalign(0.0);
+        title.set_hexpand(true);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        text.append(&title);
-        let mut details = vec![short_agent_session_id(&session.provider_session_id)];
-        details.extend(worktree_name);
-        let subtitle = gtk::Label::new(Some(&details.join(" · ")));
-        subtitle.set_xalign(0.0);
-        subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        subtitle.add_css_class("caption");
-        subtitle.add_css_class("dim-label");
-        text.append(&subtitle);
-        content.append(&text);
-        let elapsed = gtk::Label::new(Some(&format_agent_elapsed(
-            now_millis(),
-            session.last_seen_at,
+        top.append(&title);
+        let time = gtk::Label::new(Some(time));
+        time.add_css_class("caption");
+        time.add_css_class("dim-label");
+        time.add_css_class("numeric");
+        top.append(&time);
+        text.append(&top);
+        let bottom = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let place = gtk::Label::new(Some(&location));
+        place.set_xalign(0.0);
+        place.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        let count = gtk::Label::new(Some(&format!(
+            " · {}",
+            prompt_count_label(session.prompt_count)
         )));
-        elapsed.add_css_class("caption");
-        elapsed.add_css_class("dim-label");
-        elapsed.add_css_class("numeric");
-        elapsed.set_valign(gtk::Align::Center);
-        content.append(&elapsed);
-
-        let hide = gtk::Button::builder()
-            .icon_name("window-close-symbolic")
-            .valign(gtk::Align::Center)
-            .tooltip_text("Hide this session from the list")
-            .build();
-        hide.add_css_class("flat");
-        hide.add_css_class("circular");
-        let hide_workspace = self.clone();
-        let hidden_session = session.clone();
-        hide.connect_clicked(move |_| {
-            hide_workspace
-                .agents
-                .hidden
-                .borrow_mut()
-                .insert(agent_session_key(&hidden_session));
-            hide_workspace.save_hidden_agent_sessions();
-            if hide_workspace
-                .agents
-                .selected
-                .borrow()
-                .as_ref()
-                .is_some_and(|selected| same_agent_session(selected, &hidden_session))
-            {
-                hide_workspace.agents.selected.borrow_mut().take();
-                hide_workspace.render_agent_preview_message("Select a Codex or Claude session");
-                hide_workspace.agents.restore_button.set_sensitive(false);
-            }
-            hide_workspace.render_agent_sessions();
-        });
-        content.append(&hide);
+        for label in [&place, &count] {
+            label.add_css_class("caption");
+            label.add_css_class("dim-label");
+            bottom.append(label);
+        }
+        text.append(&bottom);
+        content.append(&text);
 
         let row = gtk::ListBoxRow::builder().child(&content).build();
-        let preview_workspace = self.clone();
-        let selected_session = session.clone();
-        row.connect_activate(move |_| {
-            preview_workspace.preview_agent_for_panel(selected_session.clone())
+        row.set_tooltip_text(session.first_prompt.as_deref());
+        let menu_workspace = self.clone();
+        let menu_session = session.clone();
+        let click = gtk::GestureClick::new();
+        click.set_button(gtk::gdk::BUTTON_SECONDARY);
+        click.connect_pressed(move |gesture, _, x, y| {
+            let Some(row) = gesture.widget() else {
+                return;
+            };
+            menu_workspace.show_agent_row_menu(&row, &menu_session, x, y);
         });
+        row.add_controller(click);
         self.agents.list.append(&row);
-        if self
+        self.agents.rows.borrow_mut().push((row, session));
+    }
+
+    fn show_agent_row_menu(&self, row: &gtk::Widget, session: &ProviderSession, x: f64, y: f64) {
+        let hide = gtk::Button::with_label("Hide from List");
+        hide.add_css_class("flat");
+        let popover = gtk::Popover::builder()
+            .child(&hide)
+            .has_arrow(false)
+            .build();
+        popover.set_parent(row);
+        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        popover.connect_closed(|popover| {
+            let popover = popover.clone();
+            glib::idle_add_local_once(move || popover.unparent());
+        });
+        let workspace = self.clone();
+        let session = session.clone();
+        let hide_popover = popover.clone();
+        hide.connect_clicked(move |_| {
+            hide_popover.popdown();
+            workspace.hide_agent(&session);
+        });
+        popover.popup();
+    }
+
+    /// Shows the selected session's row as selected and scrolls it into view.
+    fn select_agent_row(&self) {
+        let selected = self.agents.selected.borrow().clone();
+        let row = selected.and_then(|selected| {
+            self.agents
+                .rows
+                .borrow()
+                .iter()
+                .find(|(_, session)| same_agent_session(session, &selected))
+                .map(|(row, _)| row.clone())
+        });
+        self.agents.selecting.set(true);
+        self.agents.list.select_row(row.as_ref());
+        self.agents.selecting.set(false);
+        let Some(row) = row else {
+            return;
+        };
+        let scroller = self.agents.list_scroller.clone();
+        let list = self.agents.list.clone();
+        // Row bounds are only known after the next layout.
+        glib::idle_add_local_once(move || {
+            let Some(bounds) = row.compute_bounds(&list) else {
+                return;
+            };
+            let adjustment = scroller.vadjustment();
+            let top = f64::from(bounds.y());
+            let bottom = top + f64::from(bounds.height());
+            if top < adjustment.value() {
+                adjustment.set_value(top);
+            } else if bottom > adjustment.value() + adjustment.page_size() {
+                adjustment.set_value(bottom - adjustment.page_size());
+            }
+        });
+    }
+
+    fn hide_selected_agent(&self) {
+        let selected = self.agents.selected.borrow().clone();
+        if let Some(session) = selected {
+            self.hide_agent(&session);
+        }
+    }
+
+    fn hide_agent(&self, session: &ProviderSession) {
+        let rows = self.agents.rows.borrow().clone();
+        let index = rows
+            .iter()
+            .position(|(_, candidate)| same_agent_session(candidate, session));
+        self.agents
+            .hidden
+            .borrow_mut()
+            .insert(agent_session_key(session));
+        self.save_preference(
+            "hiddenAgentSessions",
+            serde_json::json!(sorted(self.agents.hidden.borrow().iter())),
+        );
+        let is_selected = self
             .agents
             .selected
             .borrow()
             .as_ref()
-            .is_some_and(|selected| same_agent_session(selected, &session))
-        {
-            self.agents.list.select_row(Some(&row));
+            .is_some_and(|selected| same_agent_session(selected, session));
+        if is_selected {
+            // Select the next row, so Delete can clear several in a row.
+            let next = index.and_then(|index| {
+                rows.iter()
+                    .skip(index + 1)
+                    .chain(rows.iter().take(index).rev())
+                    .next()
+                    .map(|(_, session)| session.clone())
+            });
+            self.agents.selected.borrow_mut().take();
+            if let Some(next) = next {
+                self.agents.selected.borrow_mut().replace(next);
+            }
+        }
+        self.filter_agent_panel();
+        if is_selected && let Some(next) = self.agents.selected.borrow().clone() {
+            self.preview_agent_for_panel(next);
         }
     }
 
-    fn load_hidden_agent_sessions(&self) {
+    fn rename_selected_agent(&self, name: &str) {
+        let Some(session) = self.agents.selected.borrow().clone() else {
+            return;
+        };
+        let key = agent_session_key(&session);
+        let changed = {
+            let mut names = self.agents.names.borrow_mut();
+            if name.is_empty() || name == session.name {
+                names.remove(&key).is_some()
+            } else if names.get(&key).map(String::as_str) != Some(name) {
+                names.insert(key, name.chars().take(80).collect());
+                true
+            } else {
+                false
+            }
+        };
+        self.agents.title.set_text(&self.agent_title(&session));
+        if changed {
+            self.save_agent_names();
+            self.render_agent_sessions();
+        }
+    }
+
+    fn save_agent_names(&self) {
+        let names = self
+            .agents
+            .names
+            .borrow()
+            .iter()
+            .map(|(key, name)| (key.clone(), serde_json::json!(name)))
+            .collect::<serde_json::Map<_, _>>();
+        self.save_preference("agentSessionNames", serde_json::Value::Object(names));
+    }
+
+    /// Remembers the name of an agent row that is closing, so the dialog shows it later.
+    pub(super) fn remember_agent_name(&self, record: &SessionRecord) {
+        let provider = match record.kind {
+            SessionKind::Claude => AgentProvider::Claude,
+            SessionKind::Codex => AgentProvider::Codex,
+            _ => return,
+        };
+        let Some(conversation_id) = record.conversation_id.as_deref() else {
+            return;
+        };
+        if !record.renamed {
+            return;
+        }
+        self.load_agent_preferences();
+        self.agents.names.borrow_mut().insert(
+            format!("{}:{conversation_id}", provider.command()),
+            record.name.clone(),
+        );
+        self.save_agent_names();
+    }
+
+    fn load_agent_preferences(&self) {
         if self.agents.hidden_loaded.replace(true) {
             return;
         }
         let Some(store) = self.store.borrow().clone() else {
+            self.agents.hidden_loaded.set(false);
             return;
         };
         self.run_io(
-            move || store.preference("hiddenAgentSessions"),
+            move || {
+                Ok((
+                    store.preference("hiddenAgentSessions")?,
+                    store.preference("agentSessionNames")?,
+                ))
+            },
             |workspace, result| {
-                let Ok(Some(value)) = result else {
+                let Ok((hidden, names)) = result else {
                     return;
                 };
-                let Some(values) = value.as_array() else {
-                    return;
-                };
-                workspace.agents.hidden.borrow_mut().extend(
-                    values
-                        .iter()
-                        .filter_map(|value| value.as_str().map(str::to_owned)),
-                );
-                workspace.render_agent_sessions();
+                if let Some(values) = hidden.as_ref().and_then(|value| value.as_array()) {
+                    workspace.agents.hidden.borrow_mut().extend(
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_str().map(str::to_owned)),
+                    );
+                }
+                if let Some(names) = names.as_ref().and_then(|value| value.as_object()) {
+                    let mut known = workspace.agents.names.borrow_mut();
+                    for (key, name) in names {
+                        if let Some(name) = name.as_str() {
+                            // A name saved during this run is newer than the stored one.
+                            known.entry(key.clone()).or_insert_with(|| name.to_owned());
+                        }
+                    }
+                }
+                if workspace.agents.modal.is_visible() {
+                    workspace.filter_agent_panel();
+                }
             },
         );
     }
 
-    fn save_hidden_agent_sessions(&self) {
-        let mut values = self
-            .agents
-            .hidden
-            .borrow()
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        values.sort();
-        self.save_preference("hiddenAgentSessions", serde_json::json!(values));
-    }
-
     fn preview_agent_for_panel(&self, session: ProviderSession) {
+        let is_same = self
+            .agents
+            .selected
+            .borrow()
+            .as_ref()
+            .is_some_and(|selected| same_agent_session(selected, &session));
         self.agents.selected.borrow_mut().replace(session.clone());
+        self.select_agent_row();
+        if is_same && self.agents.restore_button.is_sensitive() {
+            return;
+        }
         self.agents
             .restore_branch
             .set_text(&format!("restore-{}", now_millis()));
@@ -936,21 +1227,18 @@ impl Workspace {
                 .unwrap_or(""),
         );
         self.reset_agent_destinations(&session);
-        self.render_agent_sessions();
         self.agents.restore_button.set_sensitive(false);
-        self.render_agent_preview_message("Loading conversation preview…");
-        let discovery = ProviderDiscovery::from_environment();
+        let discovery = self.provider_discovery();
         let provider = session.provider;
         let provider_session_id = session.provider_session_id.clone();
         self.run_slow(
-            move || discovery.preview(provider, &provider_session_id, 12),
+            move || discovery.preview(provider, &provider_session_id, 40),
             |workspace, result| match result {
                 Ok(preview) => workspace.render_agent_preview(preview),
                 Err(error) => {
                     workspace.render_agent_preview_message(&format!(
                         "Could not load the preview: {error}"
                     ));
-                    workspace.show_error(&format!("Could not preview agent session: {error}"));
                 }
             },
         );
@@ -958,86 +1246,175 @@ impl Workspace {
     }
 
     fn render_agent_preview(&self, preview: ProviderPreview) {
-        let is_current = self
-            .agents
-            .selected
-            .borrow()
-            .as_ref()
-            .is_some_and(|session| {
-                session.provider == preview.session.provider
-                    && session.provider_session_id == preview.session.provider_session_id
-            });
-        if !is_current {
+        let Some(selected) = self.agents.selected.borrow().clone() else {
+            return;
+        };
+        if !same_agent_session(&selected, &preview.session) {
             return;
         }
+        let item = self
+            .agents
+            .sessions
+            .borrow()
+            .iter()
+            .find(|item| same_agent_session(&item.session, &selected))
+            .cloned();
+        self.clear_agent_preview();
+        let session = &preview.session;
+        let preview_box = &self.agents.preview;
+
+        let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let title = &self.agents.title;
+        title.set_text(&self.agent_title(session));
+        title.set_hexpand(true);
+        title_row.append(title);
+        let rename = gtk::Button::builder()
+            .icon_name("document-edit-symbolic")
+            .tooltip_text("Rename (F2)")
+            .valign(gtk::Align::Center)
+            .build();
+        rename.add_css_class("flat");
+        let rename_title = title.clone();
+        rename.connect_clicked(move |_| rename_title.start_editing());
+        title_row.append(&rename);
+        preview_box.append(&title_row);
+
+        let mut meta = vec![provider_label(session.provider).to_owned()];
+        if let Some(item) = &item {
+            meta.push(agent_location_label(item));
+        }
+        if let Some(branch) = session
+            .branch
+            .as_deref()
+            .filter(|branch| is_default_branch(branch))
+        {
+            meta.push(branch.to_owned());
+        }
+        if let Ok(now) = glib::DateTime::now_local() {
+            meta.push(agent_span_label(
+                &now,
+                session.created_at,
+                session.last_seen_at,
+            ));
+        }
+        meta.push(prompt_count_label(session.prompt_count));
+        let meta = gtk::Label::new(Some(&meta.join(" · ")));
+        meta.set_xalign(0.0);
+        meta.set_wrap(true);
+        meta.add_css_class("dim-label");
+        // Keep the title's own margin from pushing the line away.
+        meta.set_margin_top(-12);
+        preview_box.append(&meta);
+
+        let aliases = [session.custom_title.as_deref(), session.ai_title.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter(|alias| *alias != self.agent_title(session))
+            .collect::<Vec<_>>();
+        if !aliases.is_empty() {
+            let label = gtk::Label::new(Some(&format!("Also called {}", aliases.join(", "))));
+            label.set_xalign(0.0);
+            label.set_wrap(true);
+            label.add_css_class("caption");
+            label.add_css_class("dim-label");
+            label.set_margin_top(-12);
+            preview_box.append(&label);
+        }
+
+        if let Some(first) = &session.first_prompt {
+            self.append_agent_section("You asked", &[(None, first.as_str(), 6)]);
+        }
+        let last_reply = preview
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == ConversationRole::Assistant)
+            .map(|message| message.text.as_str());
+        let last_prompt = session
+            .last_prompt
+            .as_deref()
+            .filter(|last| Some(*last) != session.first_prompt.as_deref());
+        let mut left_off = Vec::new();
+        if let Some(prompt) = last_prompt {
+            left_off.push((Some("You"), prompt, 3));
+        }
+        if let Some(reply) = last_reply {
+            left_off.push((Some("Agent"), reply, 10));
+        }
+        if !left_off.is_empty() {
+            self.append_agent_section("Where it left off", &left_off);
+        }
+        if !preview.files_changed.is_empty() {
+            let base = item
+                .as_ref()
+                .and_then(|item| item.worktree_path.clone())
+                .or(session.cwd.clone());
+            let files = preview
+                .files_changed
+                .iter()
+                .map(|path| {
+                    base.as_deref()
+                        .and_then(|base| path.strip_prefix(base).ok())
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.append_agent_section("Files changed", &[(None, &files, 8)]);
+        }
+
+        let conversation = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        conversation.set_margin_top(12);
+        if preview.is_truncated {
+            let note = gtk::Label::new(Some("Earlier messages are left out."));
+            note.set_xalign(0.0);
+            note.add_css_class("dim-label");
+            conversation.append(&note);
+        }
+        for message in &preview.messages {
+            conversation.append(&agent_message_widget(
+                match message.role {
+                    ConversationRole::User => "You",
+                    ConversationRole::Assistant => "Agent",
+                },
+                &message.text,
+                0,
+            ));
+        }
+        let expander = gtk::Expander::builder()
+            .label("Show conversation")
+            .child(&conversation)
+            .build();
+        preview_box.append(&expander);
+        self.agents.restore_button.set_sensitive(true);
+    }
+
+    fn append_agent_section(&self, heading: &str, entries: &[(Option<&str>, &str, i32)]) {
+        let section = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let label = gtk::Label::new(Some(heading));
+        label.set_xalign(0.0);
+        label.add_css_class("heading");
+        section.append(&label);
+        for (role, text, lines) in entries {
+            match role {
+                Some(role) => section.append(&agent_message_widget(role, text, *lines)),
+                None => section.append(&agent_text(text, *lines)),
+            }
+        }
+        self.agents.preview.append(&section);
+    }
+
+    fn clear_agent_preview(&self) {
         while let Some(child) = self.agents.preview.first_child() {
+            if let Some(title_row) = child.downcast_ref::<gtk::Box>() {
+                // The title label lives on; only its row is rebuilt.
+                if self.agents.title.parent().as_ref() == Some(title_row.upcast_ref()) {
+                    title_row.remove(&self.agents.title);
+                }
+            }
             self.agents.preview.remove(&child);
         }
-        let elapsed = format_agent_elapsed(now_millis(), preview.session.last_seen_at);
-        let title = gtk::Label::new(Some(&preview.session.name));
-        title.set_xalign(0.0);
-        title.add_css_class("title-4");
-        title.set_wrap(true);
-        title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        self.agents.preview.append(&title);
-        let heading = gtk::Label::new(Some(&format!(
-            "{} · {}{}{}",
-            preview.session.provider.command(),
-            short_agent_session_id(&preview.session.provider_session_id),
-            if elapsed.is_empty() {
-                "".to_owned()
-            } else {
-                format!(" · {elapsed} ago")
-            },
-            if preview.is_truncated {
-                " · shortened"
-            } else {
-                ""
-            }
-        )));
-        heading.set_xalign(0.0);
-        heading.add_css_class("dim-label");
-        self.agents.preview.append(&heading);
-        if preview.is_truncated {
-            let first_prompt =
-                gtk::Label::new(Some(&format!("First prompt\n{}", preview.session.name)));
-            first_prompt.set_xalign(0.0);
-            first_prompt.set_wrap(true);
-            first_prompt.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            self.agents.preview.append(&first_prompt);
-        }
-        let preview_heading = gtk::Label::new(Some("Recent conversation"));
-        preview_heading.set_xalign(0.0);
-        preview_heading.add_css_class("heading");
-        self.agents.preview.append(&preview_heading);
-        if preview.messages.is_empty() {
-            let empty = gtk::Label::new(Some("No user or assistant messages found"));
-            empty.set_xalign(0.0);
-            self.agents.preview.append(&empty);
-        }
-        for message in preview.messages {
-            let role = gtk::Label::new(Some(match message.role {
-                ConversationRole::User => "You",
-                ConversationRole::Assistant => "Agent",
-            }));
-            role.set_xalign(0.0);
-            role.add_css_class("caption-heading");
-            if message.role == ConversationRole::User {
-                role.add_css_class("accent");
-            } else {
-                role.add_css_class("dim-label");
-            }
-            let text = gtk::Label::new(Some(&message.text));
-            text.set_xalign(0.0);
-            text.set_wrap(true);
-            text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-            text.set_selectable(true);
-            let entry = gtk::Box::new(gtk::Orientation::Vertical, 2);
-            entry.append(&role);
-            entry.append(&text);
-            self.agents.preview.append(&entry);
-        }
-        self.agents.restore_button.set_sensitive(true);
     }
 
     fn reset_agent_destinations(&self, session: &ProviderSession) {
@@ -1046,37 +1423,63 @@ impl Workspace {
             .restore_destination_choices
             .splice(0, item_count, &[]);
         self.agents.restore_destination_values.borrow_mut().clear();
-        let last_known = session
-            .cwd
-            .as_ref()
-            .map(|path| format!("Last location — {}", compact_agent_path(path)));
-        self.agents
-            .restore_destination_choices
-            .append(last_known.as_deref().unwrap_or("Last known location"));
-        self.agents
-            .restore_destination_values
-            .borrow_mut()
-            .push(AgentRestoreDestination::LastKnown);
-        self.agents
-            .restore_destination_choices
-            .append("Create a new worktree...");
-        self.agents
-            .restore_destination_values
-            .borrow_mut()
-            .push(AgentRestoreDestination::NewWorktree);
-        self.agents
-            .restore_destination_choices
-            .append("Choose a custom directory...");
-        self.agents
-            .restore_destination_values
-            .borrow_mut()
-            .push(AgentRestoreDestination::CustomDirectory);
+        self.agents.restore_destination.set_subtitle("");
+        let project_root = self
+            .agents
+            .sessions
+            .borrow()
+            .iter()
+            .find(|item| same_agent_session(&item.session, session))
+            .and_then(|item| item.project_root.clone());
+        let add = |label: String, value: AgentRestoreDestination| {
+            self.agents.restore_destination_choices.append(&label);
+            self.agents
+                .restore_destination_values
+                .borrow_mut()
+                .push(value);
+        };
+        match session.cwd.as_ref() {
+            Some(cwd) if cwd.exists() => {
+                let branch = session
+                    .branch
+                    .as_deref()
+                    .map(|branch| format!(" ({branch})"))
+                    .unwrap_or_default();
+                add(
+                    format!("{}{branch}", compact_agent_path(cwd)),
+                    AgentRestoreDestination::LastKnown,
+                );
+            }
+            Some(cwd) => {
+                self.agents
+                    .restore_destination
+                    .set_subtitle(&format!("{} no longer exists", compact_agent_path(cwd)));
+                if let Some(root) = project_root.filter(|root| root.exists()) {
+                    add(
+                        format!("Project root {}", compact_agent_path(&root)),
+                        AgentRestoreDestination::ExistingWorktree(root),
+                    );
+                }
+            }
+            None => add(
+                "Last known location".to_owned(),
+                AgentRestoreDestination::LastKnown,
+            ),
+        }
+        add(
+            "New worktree…".to_owned(),
+            AgentRestoreDestination::NewWorktree,
+        );
+        add(
+            "Other directory…".to_owned(),
+            AgentRestoreDestination::CustomDirectory,
+        );
         self.agents.restore_destination.set_selected(0);
         self.update_agent_destination_inputs();
     }
 
     fn load_agent_worktrees(&self, session: ProviderSession) {
-        let Some(cwd) = session.cwd.clone() else {
+        let Some(cwd) = session.cwd.clone().filter(|cwd| cwd.exists()) else {
             return;
         };
         let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
@@ -1104,7 +1507,7 @@ impl Workspace {
                 }
                 let labels = paths
                     .iter()
-                    .map(|path| format!("Worktree — {}", compact_agent_path(path)))
+                    .map(|path| format!("Worktree {}", compact_agent_path(path)))
                     .collect::<Vec<_>>();
                 let labels = labels.iter().map(String::as_str).collect::<Vec<_>>();
                 workspace
@@ -1137,22 +1540,27 @@ impl Workspace {
         let show_custom = matches!(destination, AgentRestoreDestination::CustomDirectory);
         self.agents.restore_branch.set_visible(show_branch);
         self.agents.restore_custom_cwd.set_visible(show_custom);
+        self.agents.restore_button.set_label(match destination {
+            AgentRestoreDestination::NewWorktree => "Resume in New Worktree",
+            _ => "Resume",
+        });
     }
 
     fn render_agent_list_message(&self, text: &str) {
         while let Some(child) = self.agents.list.first_child() {
             self.agents.list.remove(&child);
         }
+        self.agents.rows.borrow_mut().clear();
         let label = gtk::Label::new(Some(text));
         label.set_xalign(0.0);
+        label.set_margin_start(12);
+        label.set_margin_top(12);
         label.add_css_class("dim-label");
         self.agents.list.append(&label);
     }
 
     fn render_agent_preview_message(&self, text: &str) {
-        while let Some(child) = self.agents.preview.first_child() {
-            self.agents.preview.remove(&child);
-        }
+        self.clear_agent_preview();
         let label = gtk::Label::new(Some(text));
         label.set_xalign(0.0);
         label.add_css_class("dim-label");
@@ -1180,6 +1588,43 @@ impl Workspace {
     }
 }
 
+fn agent_text(text: &str, lines: i32) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
+    label.set_xalign(0.0);
+    label.set_wrap(true);
+    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    label.set_selectable(true);
+    if lines > 0 {
+        label.set_lines(lines);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    }
+    label
+}
+
+fn agent_message_widget(role: &str, text: &str, lines: i32) -> gtk::Box {
+    let heading = gtk::Label::new(Some(role));
+    heading.set_xalign(0.0);
+    heading.add_css_class("caption-heading");
+    heading.add_css_class(if role == "You" { "accent" } else { "dim-label" });
+    let entry = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    entry.append(&heading);
+    entry.append(&agent_text(text, lines));
+    entry
+}
+
+fn provider_label(provider: AgentProvider) -> &'static str {
+    match provider {
+        AgentProvider::Claude => "Claude",
+        AgentProvider::Codex => "Codex",
+    }
+}
+
+fn sorted<'a>(values: impl Iterator<Item = &'a String>) -> Vec<&'a String> {
+    let mut values = values.collect::<Vec<_>>();
+    values.sort();
+    values
+}
+
 fn entry_path(entry: &adw::EntryRow) -> Option<PathBuf> {
     let text = entry.text();
     let text = text.trim();
@@ -1190,7 +1635,7 @@ fn same_agent_session(left: &ProviderSession, right: &ProviderSession) -> bool {
     left.provider == right.provider && left.provider_session_id == right.provider_session_id
 }
 
-fn agent_session_key(session: &ProviderSession) -> String {
+pub(super) fn agent_session_key(session: &ProviderSession) -> String {
     format!(
         "{}:{}",
         session.provider.command(),
@@ -1198,14 +1643,16 @@ fn agent_session_key(session: &ProviderSession) -> String {
     )
 }
 
-fn short_agent_session_id(value: &str) -> String {
-    value.chars().take(12).collect()
-}
-
 fn compact_agent_path(path: &Path) -> String {
     let value = path.to_string_lossy();
+    let value = match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() && value.starts_with(&home) => {
+            format!("~{}", &value[home.len()..])
+        }
+        _ => value.into_owned(),
+    };
     if value.chars().count() <= 56 {
-        return value.into_owned();
+        return value;
     }
     let suffix = value
         .chars()
@@ -1221,11 +1668,13 @@ fn compact_agent_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentSessionItem, agent_worktree_name, classify_agent_sessions, filter_agent_sessions,
-        format_agent_elapsed, group_agent_sessions, restore_target_for_location,
+        AgentSessionItem, agent_day_heading, agent_location_label, agent_row_time,
+        agent_worktree_name, classify_agent_sessions, days_between, filter_agent_sessions,
+        restore_target_for_location,
     };
     use crate::providers::{AgentProvider, ProviderSession};
     use crate::worktrees::WorktreeManager;
+    use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
@@ -1235,6 +1684,12 @@ mod tests {
             provider: AgentProvider::Codex,
             provider_session_id: provider_session_id.to_owned(),
             name: name.to_owned(),
+            custom_title: None,
+            ai_title: None,
+            first_prompt: None,
+            last_prompt: None,
+            branch: None,
+            prompt_count: 0,
             cwd: Some(PathBuf::from(cwd)),
             created_at: 1_000,
             last_seen_at: 2_000,
@@ -1272,14 +1727,26 @@ mod tests {
             ),
         ];
 
-        assert_eq!(filter_agent_sessions(&sessions, None, "launch").len(), 1);
-        assert_eq!(filter_agent_sessions(&sessions, None, "terminal").len(), 1);
-        assert_eq!(filter_agent_sessions(&sessions, None, "agmux").len(), 1);
         assert_eq!(
-            filter_agent_sessions(&sessions, None, "codex-review").len(),
+            filter_agent_sessions(&sessions, None, "launch", &HashMap::new()).len(),
             1
         );
-        assert_eq!(filter_agent_sessions(&sessions, None, "missing").len(), 0);
+        assert_eq!(
+            filter_agent_sessions(&sessions, None, "terminal", &HashMap::new()).len(),
+            1
+        );
+        assert_eq!(
+            filter_agent_sessions(&sessions, None, "agmux", &HashMap::new()).len(),
+            1
+        );
+        assert_eq!(
+            filter_agent_sessions(&sessions, None, "codex-review", &HashMap::new()).len(),
+            1
+        );
+        assert_eq!(
+            filter_agent_sessions(&sessions, None, "missing", &HashMap::new()).len(),
+            0
+        );
     }
 
     #[test]
@@ -1307,7 +1774,7 @@ mod tests {
         );
         session.worktree_path = Some(PathBuf::from("/worktrees/native-session-picker"));
 
-        let filtered = filter_agent_sessions(&[session], None, "session-picker");
+        let filtered = filter_agent_sessions(&[session], None, "session-picker", &HashMap::new());
 
         assert_eq!(filtered.len(), 1);
     }
@@ -1329,51 +1796,15 @@ mod tests {
             ),
         ];
 
-        let filtered =
-            filter_agent_sessions(&sessions, Some(PathBuf::from("/work/agmux").as_path()), "");
+        let filtered = filter_agent_sessions(
+            &sessions,
+            Some(PathBuf::from("/work/agmux").as_path()),
+            "",
+            &HashMap::new(),
+        );
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].session.provider_session_id, "codex-review");
-    }
-
-    #[test]
-    fn grouping_sorts_projects_and_keeps_session_recency() {
-        let sessions = vec![
-            item(
-                "Newest other session",
-                "other-new",
-                "/work/other",
-                Some("/work/other"),
-            ),
-            item(
-                "Newest agmux session",
-                "agmux-new",
-                "/work/agmux-feature",
-                Some("/work/agmux"),
-            ),
-            item(
-                "Older agmux session",
-                "agmux-old",
-                "/work/agmux-old",
-                Some("/work/agmux"),
-            ),
-            item("Ungrouped", "unknown", "/tmp", None),
-        ];
-
-        let groups = group_agent_sessions(&sessions);
-
-        assert_eq!(groups.len(), 3);
-        assert_eq!(groups[0].project_root, Some(PathBuf::from("/work/agmux")));
-        assert_eq!(
-            groups[0].sessions[0].session.provider_session_id,
-            "agmux-new"
-        );
-        assert_eq!(
-            groups[0].sessions[1].session.provider_session_id,
-            "agmux-old"
-        );
-        assert_eq!(groups[1].project_root, Some(PathBuf::from("/work/other")));
-        assert_eq!(groups[2].project_root, None);
     }
 
     #[test]
@@ -1395,12 +1826,58 @@ mod tests {
     }
 
     #[test]
-    fn elapsed_labels_use_original_short_units() {
-        assert_eq!(format_agent_elapsed(1_000, 1_000), "now");
-        assert_eq!(format_agent_elapsed(7_000, 1_000), "6s");
-        assert_eq!(format_agent_elapsed(62_000, 1_000), "1m");
-        assert_eq!(format_agent_elapsed(3_661_000, 1_000), "1h");
-        assert_eq!(format_agent_elapsed(86_401_000, 1_000), "1d");
+    fn filtering_needs_every_word_and_matches_names_and_prompts() {
+        let mut session = item(
+            "Changes sidebar resizable",
+            "a",
+            "/work/agmux",
+            Some("/work/agmux"),
+        );
+        session.session.first_prompt = Some("Make the right sidebar draggable".to_owned());
+        session.session.branch = Some("main".to_owned());
+        let sessions = [session];
+        let names = HashMap::from([("codex:a".to_owned(), "Wide panel".to_owned())]);
+
+        assert_eq!(
+            filter_agent_sessions(&sessions, None, "sidebar draggable", &names).len(),
+            1
+        );
+        assert_eq!(
+            filter_agent_sessions(&sessions, None, "wide main", &names).len(),
+            1
+        );
+        assert_eq!(
+            filter_agent_sessions(&sessions, None, "sidebar modal", &names).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn location_leaves_out_the_main_checkout_and_default_branch() {
+        let mut main = item("A", "a", "/work/agmux", Some("/work/agmux"));
+        main.session.branch = Some("main".to_owned());
+        assert_eq!(agent_location_label(&main), "agmux");
+
+        let mut feature = item("B", "b", "/work/agmux-cleanup", Some("/work/agmux"));
+        feature.session.branch = Some("cleanup-euw".to_owned());
+        assert_eq!(agent_location_label(&feature), "agmux · cleanup-euw");
+
+        let detached = item("C", "c", "/work/agmux-review", Some("/work/agmux"));
+        assert_eq!(agent_location_label(&detached), "agmux · agmux-review");
+    }
+
+    #[test]
+    fn days_count_calendar_days_and_pick_headings() {
+        let local = |day, hour| glib::DateTime::from_local(2026, 9, day, hour, 30, 0.0).unwrap();
+        let now = local(29, 9);
+        assert_eq!(days_between(&local(28, 23), &now), 1);
+        assert_eq!(days_between(&local(29, 1), &now), 0);
+        assert_eq!(agent_day_heading(0, &now), "Today");
+        assert_eq!(agent_day_heading(1, &local(28, 23)), "Yesterday");
+        assert_eq!(agent_day_heading(4, &local(25, 10)), "Friday");
+        assert_eq!(agent_day_heading(9, &local(20, 10)), "Older");
+        assert_eq!(agent_row_time(4, &local(25, 10)), "10:30");
+        assert_eq!(agent_row_time(9, &local(20, 10)), "Sep 20");
     }
 
     #[test]

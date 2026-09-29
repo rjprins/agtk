@@ -108,6 +108,11 @@ impl InstancePaths {
         self.state_dir.join("agmux.db")
     }
 
+    /// Parsed facts about Claude and Codex logs, so they are not reread on every open.
+    pub fn provider_log_cache(&self) -> PathBuf {
+        self.state_dir.join("provider-logs.json")
+    }
+
     pub fn attic_dir(&self) -> PathBuf {
         self.state_dir.join("attic")
     }

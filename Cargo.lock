@@ -14,6 +14,7 @@ dependencies = [
  "gtk4",
  "libadwaita",
  "libc",
+ "memchr",
  "nix",
  "regex",
  "rusqlite",
