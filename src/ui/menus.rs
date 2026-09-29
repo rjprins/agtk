@@ -169,16 +169,7 @@ impl Workspace {
             workspace.start_session_rename(id)
         });
         self.add_target_action("session-launch-here", |workspace, id| {
-            let target = workspace.sessions.borrow().get(id).and_then(|session| {
-                let record = &session.record;
-                let worktree = record
-                    .worktree_path
-                    .clone()
-                    .or_else(|| record.cwd.clone())
-                    .or_else(|| record.project_root.clone())?;
-                Some((record.project_root.clone()?, worktree))
-            });
-            if let Some((root, worktree)) = target {
+            if let Some((root, worktree)) = workspace.session_launch_target(id) {
                 workspace.open_launch_for_worktree(&root, &worktree);
             }
         });

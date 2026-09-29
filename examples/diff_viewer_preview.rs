@@ -8,8 +8,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use webkit6::prelude::*;
 use diff_viewer::{DiffViewer, ViewerEvent};
+use webkit6::prelude::*;
 
 fn main() -> glib::ExitCode {
     let display = std::env::var("AGMUX_TEST_DISPLAY")

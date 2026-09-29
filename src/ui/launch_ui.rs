@@ -570,18 +570,28 @@ impl Workspace {
     }
 
     pub(super) fn open_launch_for_selected_project(&self) {
-        let root = self.selected_session_id().and_then(|id| {
-            self.sessions
-                .borrow()
-                .get(&id)
-                .and_then(|session| session.record.project_root.clone())
-        });
-        if let Some(root) = root {
-            self.open_launch_for_project(root.to_string_lossy().as_ref());
+        let target = self
+            .selected_session_id()
+            .and_then(|id| self.session_launch_target(&id));
+        if let Some((root, worktree)) = target {
+            self.open_launch_for_worktree(&root, &worktree);
         } else {
             self.prepare_launch_panel();
             self.launch.modal.present();
         }
+    }
+
+    /// The project and worktree a session runs in, for launching next to it.
+    pub(super) fn session_launch_target(&self, id: &str) -> Option<(PathBuf, PathBuf)> {
+        let sessions = self.sessions.borrow();
+        let record = &sessions.get(id)?.record;
+        let root = record.project_root.clone()?;
+        let worktree = record
+            .worktree_path
+            .clone()
+            .or_else(|| record.cwd.clone())
+            .unwrap_or_else(|| root.clone());
+        Some((root, worktree))
     }
 
     pub(super) fn open_launch_for_worktree(&self, project_root: &Path, worktree: &Path) {
@@ -596,6 +606,8 @@ impl Workspace {
         self.launch
             .cwd
             .set_text(worktree.to_string_lossy().as_ref());
+        self.launch.branch.set_text(&generated_branch_name());
+        self.launch.base_branch.set_text(DEFAULT_BASE_BRANCH);
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
         self.worktrees.modal.hide();

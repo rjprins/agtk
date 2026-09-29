@@ -91,7 +91,7 @@ These shortcuts work while VTE has focus and can be changed through `[keys]`:
 
 | Action | Default |
 | --- | --- |
-| Launch in the selected session's project | `Ctrl+Shift+Backquote` |
+| Launch in the selected session's project and worktree | `Ctrl+Shift+Backquote` |
 | Close selected session | `Ctrl+Shift+Q` |
 | Toggle sidebar | `Ctrl+Shift+Backslash` |
 | Next or previous session | `Ctrl+Shift+]` or `Ctrl+Shift+[` |
