@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
+use std::time::Duration;
 
 use agmux_native::control::{ControlCommand, ControlResponse, ControlServer};
 use serde_json::json;
@@ -37,6 +38,50 @@ fn server_delivers_a_typed_request_and_returns_its_response() {
     worker.join().expect("request worker");
     drop(server);
     assert!(!socket.exists());
+}
+
+#[test]
+fn server_answers_a_request_while_an_earlier_one_is_still_pending() {
+    let directory = tempfile::tempdir().expect("create temporary directory");
+    let socket = directory.path().join("control.sock");
+    let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
+    let slow_socket = socket.clone();
+    let slow = thread::spawn(move || {
+        exchange(
+            &slow_socket,
+            r#"{"version":1,"id":"slow-1","method":"app.get_state","params":{}}
+"#,
+        )
+    });
+    let held = requests.recv().expect("receive slow request");
+    assert_eq!(held.request.id, "slow-1");
+
+    let worker = thread::spawn(move || {
+        // Well inside the 5 second reply deadline that the held request waits on.
+        let pending = requests
+            .recv_timeout(Duration::from_secs(1))
+            .expect("second request arrives while the first is pending");
+        let request_id = pending.request.id.clone();
+        pending
+            .respond(ControlResponse::success(request_id, json!({})))
+            .expect("send response");
+    });
+    let response = exchange(
+        &socket,
+        r#"{"version":1,"id":"quick-1","method":"app.get_state","params":{}}
+"#,
+    );
+    assert!(response.contains(r#""id":"quick-1""#), "{response}");
+    worker.join().expect("request worker");
+
+    let request_id = held.request.id.clone();
+    held.respond(ControlResponse::success(request_id, json!({})))
+        .expect("answer the slow request");
+    assert!(
+        slow.join()
+            .expect("slow client")
+            .contains(r#""id":"slow-1""#)
+    );
 }
 
 #[test]

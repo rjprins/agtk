@@ -3,7 +3,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, mpsc::RecvTimeoutError};
 use std::thread::{self, JoinHandle};
@@ -18,6 +18,8 @@ use super::{
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// Beyond this many open requests, new callers wait in the listen backlog.
+const MAX_ACTIVE_CLIENTS: usize = 32;
 
 pub struct PendingRequest {
     pub request: ControlRequest,
@@ -99,16 +101,45 @@ impl Drop for ControlServer {
 }
 
 fn serve(listener: UnixListener, requests: Sender<PendingRequest>, shutdown: Arc<AtomicBool>) {
+    let active = Arc::new(AtomicUsize::new(0));
     while !shutdown.load(Ordering::Acquire) {
+        if active.load(Ordering::Acquire) >= MAX_ACTIVE_CLIENTS {
+            thread::sleep(Duration::from_millis(10));
+            continue;
+        }
         match listener.accept() {
             Ok((stream, _)) => {
-                let _ = handle_client(stream, &requests);
+                let requests = requests.clone();
+                let slot = ActiveClient::claim(&active);
+                // A slow request, such as a PR lookup, must not hold up agent state hooks.
+                let _ = thread::Builder::new()
+                    .name("agmux-control".to_owned())
+                    .spawn(move || {
+                        let _slot = slot;
+                        let _ = handle_client(stream, &requests);
+                    });
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(10));
             }
             Err(_) => break,
         }
+    }
+}
+
+/// Counts an open request until dropped, also when its thread fails to start.
+struct ActiveClient(Arc<AtomicUsize>);
+
+impl ActiveClient {
+    fn claim(active: &Arc<AtomicUsize>) -> Self {
+        active.fetch_add(1, Ordering::AcqRel);
+        Self(active.clone())
+    }
+}
+
+impl Drop for ActiveClient {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
