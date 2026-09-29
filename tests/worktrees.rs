@@ -74,6 +74,37 @@ fn linked_worktrees_report_each_checkout_branch() {
 }
 
 #[test]
+fn status_hash_follows_contents_around_deleted_and_oddly_named_files() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let root = fixture.root();
+    // A deleted tracked file sits between the others and takes the index fallback.
+    fs::remove_file(root.join("README.md")).unwrap();
+    for (name, content) in [
+        ("\"quoted", "q"),
+        ("a.txt", "a"),
+        ("b.txt", "b"),
+        ("new\nline", "n"),
+    ] {
+        fs::write(root.join(name), content).unwrap();
+    }
+    let hash = || {
+        manager.list(root, &[]).unwrap().worktrees[0]
+            .status_hash
+            .clone()
+    };
+    let first = hash();
+    assert_eq!(hash(), first);
+
+    // Status lines for untracked files carry no content, so only the file hashes see these.
+    fs::write(root.join("b.txt"), "B").unwrap();
+    let second = hash();
+    assert_ne!(second, first);
+    fs::write(root.join("new\nline"), "N").unwrap();
+    assert_ne!(hash(), second);
+}
+
+#[test]
 fn worktree_root_resolves_nested_directories_in_linked_checkouts() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic());

@@ -2,9 +2,11 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::symlink;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -583,21 +585,11 @@ fn status(worktree: &Path) -> WorktreeResult<Status> {
         ignored |= line.starts_with("! ");
     }
     let mut fingerprint = raw.as_bytes().to_vec();
-    for path in salvageable_paths(worktree, &raw)? {
+    let paths = salvageable_paths(worktree, &raw)?;
+    for (path, object) in paths.iter().zip(object_ids(worktree, &paths)?) {
         fingerprint.push(0);
         fingerprint.extend_from_slice(path.as_os_str().as_bytes());
         fingerprint.push(0);
-        let mut arguments = os_args(&["hash-object", "--no-filters", "--"]);
-        arguments.push(path.as_os_str().to_owned());
-        let object = run_git(worktree, arguments)
-            .map(|output| output.stdout)
-            .or_else(|_| {
-                git_text(
-                    worktree,
-                    ["rev-parse", &format!(":{}", path.to_string_lossy())],
-                )
-                .map(String::into_bytes)
-            })?;
         fingerprint.extend_from_slice(&object);
     }
     let hash = glib::compute_checksum_for_data(glib::ChecksumType::Sha256, &fingerprint)
@@ -609,6 +601,81 @@ fn status(worktree: &Path) -> WorktreeResult<Status> {
         ignored_only: !changed && ignored,
         hash,
     })
+}
+
+/// Object ids as `git hash-object` prints them, one per path. Readable files
+/// share one process, since a process per file took seconds in large checkouts.
+fn object_ids(worktree: &Path, paths: &[PathBuf]) -> WorktreeResult<Vec<Vec<u8>>> {
+    let mut objects = Vec::with_capacity(paths.len());
+    while objects.len() < paths.len() {
+        let batch = paths[objects.len()..]
+            .iter()
+            .take_while(|path| worktree.join(path).is_file())
+            .collect::<Vec<_>>();
+        if !batch.is_empty() {
+            objects.extend(hash_files(worktree, &batch)?);
+        }
+        // Deleted, unreadable or special paths keep the index fallback.
+        if let Some(path) = paths.get(objects.len()) {
+            objects.push(object_id(worktree, path)?);
+        }
+    }
+    Ok(objects)
+}
+
+/// Returns the ids printed before the first path git could not read.
+fn hash_files(worktree: &Path, paths: &[&PathBuf]) -> WorktreeResult<Vec<Vec<u8>>> {
+    let mut input = Vec::new();
+    for path in paths {
+        // Quoted, so names with newlines or a leading quote reach git intact.
+        quote_c_style(path.as_os_str().as_bytes(), &mut input);
+        input.push(b'\n');
+    }
+    let mut child = Command::new("git")
+        .args(["hash-object", "--no-filters", "--stdin-paths"])
+        .current_dir(worktree)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stdin = child.stdin.take().ok_or("git hash-object has no stdin")?;
+    // Write from another thread so a full stdout pipe cannot stall both sides.
+    let writer = thread::spawn(move || stdin.write_all(&input));
+    let output = child.wait_with_output()?;
+    let _ = writer.join();
+    Ok(output
+        .stdout
+        .split_inclusive(|byte| *byte == b'\n')
+        .filter(|line| line.ends_with(b"\n"))
+        .take(paths.len())
+        .map(<[u8]>::to_vec)
+        .collect())
+}
+
+fn object_id(worktree: &Path, path: &Path) -> WorktreeResult<Vec<u8>> {
+    let mut arguments = os_args(&["hash-object", "--no-filters", "--"]);
+    arguments.push(path.as_os_str().to_owned());
+    run_git(worktree, arguments)
+        .map(|output| output.stdout)
+        .or_else(|_| {
+            git_text(
+                worktree,
+                ["rev-parse", &format!(":{}", path.to_string_lossy())],
+            )
+            .map(String::into_bytes)
+        })
+}
+
+fn quote_c_style(path: &[u8], output: &mut Vec<u8>) {
+    output.push(b'"');
+    for &byte in path {
+        match byte {
+            b'"' | b'\\' => output.extend_from_slice(&[b'\\', byte]),
+            0x20..=0x7e => output.push(byte),
+            _ => output.extend_from_slice(format!("\\{byte:03o}").as_bytes()),
+        }
+    }
+    output.push(b'"');
 }
 
 struct ClassificationContext<'a> {
