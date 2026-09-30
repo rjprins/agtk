@@ -13,8 +13,8 @@ use agtk::control::{
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams,
     SessionIdParams, SessionKind, SessionSetStateParams, SessionState, ShortcutSetParams,
-    UiDiffScope, UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WaitCondition, WorktreeCreateParams,
-    WorktreeListParams, WorktreeReapParams,
+    UiDiffScope, UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WaitCondition,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agtk::instance::{InstanceName, InstancePaths};
 use agtk::providers::AgentProvider;

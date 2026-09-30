@@ -2,9 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
-use agtk::control::{
-    ClaudePresetApplyParams, ControlCommand, PrListParams, SendInputParams,
-};
+use agtk::control::{ClaudePresetApplyParams, ControlCommand, PrListParams, SendInputParams};
 use agtk::mcp::{ControlBackend, McpServer};
 use serde_json::{Value, json};
 

@@ -228,9 +228,7 @@ impl FileExplorer {
             let popover = gtk::PopoverMenu::from_model(Some(&menu));
             popover.set_parent(&view);
             popover.set_has_arrow(false);
-            popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
-                x as i32, y as i32, 1, 1,
-            )));
+            popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
             popover.connect_closed(|popover| {
                 let popover = popover.clone();
                 glib::idle_add_local_once(move || popover.unparent());
@@ -575,7 +573,10 @@ fn bind_row(
     let path = node.display_path();
     widget.set_tooltip_text(Some(&path));
     if show_directory {
-        let parent = path.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+        let parent = path
+            .rsplit_once('/')
+            .map(|(parent, _)| parent)
+            .unwrap_or("");
         directory.set_text(parent);
         directory.set_visible(!parent.is_empty());
     } else {
@@ -583,13 +584,9 @@ fn bind_row(
     }
     let mut state = state.borrow_mut();
     apply_status(&status, &node, &state.overlay);
-    state.bound.insert(
-        widget.clone(),
-        BoundRow {
-            node,
-            status,
-        },
-    );
+    state
+        .bound
+        .insert(widget.clone(), BoundRow { node, status });
 }
 
 fn apply_status(label: &gtk::Label, node: &FileNode, overlay: &StatusOverlay) {

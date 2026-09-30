@@ -142,8 +142,7 @@ fn prepare_environment() -> io::Result<Vec<CString>> {
         .collect::<io::Result<Vec<_>>>()?;
     environment.push(CString::new("TERM=xterm-256color").expect("static environment variable"));
     environment.push(CString::new("COLORTERM=truecolor").expect("static environment variable"));
-    environment
-        .push(CString::new("TERM_PROGRAM=agtk").expect("static environment variable"));
+    environment.push(CString::new("TERM_PROGRAM=agtk").expect("static environment variable"));
     environment.push(
         CString::new(format!(
             "TERM_PROGRAM_VERSION={}",

@@ -8,9 +8,7 @@ use serde_json::{Value, json};
 #[test]
 fn stdio_server_bridges_a_real_mcp_tool_call_to_the_native_socket() {
     let directory = tempfile::tempdir().unwrap();
-    let socket = directory
-        .path()
-        .join("agtk/mcp-integration/control.sock");
+    let socket = directory.path().join("agtk/mcp-integration/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).unwrap();
     let responder = thread::spawn(move || {
         let pending = requests.recv().unwrap();

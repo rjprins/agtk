@@ -217,7 +217,10 @@ mod tests {
         assert_eq!(paths(&tree.roots), ["docs", "src", "build.rs", "README.md"]);
         let src = &tree.roots[1];
         assert!(src.is_dir);
-        assert_eq!(paths(&src.children), ["src/ui", "src/Alpha.rs", "src/zeta.rs"]);
+        assert_eq!(
+            paths(&src.children),
+            ["src/ui", "src/Alpha.rs", "src/zeta.rs"]
+        );
         assert_eq!(paths(&src.children[0].children), ["src/ui/mod.rs"]);
         assert_eq!(tree.file_count, 6);
         assert_eq!(

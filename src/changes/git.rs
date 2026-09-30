@@ -146,7 +146,13 @@ pub(super) fn indexed_paths(root: &Path) -> Result<Vec<Vec<u8>>, String> {
 pub(super) fn worktree_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
     let output = run_checked(
         root,
-        ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        [
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
     )?;
     Ok(output
         .stdout

@@ -45,9 +45,6 @@ fn instance_names_produce_distinct_valid_application_ids() {
     let test = InstanceName::parse("test-123").expect("test instance");
 
     assert_eq!(default.application_id(), "nl.rutger.Agtk");
-    assert_eq!(
-        test.application_id(),
-        "nl.rutger.Agtk.Devel.i_test_123"
-    );
+    assert_eq!(test.application_id(), "nl.rutger.Agtk.Devel.i_test_123");
     assert_ne!(default.application_id(), test.application_id());
 }

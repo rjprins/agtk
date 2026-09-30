@@ -72,11 +72,7 @@ mod tests {
         ];
 
         assert_eq!(
-            next_worktree_session_name(
-                "codex-123",
-                Some(Path::new("/work/agtk")),
-                &sessions,
-            ),
+            next_worktree_session_name("codex-123", Some(Path::new("/work/agtk")), &sessions,),
             "agtk 5"
         );
     }
@@ -86,11 +82,7 @@ mod tests {
         let sessions = vec![session("agtk", "/other/agtk")];
 
         assert_eq!(
-            next_worktree_session_name(
-                "codex-123",
-                Some(Path::new("/work/agtk")),
-                &sessions,
-            ),
+            next_worktree_session_name("codex-123", Some(Path::new("/work/agtk")), &sessions,),
             "agtk"
         );
     }

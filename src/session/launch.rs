@@ -42,9 +42,7 @@ impl SessionLaunchPlan {
 
         let command = params.command.unwrap_or_else(|| match params.kind {
             SessionKind::Shell => env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()),
-            SessionKind::Codex => {
-                env::var("AGTK_CODEX_BIN").unwrap_or_else(|_| "codex".to_owned())
-            }
+            SessionKind::Codex => env::var("AGTK_CODEX_BIN").unwrap_or_else(|_| "codex".to_owned()),
             SessionKind::Claude => {
                 env::var("AGTK_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned())
             }

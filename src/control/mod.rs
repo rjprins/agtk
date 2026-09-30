@@ -13,9 +13,8 @@ pub use protocol::{
     PrSetAutoReviewParams, ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams,
     SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams, UiDiffScope,
     UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WorktreeCreateParams,
-    WorktreeListParams,
-    WorktreeReapParams, control_timeout, decode_request, decode_response, encode_request,
-    encode_response,
+    WorktreeListParams, WorktreeReapParams, control_timeout, decode_request, decode_response,
+    encode_request, encode_response,
 };
 pub use server::{ControlServer, PendingRequest};
 pub use state::{

@@ -8,9 +8,7 @@ use serde_json::json;
 #[test]
 fn wait_prints_the_observation_that_satisfies_terminal_text() {
     let directory = tempfile::tempdir().expect("create temporary directory");
-    let socket = directory
-        .path()
-        .join("agtk/wait-success/control.sock");
+    let socket = directory.path().join("agtk/wait-success/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         for text in ["starting", "build complete"] {
@@ -67,9 +65,7 @@ fn wait_prints_the_observation_that_satisfies_terminal_text() {
 #[test]
 fn wait_uses_exit_code_four_when_the_deadline_expires() {
     let directory = tempfile::tempdir().expect("create temporary directory");
-    let socket = directory
-        .path()
-        .join("agtk/wait-timeout/control.sock");
+    let socket = directory.path().join("agtk/wait-timeout/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         while let Ok(pending) = requests.recv_timeout(Duration::from_millis(50)) {
@@ -110,9 +106,7 @@ fn wait_uses_exit_code_four_when_the_deadline_expires() {
 #[test]
 fn wait_supports_selected_session_and_session_state_conditions() {
     let directory = tempfile::tempdir().expect("create temporary directory");
-    let socket = directory
-        .path()
-        .join("agtk/wait-state/control.sock");
+    let socket = directory.path().join("agtk/wait-state/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         for _ in 0..2 {

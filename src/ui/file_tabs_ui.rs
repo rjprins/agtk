@@ -161,12 +161,8 @@ impl Workspace {
             return;
         }
         self.select_session_for_diff(&params.session_id);
-        match self.open_file_from_session(
-            Some(params.session_id),
-            path,
-            params.line,
-            params.column,
-        ) {
+        match self.open_file_from_session(Some(params.session_id), path, params.line, params.column)
+        {
             Some(tab_id) => {
                 let _ = pending.respond(ControlResponse::success(
                     request_id,

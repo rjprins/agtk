@@ -2,12 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use agtk::agent_hooks::{
-    HOOK_TIMEOUT_SECONDS, claude_hook_settings, ensure_claude_hook_settings,
-};
-use agtk::control::{
-    AgentSignalState, ControlCommand, SessionSetStateParams, control_timeout,
-};
+use agtk::agent_hooks::{HOOK_TIMEOUT_SECONDS, claude_hook_settings, ensure_claude_hook_settings};
+use agtk::control::{AgentSignalState, ControlCommand, SessionSetStateParams, control_timeout};
 
 fn command(settings: &serde_json::Value, event: &str) -> String {
     settings["hooks"][event][0]["hooks"][0]["command"]

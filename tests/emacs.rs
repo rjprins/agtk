@@ -85,11 +85,8 @@ fn open_file_form_visits_the_file_at_its_line_and_column() {
     assert!(form.contains("(raise-frame frame)"));
     assert!(!form.contains("(require '"));
 
-    let plain = agtk::emacs::build_open_file_eval(
-        std::path::Path::new("/work/a.rs"),
-        None,
-        Some(3),
-    );
+    let plain =
+        agtk::emacs::build_open_file_eval(std::path::Path::new("/work/a.rs"), None, Some(3));
     assert!(!plain.contains("forward-line"));
     assert!(!plain.contains("move-to-column"));
 }

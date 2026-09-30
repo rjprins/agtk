@@ -157,8 +157,7 @@ fn file_documents_report_text_binary_and_missing_files() {
     };
     assert_eq!(missing.reason, "This file does not exist");
 
-    let FileDocumentResult::Placeholder(directory) = read_file_document(root, ".").unwrap()
-    else {
+    let FileDocumentResult::Placeholder(directory) = read_file_document(root, ".").unwrap() else {
         panic!("expected a placeholder");
     };
     assert_eq!(directory.reason, "This path is a directory");

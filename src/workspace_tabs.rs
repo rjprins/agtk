@@ -348,7 +348,11 @@ mod tests {
             tabs.close_file(&file("/repo/one.rs")),
             Some(WorkspaceTabId::Session("b".to_owned()))
         );
-        assert!(tabs.context_tabs("/repo").iter().all(|tab| matches!(tab, WorkspaceTabId::Session(_))));
+        assert!(
+            tabs.context_tabs("/repo")
+                .iter()
+                .all(|tab| matches!(tab, WorkspaceTabId::Session(_)))
+        );
     }
 
     #[test]

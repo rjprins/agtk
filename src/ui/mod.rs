@@ -47,8 +47,8 @@ mod azure_ui;
 mod capture;
 mod changes_ui;
 mod claude_ui;
-mod controls;
 mod code_viewer;
+mod controls;
 mod emacs_ui;
 mod explorer_ui;
 mod file_tabs_ui;
@@ -682,8 +682,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let reload_workspace = workspace.clone();
     diff_reload_button.connect_clicked(move |_| reload_workspace.reload_active_document());
     let emacs_workspace = workspace.clone();
-    open_in_emacs_button
-        .connect_clicked(move |_| emacs_workspace.open_visible_document_in_emacs());
+    open_in_emacs_button.connect_clicked(move |_| emacs_workspace.open_visible_document_in_emacs());
     workspace.connect_explorer();
     let changes_workspace = workspace.clone();
     changes.toggle.connect_toggled(move |toggle| {

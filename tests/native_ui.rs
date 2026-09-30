@@ -1644,8 +1644,13 @@ fn files_page_lists_the_worktree_and_opens_files_read_only() {
         let mut last = Value::Null;
         while Instant::now() < deadline {
             let inspection = app.request("ui.inspect", json!({}));
-            last = find(&inspection["root"], id).cloned().unwrap_or(Value::Null);
-            if last["label"].as_str().is_some_and(|label| label.contains(needle)) {
+            last = find(&inspection["root"], id)
+                .cloned()
+                .unwrap_or(Value::Null);
+            if last["label"]
+                .as_str()
+                .is_some_and(|label| label.contains(needle))
+            {
                 return last;
             }
             thread::sleep(Duration::from_millis(50));

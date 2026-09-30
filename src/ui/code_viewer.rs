@@ -317,9 +317,7 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             )
         }
         ViewerCommand::Copy => ("window.agtkViewer.copySelection()".to_owned(), None),
-        ViewerCommand::PreviousChange => {
-            ("window.agtkViewer.moveToChange(false)".to_owned(), None)
-        }
+        ViewerCommand::PreviousChange => ("window.agtkViewer.moveToChange(false)".to_owned(), None),
         ViewerCommand::NextChange => ("window.agtkViewer.moveToChange(true)".to_owned(), None),
         ViewerCommand::SaveViewState => ("window.agtkViewer.saveViewState()".to_owned(), None),
         ViewerCommand::SetAppearance {
