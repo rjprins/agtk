@@ -305,15 +305,23 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .child(&center_tabs)
         .build();
     tabs_scroll.set_propagate_natural_height(true);
+    tabs_scroll.set_propagate_natural_width(true);
     tabs_scroll.set_size_request(-1, 42);
     tabs_scroll.set_hexpand(true);
     let tabs_bar = adw::HeaderBar::new();
-    tabs_bar.set_title_widget(Some(&tabs_scroll));
     tabs_bar.set_show_start_title_buttons(false);
 
     let content_title = adw::WindowTitle::new("agmux", "");
-    let content_bar = adw::HeaderBar::new();
-    content_bar.set_title_widget(Some(&content_title));
+    // Keep long session names and prompts ellipsized rather than forcing a wrap.
+    // https://gnome.pages.gitlab.gnome.org/libadwaita/doc/1-latest/class.Clamp.html
+    let compact_title = adw::Clamp::builder()
+        .maximum_size(240)
+        .tightening_threshold(240)
+        .child(&content_title)
+        .build();
+    let session_details = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    session_details.set_valign(gtk::Align::Center);
+    session_details.append(&compact_title);
     let session_context_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     session_context_bar.set_visible(false);
     let context_last_input = gtk::Label::new(Some("(none yet)"));
@@ -333,7 +341,17 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         })
         .sync_create()
         .build();
-    content_bar.pack_end(&session_context_bar);
+    session_details.append(&session_context_bar);
+    // Wrap at the children's natural widths, including the scrollable tabs.
+    // https://gnome.pages.gitlab.gnome.org/libadwaita/doc/1-latest/class.WrapBox.html
+    let header_contents = adw::WrapBox::new();
+    header_contents.set_hexpand(true);
+    header_contents.set_child_spacing(8);
+    header_contents.set_justify(adw::JustifyMode::Fill);
+    header_contents.set_justify_last_line(true);
+    header_contents.append(&tabs_scroll);
+    header_contents.append(&session_details);
+    tabs_bar.set_title_widget(Some(&header_contents));
 
     let context_pr = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     context_pr.add_css_class("toolbar");
@@ -361,7 +379,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let main_pane = adw::ToolbarView::new();
     main_pane.add_top_bar(&tabs_bar);
     main_pane.add_top_bar(&context_pr);
-    main_pane.add_top_bar(&content_bar);
     let center_content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     center_content.append(&stack);
     main_pane.set_content(Some(&center_content));
@@ -373,8 +390,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     sidebar_panel.add_css_class("sidebar-pane");
     sidebar_panel.set_size_request(sidebar::MIN_SIDEBAR_WIDTH, -1);
     sidebar_bar.set_show_end_title_buttons(false);
-    content_bar.set_show_start_title_buttons(false);
-    content_bar.set_show_end_title_buttons(false);
     let split = gtk::Paned::new(gtk::Orientation::Horizontal);
     split.set_start_child(Some(&sidebar_panel));
     split.set_end_child(Some(&changes.split));
