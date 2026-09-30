@@ -723,7 +723,32 @@ impl Workspace {
                                         is_enabled: true,
                                         is_selected: false,
                                         bounds: widget_bounds(&self.context_pr, &self.window),
-                                        children: Vec::new(),
+                                        children: {
+                                            let mut nodes = Vec::new();
+                                            let mut child = self.context_pr_pbis.first_child();
+                                            while let Some(widget) = child {
+                                                child = widget.next_sibling();
+                                                if let Ok(button) = widget.downcast::<gtk::Button>()
+                                                {
+                                                    nodes.push(UiNode {
+                                                        id: button.widget_name().to_string(),
+                                                        role: "link".to_owned(),
+                                                        label: button
+                                                            .label()
+                                                            .map(|text| text.to_string()),
+                                                        is_visible: button.is_visible(),
+                                                        is_enabled: button.is_sensitive(),
+                                                        is_selected: false,
+                                                        bounds: widget_bounds(
+                                                            &button,
+                                                            &self.window,
+                                                        ),
+                                                        children: Vec::new(),
+                                                    });
+                                                }
+                                            }
+                                            nodes
+                                        },
                                     },
                                 ],
                             }];

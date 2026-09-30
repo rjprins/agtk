@@ -279,6 +279,22 @@ impl Workspace {
         let pull_request = &context.pull_request;
         self.context_pr_number
             .set_label(&format!("PR #{}", pull_request.id));
+        while let Some(child) = self.context_pr_pbis.first_child() {
+            self.context_pr_pbis.remove(&child);
+        }
+        for pbi in &pull_request.linked_pbis {
+            let button = gtk::Button::with_label(&format!("PBI #{}", pbi.id));
+            button.add_css_class("flat");
+            button.add_css_class("accent");
+            button.set_tooltip_text(Some(&pbi.title));
+            button.set_widget_name(&format!("pbi-{}", pbi.id));
+            let workspace = self.clone();
+            let url = pbi.url.clone();
+            button.connect_clicked(move |_| workspace.open_pr_link(&url));
+            self.context_pr_pbis.append(&button);
+        }
+        self.context_pr_pbis
+            .set_visible(!pull_request.linked_pbis.is_empty());
         self.context_pr_title.set_text(&pull_request.title);
         self.context_pr_title
             .set_tooltip_text(Some(&pull_request.title));
@@ -294,15 +310,18 @@ impl Workspace {
         let Some(context) = self.selected_pr.borrow().clone() else {
             return;
         };
-        let url = context.pull_request.url;
-        let launcher = gtk::UriLauncher::new(&url);
+        self.open_pr_link(&context.pull_request.url);
+    }
+
+    fn open_pr_link(&self, url: &str) {
+        let launcher = gtk::UriLauncher::new(url);
         let workspace = self.clone();
         launcher.launch(
             Some(&self.window),
             None::<&gio::Cancellable>,
             move |result| {
                 if let Err(error) = result {
-                    workspace.show_error(&format!("Could not open PR: {error}"));
+                    workspace.show_error(&format!("Could not open Azure DevOps link: {error}"));
                 }
             },
         );

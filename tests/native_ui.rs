@@ -47,11 +47,12 @@ impl App {
         let fake_az = directory.path().join("fake-az");
         std::fs::write(
             &fake_az,
-            "#!/bin/sh\n[ -e \"$AGMUX_AZURE_PRS_FILE.slow\" ] && sleep 10\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGMUX_AZURE_PRS_FILE\" ;;\n  'devops invoke --org') cat \"$AGMUX_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\n[ -e \"$AGMUX_AZURE_PRS_FILE.slow\" ] && sleep 10\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGMUX_AZURE_PRS_FILE\" ;;\n  'repos pr work-item') cat \"$AGMUX_AZURE_PBIS_FILE\" ;;\n  'devops invoke --org') cat \"$AGMUX_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         std::fs::set_permissions(&fake_az, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::write(directory.path().join("azure-prs.json"), "[]").unwrap();
+        std::fs::write(directory.path().join("azure-pbis.json"), "[]").unwrap();
         std::fs::write(
             directory.path().join("azure-threads.json"),
             r#"{"value":[]}"#,
@@ -127,6 +128,10 @@ impl App {
             .env(
                 "AGMUX_AZURE_THREADS_FILE",
                 self.directory.path().join("azure-threads.json"),
+            )
+            .env(
+                "AGMUX_AZURE_PBIS_FILE",
+                self.directory.path().join("azure-pbis.json"),
             )
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -960,6 +965,12 @@ fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
         );
     }
     let pr_file = app.directory.path().join("azure-prs.json");
+    let pbi_file = app.directory.path().join("azure-pbis.json");
+    std::fs::write(&pbi_file, serde_json::to_vec(&json!([
+        {"id":237561,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Monitor workflows"}},
+        {"id":237562,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Alert on failures"}},
+        {"id":237563,"fields":{"System.WorkItemType":"Task","System.Title":"Implementation task"}}
+    ])).unwrap()).unwrap();
     let mut pr = json!({
         "pullRequestId":42, "title":"Cached review",
         "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main",
@@ -1002,6 +1013,20 @@ fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
         }
     };
     wait_label(&app, "PR #42: Cached review", Duration::from_secs(5));
+    let assert_pbis = |node: &Value| {
+        let labels = node["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|child| {
+                assert_eq!(child["role"], "link");
+                assert_eq!(child["isVisible"], true);
+                child["label"].as_str().unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(labels, ["PBI #237561", "PBI #237562"]);
+    };
+    assert_pbis(&context(&app));
 
     let slow = app.directory.path().join("azure-prs.json.slow");
     std::fs::write(&slow, "").unwrap();
@@ -1014,6 +1039,7 @@ fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
         "cached PR should appear before the slow Azure lookup"
     );
     assert_eq!(node["label"], "PR #42: Cached review");
+    assert_pbis(&node);
 
     app.stop();
     app.start();
@@ -1023,6 +1049,7 @@ fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
         "saved PR should appear immediately after restarting"
     );
     assert_eq!(node["label"], "PR #42: Cached review");
+    assert_pbis(&node);
 
     pr["title"] = json!("Refreshed review");
     std::fs::write(&pr_file, serde_json::to_vec(&json!([pr])).unwrap()).unwrap();
@@ -1043,6 +1070,21 @@ fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
         "failed refresh should retain the cached PR"
     );
     assert_eq!(node["label"], "PR #42: Refreshed review");
+    assert_pbis(&node);
+
+    std::fs::write(&pbi_file, "[]").unwrap();
+    std::fs::write(&pr_file, serde_json::to_vec(&json!([pr])).unwrap()).unwrap();
+    app.request("session.select", json!({"sessionId":other_id}));
+    app.request("session.select", json!({"sessionId":id}));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !context(&app)["children"].as_array().unwrap().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "unlinked PBIs should disappear from the PR bar"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+    assert_eq!(context(&app)["isVisible"], true);
 
     std::fs::write(&pr_file, "[]").unwrap();
     app.request("session.select", json!({"sessionId":other_id}));

@@ -65,6 +65,7 @@ cat > "$work/fake-az" <<'AZ'
 case "$1 $2 $3" in
   'account show --query') echo 'reviewer@example.com' ;;
   'repos pr list') cat "$AGMUX_AZURE_PRS_FILE" ;;
+  'repos pr work-item') printf '%s\n' '[{"id":2417,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Implement cursor pagination"}}]' ;;
   'devops invoke --org') cat "$AGMUX_AZURE_THREADS_FILE" ;;
   *) echo 'unexpected az command' >&2; exit 2 ;;
 esac

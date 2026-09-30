@@ -52,6 +52,12 @@ fn azure_remotes_and_active_pr_payloads_are_strictly_normalized() {
     assert_eq!(prs[0].source_branch, "native-workspace");
     assert_eq!(prs[0].reviewer_votes, [10]);
     assert!(prs[0].url.contains("pullrequest/42"));
+
+    // Snapshots saved before PBI links were added still restore successfully.
+    let mut legacy = serde_json::to_value(&prs[0]).unwrap();
+    legacy.as_object_mut().unwrap().remove("linkedPbis");
+    let restored: AzurePr = serde_json::from_value(legacy).unwrap();
+    assert!(restored.linked_pbis.is_empty());
 }
 
 #[test]
@@ -102,7 +108,8 @@ fn azure_client_uses_bounded_cli_calls_and_collects_unresolved_threads() {
 case "$*" in
   "account show"*) printf 'rutger@example.com\n' ;;
   "repos pr list"*) printf '%s\n' '[{"pullRequestId":7,"title":"Review me","sourceRefName":"refs/heads/review-me","targetRefName":"refs/heads/main","creationDate":"2026-09-15T08:00:00Z","isDraft":false,"createdBy":{"displayName":"Other","uniqueName":"other@example.com"},"reviewers":[]}]' ;;
-  "devops invoke"*) printf '%s\n' '{"value":[{"id":3,"status":"active","comments":[{"id":1,"commentType":"text","content":"Please fix this","isDeleted":false,"publishedDate":"2026-09-15T09:00:00Z"}]}]}' ;;
+  "repos pr work-item list"*) [ -e "$0.fail-pbis" ] && exit 7; printf '%s\n' '[{"id":123,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Linked backlog item","System.TeamProject":"Project One"}},{"id":124,"fields":{"System.WorkItemType":"Bug","System.Title":"Linked bug"}},{"id":125,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Another backlog item"}}]' ;;
+  "devops invoke"*) [ -e "$0.fail-threads" ] && exit 7; printf '%s\n' '{"value":[{"id":3,"status":"active","comments":[{"id":1,"commentType":"text","content":"Please fix this","isDeleted":false,"publishedDate":"2026-09-15T09:00:00Z"}]}]}' ;;
   *) printf 'unexpected arguments: %s\n' "$*" >&2; exit 7 ;;
 esac
 "##,
@@ -118,6 +125,35 @@ esac
     assert_eq!(result.pull_requests.len(), 1);
     assert_eq!(result.pull_requests[0].unresolved_threads, 1);
     assert_eq!(result.pull_requests[0].latest_review_at, 1_789_462_800_000);
+    let pbis = &result.pull_requests[0].linked_pbis;
+    assert_eq!(pbis.len(), 2);
+    assert_eq!(pbis[0].id, 123);
+    assert_eq!(pbis[0].title, "Linked backlog item");
+    assert_eq!(
+        pbis[0].url,
+        "https://dev.azure.com/demo/Project%20One/_workitems/edit/123"
+    );
+    assert_eq!(
+        pbis[1].url,
+        "https://dev.azure.com/demo/Project/_workitems/edit/125"
+    );
+
+    let failed_pbis = directory.path().join("fake-az.fail-pbis");
+    fs::write(&failed_pbis, "").unwrap();
+    let result = AzureClient::new(&az)
+        .list_active(&repository)
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.pull_requests[0].unresolved_threads, 1);
+    assert!(result.pull_requests[0].linked_pbis.is_empty());
+
+    fs::remove_file(failed_pbis).unwrap();
+    fs::write(directory.path().join("fake-az.fail-threads"), "").unwrap();
+    let result = AzureClient::new(&az)
+        .list_active(&repository)
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.pull_requests[0].linked_pbis.len(), 2);
 }
 
 fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> AzurePr {
@@ -137,6 +173,7 @@ fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> Azur
         merge_status: "unknown".to_owned(),
         reviewer_votes: Vec::new(),
         unresolved_threads,
+        linked_pbis: Vec::new(),
         url: format!("https://example.test/{id}"),
     }
 }

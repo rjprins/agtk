@@ -43,6 +43,16 @@ pub struct AzurePr {
     pub merge_status: String,
     pub reviewer_votes: Vec<i64>,
     pub unresolved_threads: u32,
+    #[serde(default)]
+    pub linked_pbis: Vec<LinkedPbi>,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedPbi {
+    pub id: u64,
+    pub title: String,
     pub url: String,
 }
 
@@ -204,7 +214,7 @@ impl AzureClient {
                     .is_some_and(|author| author.eq_ignore_ascii_case(user));
             }
         }
-        self.add_review_details(&reference, &mut pull_requests);
+        self.add_pr_details(&reference, &mut pull_requests);
         pull_requests.sort_by(|left, right| {
             right
                 .updated_at
@@ -218,7 +228,7 @@ impl AzureClient {
         }))
     }
 
-    fn add_review_details(&self, reference: &AzureRepoRef, pull_requests: &mut [AzurePr]) {
+    fn add_pr_details(&self, reference: &AzureRepoRef, pull_requests: &mut [AzurePr]) {
         for chunk in pull_requests.chunks_mut(DETAIL_CONCURRENCY) {
             let results = thread::scope(|scope| {
                 chunk
@@ -227,21 +237,52 @@ impl AzureClient {
                         let client = self.clone();
                         let reference = reference.clone();
                         let id = pull_request.id;
-                        scope.spawn(move || client.thread_summary(&reference, id))
+                        scope.spawn(move || {
+                            (
+                                client.thread_summary(&reference, id).ok(),
+                                client.linked_pbis(&reference, id).ok(),
+                            )
+                        })
                     })
                     .collect::<Vec<_>>()
                     .into_iter()
-                    .map(|handle| handle.join().ok().and_then(Result::ok))
+                    .map(|handle| handle.join().ok())
                     .collect::<Vec<_>>()
             });
-            for (pull_request, summary) in chunk.iter_mut().zip(results) {
+            for (pull_request, details) in chunk.iter_mut().zip(results) {
+                let Some((summary, linked_pbis)) = details else {
+                    continue;
+                };
                 if let Some(summary) = summary {
                     pull_request.unresolved_threads = summary.unresolved_threads;
                     pull_request.latest_review_at = summary.latest_review_at;
                     pull_request.updated_at = pull_request.updated_at.max(summary.latest_review_at);
                 }
+                if let Some(linked_pbis) = linked_pbis {
+                    pull_request.linked_pbis = linked_pbis;
+                }
             }
         }
+    }
+
+    fn linked_pbis(&self, reference: &AzureRepoRef, id: u64) -> AzureResult<Vec<LinkedPbi>> {
+        let id = id.to_string();
+        let raw = self.az_json([
+            "repos",
+            "pr",
+            "work-item",
+            "list",
+            "--id",
+            &id,
+            "--org",
+            &reference.org_url,
+            "--detect",
+            "false",
+            "--only-show-errors",
+            "-o",
+            "json",
+        ])?;
+        Ok(normalize_linked_pbis(reference, &raw))
     }
 
     fn thread_summary(&self, reference: &AzureRepoRef, id: u64) -> AzureResult<ThreadSummary> {
@@ -391,6 +432,7 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         merge_status,
         reviewer_votes,
         unresolved_threads: 0,
+        linked_pbis: Vec::new(),
         url: format!(
             "{}/{}/_git/{}/pullrequest/{id}?_a=files",
             reference.org_url,
@@ -459,6 +501,43 @@ pub fn acknowledge_attention(
         }
     }
     state
+}
+
+fn normalize_linked_pbis(reference: &AzureRepoRef, value: &Value) -> Vec<LinkedPbi> {
+    let mut pbis = value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let fields = item.get("fields")?.as_object()?;
+            let kind = fields.get("System.WorkItemType").and_then(nonempty)?;
+            if !kind.eq_ignore_ascii_case("Product Backlog Item") {
+                return None;
+            }
+            let id = item.get("id")?.as_u64().filter(|id| *id > 0)?;
+            let title = fields
+                .get("System.Title")
+                .and_then(nonempty)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("PBI #{id}"));
+            let project = fields
+                .get("System.TeamProject")
+                .and_then(nonempty)
+                .unwrap_or(&reference.project);
+            Some(LinkedPbi {
+                id,
+                title,
+                url: format!(
+                    "{}/{}/_workitems/edit/{id}",
+                    reference.org_url,
+                    percent_encode(project)
+                ),
+            })
+        })
+        .collect::<Vec<_>>();
+    pbis.sort_by_key(|pbi| pbi.id);
+    pbis.dedup_by_key(|pbi| pbi.id);
+    pbis
 }
 
 fn normalize_thread_summary(value: &Value) -> ThreadSummary {
@@ -658,8 +737,34 @@ fn days_from_civil(mut year: i64, month: i64, day: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_thread_summary;
+    use super::{normalize_linked_pbis, normalize_thread_summary, parse_azure_remote};
     use serde_json::json;
+
+    #[test]
+    fn linked_pbis_validate_ids_deduplicate_and_build_browser_links() {
+        let reference =
+            parse_azure_remote("https://dev.azure.com/demo/Project%20One/_git/app").unwrap();
+        let pbis = normalize_linked_pbis(
+            &reference,
+            &json!([
+                {"id":42, "url":"javascript:ignored", "fields":{"System.WorkItemType":"Product Backlog Item", "System.Title":"Title <&>", "System.TeamProject":"Other Project"}},
+                {"id":42, "fields":{"System.WorkItemType":"Product Backlog Item"}},
+                {"id":0, "fields":{"System.WorkItemType":"Product Backlog Item"}},
+                {"id":-1, "fields":{"System.WorkItemType":"Product Backlog Item"}},
+                {"id":"invalid", "fields":{"System.WorkItemType":"Product Backlog Item"}},
+                {"id":43, "fields":{"System.WorkItemType":"Task"}},
+                null
+            ]),
+        );
+        assert_eq!(pbis.len(), 1);
+        assert_eq!(pbis[0].id, 42);
+        assert_eq!(pbis[0].title, "Title <&>");
+        assert_eq!(
+            pbis[0].url,
+            "https://dev.azure.com/demo/Other%20Project/_workitems/edit/42"
+        );
+        assert!(normalize_linked_pbis(&reference, &json!([])).is_empty());
+    }
 
     #[test]
     fn system_events_do_not_count_as_unresolved_or_update_review_time() {

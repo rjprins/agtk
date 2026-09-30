@@ -135,6 +135,7 @@ struct Workspace {
     context_last_input: gtk::Label,
     context_pr: gtk::Box,
     context_pr_number: gtk::Button,
+    context_pr_pbis: gtk::Box,
     context_pr_title: gtk::Label,
     context_pr_author: gtk::Label,
     context_pr_threads: gtk::Label,
@@ -341,6 +342,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     context_pr_number.add_css_class("flat");
     context_pr_number.add_css_class("accent");
     context_pr_number.set_tooltip_text(Some("Open this pull request in Azure DevOps"));
+    let context_pr_pbis = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    context_pr_pbis.set_visible(false);
     let context_pr_title = gtk::Label::new(None);
     context_pr_title.set_xalign(0.0);
     context_pr_title.set_hexpand(true);
@@ -350,6 +353,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let context_pr_threads = gtk::Label::new(None);
     context_pr_threads.add_css_class("warning");
     context_pr.append(&context_pr_number);
+    context_pr.append(&context_pr_pbis);
     context_pr.append(&context_pr_title);
     context_pr.append(&context_pr_author);
     context_pr.append(&context_pr_threads);
@@ -562,6 +566,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         context_last_input: context_last_input.clone(),
         context_pr,
         context_pr_number,
+        context_pr_pbis,
         context_pr_title,
         context_pr_author,
         context_pr_threads,
