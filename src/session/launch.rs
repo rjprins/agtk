@@ -20,6 +20,8 @@ pub struct SessionLaunchPlan {
     pub cwd: Option<PathBuf>,
     pub name: Option<String>,
     pub initial_input: Option<String>,
+    /// The first prompt of an agent, as arguments for its command line.
+    pub prompt_args: Vec<String>,
     pub project_root: Option<PathBuf>,
     pub worktree_path: Option<PathBuf>,
 }
@@ -78,6 +80,23 @@ impl SessionLaunchPlan {
             .or_else(|| env::current_dir().ok())
             .map(|path| fs::canonicalize(path).map_err(|e| LaunchPlanError(e.to_string())))
             .transpose()?;
+        // Typed input would race the agent's startup and stay unsent in its prompt box.
+        let (initial_input, prompt_args) = match params.initial_input {
+            Some(prompt) if matches!(params.kind, SessionKind::Codex | SessionKind::Claude) => {
+                if prompt.contains('\0') {
+                    return Err(LaunchPlanError(
+                        "initial input cannot contain NUL bytes".to_owned(),
+                    ));
+                }
+                let prompt_args = if prompt.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    vec!["--".to_owned(), prompt]
+                };
+                (None, prompt_args)
+            }
+            other => (other, Vec::new()),
+        };
         Ok(Self {
             kind: params.kind,
             program,
@@ -85,7 +104,8 @@ impl SessionLaunchPlan {
             path,
             cwd,
             name: params.name,
-            initial_input: params.initial_input,
+            initial_input,
+            prompt_args,
             project_root,
             worktree_path,
         })

@@ -288,18 +288,29 @@ impl Workspace {
                     .borrow()
                     .get(&params.session_id)
                     .filter(|session| session.record.state != SessionState::Exited)
-                    .map(|session| session.terminal.clone());
-                if let Some(terminal) = terminal {
+                    .map(|session| {
+                        (
+                            session.terminal.clone(),
+                            status_ui::is_agent(session.record.kind),
+                        )
+                    });
+                if let Some((terminal, is_agent)) = terminal {
                     // VTE sends these bytes directly to the attached child PTY.
                     // Source: https://gnome.pages.gitlab.gnome.org/vte/gtk4/method.Terminal.feed_child.html
-                    terminal.feed_child(params.text.as_bytes());
                     let mut bytes_written = params.text.len();
                     if params.append_enter {
-                        terminal.feed_child(b"\n");
+                        // Agents only submit on a carriage return, and only keep a
+                        // multi-line message together when it arrives as a paste.
+                        if is_agent && !params.text.is_empty() {
+                            terminal.paste_text(&params.text);
+                        } else {
+                            terminal.feed_child(params.text.as_bytes());
+                        }
+                        terminal.feed_child(b"\r");
                         bytes_written += 1;
-                    }
-                    if params.append_enter {
                         self.mark_agent_busy(&params.session_id);
+                    } else {
+                        terminal.feed_child(params.text.as_bytes());
                     }
                     ControlResponse::success(
                         id,

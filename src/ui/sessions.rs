@@ -473,12 +473,14 @@ impl Workspace {
                 record.position = position;
                 record.state = SessionState::Reconnecting;
                 store.save_session(&record)?;
-                let hook_args: Vec<OsString> = if record.kind == SessionKind::Claude {
+                let mut hook_args: Vec<OsString> = if record.kind == SessionKind::Claude {
                     let settings = ensure_claude_hook_settings(paths.runtime_dir(), &agtkctl)?;
                     vec!["--settings".into(), settings.into_os_string()]
                 } else {
                     Vec::new()
                 };
+                // The prompt goes last, and not in the record, so a relaunch does not repeat it.
+                hook_args.extend(plan.prompt_args.iter().map(OsString::from));
                 let host_plan = SessionHostLaunchPlan::detected(
                     host_binary,
                     paths.name().as_str(),
@@ -575,7 +577,7 @@ impl Workspace {
                                 .map(|s| s.terminal.clone());
                             if let (Some(input), Some(terminal)) = (initial_input, terminal) {
                                 terminal.feed_child(input.as_bytes());
-                                terminal.feed_child(b"\n");
+                                terminal.feed_child(b"\r");
                             }
                             // Queue behind selection persistence before acknowledging durable creation.
                             let summary = workspace

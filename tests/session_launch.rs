@@ -195,3 +195,23 @@ fn session_host_plan_falls_back_to_direct_launch_without_systemd_run() {
     );
     assert!(plan.fallback_command().is_none());
 }
+
+#[test]
+fn agent_plan_passes_the_first_prompt_as_an_argument_instead_of_typing_it() {
+    let params = CreateSessionParams {
+        kind: SessionKind::Claude,
+        command: Some("/bin/sh".to_owned()),
+        args: vec!["--model".to_owned(), "haiku".to_owned()],
+        cwd: None,
+        name: None,
+        project_root: None,
+        worktree_path: None,
+        initial_input: Some("-fix the\nbuild".to_owned()),
+    };
+
+    let plan = SessionLaunchPlan::new(params).expect("valid launch plan");
+
+    assert_eq!(plan.args, ["--model", "haiku"]);
+    assert_eq!(plan.prompt_args, ["--", "-fix the\nbuild"]);
+    assert_eq!(plan.initial_input, None);
+}
