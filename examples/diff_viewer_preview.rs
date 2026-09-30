@@ -1,14 +1,14 @@
 // The preview only uses part of the viewer API.
 #[allow(dead_code)]
-#[path = "../src/ui/diff_viewer.rs"]
-mod diff_viewer;
+#[path = "../src/ui/code_viewer.rs"]
+mod code_viewer;
 
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use diff_viewer::{DiffViewer, ViewerEvent};
+use code_viewer::{CodeViewer, ViewerEvent};
 use webkit6::prelude::*;
 
 fn main() -> glib::ExitCode {
@@ -23,7 +23,7 @@ fn main() -> glib::ExitCode {
         .application_id("nl.rutger.AgmuxNative.ChangesViewerPreview")
         .build();
     app.connect_activate(|app| {
-        let viewer = Rc::new(DiffViewer::new(|event| match &event {
+        let viewer = Rc::new(CodeViewer::new(|event| match &event {
             ViewerEvent::Ready { .. } => println!("Changes viewer is ready"),
             ViewerEvent::DiffRendered {
                 line_changes,
@@ -32,6 +32,9 @@ fn main() -> glib::ExitCode {
             } => println!(
                 "Diff rendered with {line_changes} line changes and {character_changes} character changes"
             ),
+            ViewerEvent::FileRendered { line_count, .. } => {
+                println!("File rendered with {line_count} lines")
+            }
             ViewerEvent::ViewState { .. } => {}
             ViewerEvent::Error { message, .. } => eprintln!("Viewer error: {message}"),
         }));

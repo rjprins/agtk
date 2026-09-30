@@ -28,6 +28,10 @@ impl Workspace {
             self.open_diff_control(pending);
             return;
         }
+        if matches!(&pending.request.command, ControlCommand::UiOpenFile(_)) {
+            self.open_file_control(pending);
+            return;
+        }
         if let ControlCommand::SessionCreate(params) = &pending.request.command {
             self.launch_controlled_session(params.clone(), pending);
             return;
@@ -179,8 +183,15 @@ impl Workspace {
                         true
                     }
                     UiSurface::Search => false,
-                    UiSurface::Changes => {
+                    UiSurface::Changes | UiSurface::Files => {
                         let already_open = self.changes.split.shows_sidebar();
+                        self.changes.pages.set_visible_child_name(
+                            if params.surface == UiSurface::Files {
+                                explorer_ui::FILES_PAGE
+                            } else {
+                                explorer_ui::CHANGES_PAGE
+                            },
+                        );
                         self.changes.split.set_show_sidebar(true);
                         self.changes.toggle.set_active(true);
                         if already_open {
@@ -325,6 +336,7 @@ impl Workspace {
             ),
             ControlCommand::SessionCreate(_)
             | ControlCommand::UiOpenDiff(_)
+            | ControlCommand::UiOpenFile(_)
             | ControlCommand::AppearanceSet(_)
             | ControlCommand::ShortcutSet(_)
             | ControlCommand::ProjectSet(_)

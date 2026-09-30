@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
+use super::explorer_ui::{CHANGES_PAGE, FILES_PAGE, FileExplorer};
 use super::sidebar::{DEFAULT_CHANGES_WIDTH, MAX_CHANGES_WIDTH, MIN_CHANGES_WIDTH};
 use crate::changes::{
     ChangeStatus, ChangedFile, ChangesSnapshot, CommitSummary, DiffScope, display_changed_path,
@@ -12,12 +13,14 @@ use crate::changes::{
 const INITIAL_FILE_LIMIT: usize = 200;
 const COMMITS_AGO_OPTION: &str = "Commits ago…";
 
+/// The right sidebar: a Changes page and a Files page for the selected worktree.
 #[derive(Clone)]
 pub(super) struct ChangesSidebar {
     pub split: adw::OverlaySplitView,
     pub toggle: gtk::ToggleButton,
     pub root: gtk::Box,
-    pub header: gtk::Label,
+    pub pages: adw::ViewStack,
+    pub switcher: adw::InlineViewSwitcher,
     pub branch: gtk::Label,
     pub base: gtk::DropDown,
     pub commits_ago: gtk::SpinButton,
@@ -25,6 +28,7 @@ pub(super) struct ChangesSidebar {
     pub comparison_hint: gtk::Label,
     pub refresh: gtk::Button,
     pub rows: gtk::Box,
+    pub explorer: FileExplorer,
     pub(crate) state: Rc<RefCell<ChangesSidebarState>>,
     pub updating_base: Rc<std::cell::Cell<bool>>,
 }
@@ -64,21 +68,24 @@ impl ChangesSidebar {
         toolbar.set_margin_bottom(8);
         toolbar.set_margin_start(12);
         toolbar.set_margin_end(12);
-        let header = gtk::Label::new(Some("Changes"));
-        header.add_css_class("heading");
-        header.set_xalign(0.0);
-        header.set_hexpand(true);
+        let pages = adw::ViewStack::new();
+        pages.set_vexpand(true);
+        let switcher = adw::InlineViewSwitcher::new();
+        switcher.set_stack(Some(&pages));
+        switcher.set_display_mode(adw::InlineViewSwitcherDisplayMode::Labels);
+        switcher.set_hexpand(true);
+        switcher.set_halign(gtk::Align::Start);
         let refresh = gtk::Button::builder()
             .icon_name("view-refresh-symbolic")
-            .tooltip_text("Refresh changes")
+            .tooltip_text("Refresh changes and files")
             .build();
         refresh.add_css_class("flat");
         let close = gtk::Button::builder()
             .icon_name("window-close-symbolic")
-            .tooltip_text("Close Changes sidebar")
+            .tooltip_text("Close sidebar")
             .build();
         close.add_css_class("flat");
-        toolbar.append(&header);
+        toolbar.append(&switcher);
         toolbar.append(&refresh);
         toolbar.append(&close);
         root.append(&toolbar);
@@ -92,12 +99,13 @@ impl ChangesSidebar {
         branch.add_css_class("dim-label");
         root.append(&branch);
 
+        let changes_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let base_label = gtk::Label::new(Some("Compared with"));
         base_label.set_xalign(0.0);
         base_label.set_margin_start(12);
         base_label.set_margin_end(12);
         base_label.add_css_class("caption");
-        root.append(&base_label);
+        changes_page.append(&base_label);
         let base = gtk::DropDown::new(
             Some(gtk::StringList::new(&["Choose comparison base"])),
             None::<&gtk::Expression>,
@@ -106,7 +114,7 @@ impl ChangesSidebar {
         base.set_margin_end(12);
         base.set_margin_bottom(8);
         base.set_tooltip_text(Some("Compare with a branch or an earlier commit"));
-        root.append(&base);
+        changes_page.append(&base);
 
         let commits_ago_row = gtk::Box::new(gtk::Orientation::Vertical, 4);
         commits_ago_row.set_margin_start(12);
@@ -135,7 +143,7 @@ impl ChangesSidebar {
         comparison_hint.add_css_class("dim-label");
         commits_ago_row.append(&comparison_hint);
         commits_ago_row.set_visible(false);
-        root.append(&commits_ago_row);
+        changes_page.append(&commits_ago_row);
 
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -146,15 +154,25 @@ impl ChangesSidebar {
         rows.set_margin_end(6);
         rows.set_margin_bottom(8);
         scroll.set_child(Some(&rows));
-        root.append(&scroll);
+        changes_page.append(&scroll);
+        pages.add_titled(&changes_page, Some(CHANGES_PAGE), "Changes");
+
+        let explorer = FileExplorer::new();
+        pages.add_titled(&explorer.root, Some(FILES_PAGE), "Files");
+        root.append(&pages);
+
         let sidebar = gtk::Overlay::new();
         sidebar.set_child(Some(&root));
         sidebar.add_overlay(&resize_handle(&split));
         split.set_sidebar(Some(&sidebar));
 
-        let toggle = gtk::ToggleButton::with_label("Changes");
+        let toggle = gtk::ToggleButton::builder()
+            .icon_name("sidebar-show-right-symbolic")
+            .build();
         toggle.add_css_class("flat");
-        toggle.set_tooltip_text(Some("Show changes for the selected agent's worktree"));
+        toggle.set_tooltip_text(Some(
+            "Show the changes and files of the selected agent's worktree",
+        ));
         let sync_toggle = toggle.clone();
         split.connect_show_sidebar_notify(move |split| {
             sync_toggle.set_active(split.shows_sidebar());
@@ -168,7 +186,8 @@ impl ChangesSidebar {
             split,
             toggle,
             root,
-            header,
+            pages,
+            switcher,
             branch,
             base,
             commits_ago,
@@ -176,8 +195,18 @@ impl ChangesSidebar {
             comparison_hint,
             refresh,
             rows,
+            explorer,
             state: Rc::new(RefCell::new(ChangesSidebarState::default())),
             updating_base: Rc::new(std::cell::Cell::new(false)),
+        }
+    }
+
+    /// The title of the page the sidebar shows, for the inspection tree.
+    pub fn visible_page_title(&self) -> String {
+        if self.pages.visible_child_name().as_deref() == Some(FILES_PAGE) {
+            "Files".to_owned()
+        } else {
+            "Changes".to_owned()
         }
     }
 
@@ -212,6 +241,7 @@ impl ChangesSidebar {
         message.set_margin_start(12);
         message.set_margin_end(12);
         self.rows.append(&message);
+        self.explorer.set_message(text);
     }
 
     pub fn set_base_refs(&self, refs: Vec<String>, selected: Option<&str>) {
@@ -659,13 +689,7 @@ pub(super) fn append_file_button(
 }
 
 fn status_glyph(status: ChangeStatus) -> &'static str {
-    match status {
-        ChangeStatus::Added | ChangeStatus::Untracked => "+",
-        ChangeStatus::Deleted => "−",
-        ChangeStatus::Renamed => "↪",
-        ChangeStatus::Unmerged => "!",
-        _ => "•",
-    }
+    crate::explorer::status_glyph(status)
 }
 
 fn clear(box_widget: &gtk::Box) {

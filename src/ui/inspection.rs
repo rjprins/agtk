@@ -291,6 +291,16 @@ impl Workspace {
                         children: Vec::new(),
                     }
                 }
+                crate::workspace_tabs::WorkspaceTabId::File(key) => UiNode {
+                    id: crate::workspace_tabs::WorkspaceTabs::file_tab_id(key),
+                    role: "tab".to_owned(),
+                    label: Some(format!("{} (File)", file_tabs_ui::file_tab_title(key))),
+                    is_visible: self.center_tabs.is_visible(),
+                    is_enabled: self.file_tabs.borrow().contains_key(key),
+                    is_selected: active_tab.as_ref() == Some(&tab),
+                    bounds: widget_bounds(&self.center_tabs, &self.window),
+                    children: Vec::new(),
+                },
             })
             .collect::<Vec<_>>();
         let workspace_tabs_node = UiNode {
@@ -306,12 +316,12 @@ impl Workspace {
         let mut changes_children = vec![
             UiNode {
                 id: "changes-header".to_owned(),
-                role: "heading".to_owned(),
-                label: Some(self.changes.header.text().to_string()),
-                is_visible: self.changes.header.is_visible(),
-                is_enabled: self.changes.header.is_sensitive(),
+                role: "tablist".to_owned(),
+                label: Some(self.changes.visible_page_title()),
+                is_visible: self.changes.switcher.is_visible(),
+                is_enabled: self.changes.switcher.is_sensitive(),
                 is_selected: false,
-                bounds: widget_bounds(&self.changes.header, &self.window),
+                bounds: widget_bounds(&self.changes.switcher, &self.window),
                 children: Vec::new(),
             },
             UiNode {
@@ -351,6 +361,7 @@ impl Workspace {
             },
         ];
         changes_children.extend(changes_content_nodes(self));
+        changes_children.push(files_page_node(self));
         let changes_sidebar_node = UiNode {
             id: "changes-sidebar".to_owned(),
             role: "complementary".to_owned(),
@@ -373,12 +384,18 @@ impl Workspace {
         };
         let current_diff_request = self.diff_current_request.borrow().clone();
         let rendered_diff = self.diff_rendered.borrow().clone();
+        let rendered_file = self.file_rendered.borrow().clone();
         let diff_error = self.diff_error.borrow().clone();
         let diff_rendered = current_diff_request
             .as_ref()
             .and_then(|request| rendered_diff.filter(|(rendered, _, _)| rendered == request));
+        let file_rendered = current_diff_request
+            .as_ref()
+            .and_then(|request| rendered_file.filter(|(rendered, _)| rendered == request));
         let diff_label = if let Some((_, line_changes, character_changes)) = &diff_rendered {
             format!("rendered: {line_changes} line changes, {character_changes} character changes")
+        } else if let Some((_, line_count)) = &file_rendered {
+            format!("rendered: {line_count} lines")
         } else if let Some((_, message)) = diff_error
             .filter(|(error_request, _)| current_diff_request.as_ref() == Some(error_request))
         {
@@ -406,7 +423,7 @@ impl Workspace {
                     role: "document".to_owned(),
                     label: Some(diff_label),
                     is_visible: diff_visible,
-                    is_enabled: diff_rendered.is_some(),
+                    is_enabled: diff_rendered.is_some() || file_rendered.is_some(),
                     is_selected: diff_visible,
                     bounds: widget_bounds(&self.diff_viewer_host, &self.window),
                     children: Vec::new(),
@@ -736,7 +753,66 @@ fn current_diff_scope_label(workspace: &Workspace) -> &'static str {
             crate::changes::DiffScope::Committed => "Committed on branch",
             crate::changes::DiffScope::Commit { .. } => "Commit",
         },
+        Some(crate::workspace_tabs::WorkspaceTabId::File(_)) => "File",
         _ => "No diff",
+    }
+}
+
+/// The Files page: its filter, the rows on show and any message instead of a tree.
+fn files_page_node(workspace: &Workspace) -> UiNode {
+    let explorer = &workspace.changes.explorer;
+    let sidebar_visible = workspace.changes.split.shows_sidebar();
+    let page_visible = sidebar_visible
+        && workspace.changes.pages.visible_child_name().as_deref() == Some(explorer_ui::FILES_PAGE);
+    let view = explorer
+        .views
+        .visible_child_name()
+        .map(|name| name.to_string())
+        .unwrap_or_default();
+    UiNode {
+        id: "files-page".to_owned(),
+        role: "tabpanel".to_owned(),
+        label: Some(explorer.footer.text().to_string()),
+        is_visible: page_visible,
+        is_enabled: explorer.root.is_sensitive(),
+        is_selected: page_visible,
+        bounds: widget_bounds(&explorer.root, &workspace.window),
+        children: vec![
+            UiNode {
+                id: "files-filter".to_owned(),
+                role: "searchbox".to_owned(),
+                label: Some(explorer.filter.text().to_string()),
+                is_visible: page_visible,
+                is_enabled: explorer.filter.is_sensitive(),
+                is_selected: false,
+                bounds: widget_bounds(&explorer.filter, &workspace.window),
+                children: Vec::new(),
+            },
+            UiNode {
+                id: "files-tree".to_owned(),
+                role: "tree".to_owned(),
+                label: Some(format!(
+                    "{view}: {} rows, expanded: {}",
+                    explorer.visible_row_count(),
+                    explorer.expanded_paths().join(", ")
+                )),
+                is_visible: page_visible && view != "message",
+                is_enabled: true,
+                is_selected: false,
+                bounds: widget_bounds(&explorer.views, &workspace.window),
+                children: Vec::new(),
+            },
+            UiNode {
+                id: "files-message".to_owned(),
+                role: "status".to_owned(),
+                label: Some(explorer.message.text().to_string()),
+                is_visible: page_visible && view == "message",
+                is_enabled: true,
+                is_selected: false,
+                bounds: widget_bounds(&explorer.message, &workspace.window),
+                children: Vec::new(),
+            },
+        ],
     }
 }
 

@@ -62,6 +62,7 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "launch_agent",
             "select_session",
             "open_diff",
+            "open_file",
             "kill_session",
             "rename_session",
             "open_magit",

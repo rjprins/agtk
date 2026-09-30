@@ -41,7 +41,7 @@ impl Workspace {
         }
 
         if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
-            if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+            if let Some(viewer) = self.code_viewer.borrow().as_ref() {
                 viewer.save_view_state();
                 viewer.clear();
             }
@@ -113,7 +113,7 @@ impl Workspace {
             && same_diff_is_visible
             && !self.stale_diff_tabs.borrow().contains(&key)
         {
-            if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+            if let Some(viewer) = self.code_viewer.borrow().as_ref() {
                 viewer.focus();
             }
             return Some(crate::workspace_tabs::WorkspaceTabs::diff_tab_id(&key));
@@ -277,7 +277,7 @@ impl Workspace {
         });
     }
 
-    fn select_session_for_diff(&self, session_id: &str) {
+    pub(super) fn select_session_for_diff(&self, session_id: &str) {
         let Some(row) = self
             .sessions
             .borrow()
@@ -358,7 +358,7 @@ impl Workspace {
             .active_context()
             .unwrap_or("session")
             .to_owned();
-        let (generation, should_start, show_loading) = {
+        let (generation, should_start, show_loading, context_changed) = {
             let mut state = self.changes.state.borrow_mut();
             let context_changed = state.context_key.as_deref() != Some(context_key.as_str());
             state.context_key = Some(context_key.clone());
@@ -367,7 +367,12 @@ impl Workspace {
                     state.request_generation = state.request_generation.wrapping_add(1);
                 }
                 state.refresh_pending = true;
-                (state.request_generation, false, context_changed)
+                (
+                    state.request_generation,
+                    false,
+                    context_changed,
+                    context_changed,
+                )
             } else {
                 state.request_generation = state.request_generation.wrapping_add(1);
                 state.refresh_in_flight = true;
@@ -375,11 +380,15 @@ impl Workspace {
                     state.request_generation,
                     true,
                     context_changed || state.snapshot.is_none(),
+                    context_changed,
                 )
             }
         };
         if show_loading {
             self.changes.set_loading("Reading worktree changes…");
+        }
+        if context_changed {
+            self.changes.explorer.set_loading();
         }
         if !should_start {
             return;
@@ -457,6 +466,7 @@ impl Workspace {
                             },
                         );
                     }
+                    workspace.refresh_explorer(&snapshot);
                     workspace.check_visible_diff_for_staleness(&snapshot);
                 }
                 Err(error) => workspace.changes.set_error(&error),
@@ -650,11 +660,14 @@ impl Workspace {
             .unwrap_or_else(|| "Diff".to_owned());
         self.diff_heading.set_text(&path);
         self.content_title.set_title(&path);
+        self.diff_navigation.set_visible(true);
+        self.open_in_emacs_button.set_visible(true);
         self.diff_placeholder.set_text("Loading diff…");
         self.diff_placeholder.set_visible(true);
         self.diff_viewer_host.set_visible(false);
         self.render_workspace_tabs();
         self.set_diff_actions_enabled(true);
+        self.update_open_in_emacs_button();
         self.update_diff_stale_banner(key);
         self.load_diff_tab(key.clone());
     }
@@ -700,8 +713,10 @@ impl Workspace {
 
     fn check_visible_diff_for_staleness(&self, snapshot: &crate::changes::ChangesSnapshot) {
         let active = self.workspace_tabs.borrow().visible_tab().cloned();
-        if let Some(WorkspaceTabId::Diff(key)) = active {
-            self.check_diff_for_staleness(&key, snapshot);
+        match active {
+            Some(WorkspaceTabId::Diff(key)) => self.check_diff_for_staleness(&key, snapshot),
+            Some(WorkspaceTabId::File(key)) => self.check_file_for_staleness(&key),
+            _ => {}
         }
     }
 
@@ -762,11 +777,21 @@ impl Workspace {
             && stale;
         self.diff_stale_label
             .set_text("The worktree or comparison base changed. Reload to update this diff.");
+        self.diff_reload_button.set_label("Reload diff");
         self.diff_reload_button.set_sensitive(stale);
         self.diff_stale_banner.set_visible(visible);
     }
 
-    pub(super) fn reload_active_diff(&self) {
+    /// Reloads whichever diff or file the viewer shows.
+    pub(super) fn reload_active_document(&self) {
+        match self.workspace_tabs.borrow().visible_tab().cloned() {
+            Some(WorkspaceTabId::Diff(_)) => self.reload_active_diff(),
+            Some(WorkspaceTabId::File(key)) => self.reload_active_file(&key),
+            _ => {}
+        }
+    }
+
+    fn reload_active_diff(&self) {
         let Some(WorkspaceTabId::Diff(key)) = self.workspace_tabs.borrow().visible_tab().cloned()
         else {
             return;
@@ -848,64 +873,10 @@ impl Workspace {
         *self.diff_current_request.borrow_mut() = Some(request_id.clone());
         *self.diff_rendered.borrow_mut() = None;
         *self.diff_error.borrow_mut() = None;
-        if self.diff_viewer.borrow().is_none() {
-            let view_states = self.diff_view_states.clone();
-            let current_request = self.diff_current_request.clone();
-            let rendered = self.diff_rendered.clone();
-            let error_state = self.diff_error.clone();
-            let viewer = diff_viewer::DiffViewer::new(move |event| match event {
-                diff_viewer::ViewerEvent::ViewState { tab_id, state } => {
-                    view_states.borrow_mut().insert(tab_id, state);
-                }
-                diff_viewer::ViewerEvent::DiffRendered {
-                    request_id,
-                    line_changes,
-                    character_changes,
-                    ..
-                } => {
-                    if current_request.borrow().as_deref() == Some(request_id.as_str()) {
-                        *rendered.borrow_mut() =
-                            Some((request_id, line_changes, character_changes));
-                    }
-                }
-                diff_viewer::ViewerEvent::Error {
-                    request_id: Some(request_id),
-                    message,
-                } => {
-                    if current_request.borrow().as_deref() == Some(request_id.as_str()) {
-                        *error_state.borrow_mut() = Some((request_id, message));
-                    }
-                }
-                diff_viewer::ViewerEvent::Ready { .. }
-                | diff_viewer::ViewerEvent::Error {
-                    request_id: None, ..
-                } => {}
-            });
-            self.diff_viewer_host.append(&viewer.widget());
-            *self.diff_viewer.borrow_mut() = Some(viewer);
-        }
-        let appearance = self.appearance.borrow().clone();
-        let description = FontDescription::from_string(&appearance.font);
-        let font_family = description
-            .family()
-            .map(|family| family.to_string())
-            .unwrap_or_else(|| "monospace".to_owned());
-        let font_size = (description.size() as f64 / gtk::pango::SCALE as f64)
-            .round()
-            .clamp(8.0, 48.0) as u32;
-        if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
-            viewer.set_appearance(
-                if matches!(
-                    self.effective_terminal_theme(),
-                    ThemeKey::NeutralLight | ThemeKey::SolarizedLight | ThemeKey::Light
-                ) {
-                    "light"
-                } else {
-                    "dark"
-                },
-                &font_family,
-                font_size,
-            );
+        self.ensure_code_viewer();
+        let (theme, font_family, font_size) = self.viewer_appearance();
+        if let Some(viewer) = self.code_viewer.borrow().as_ref() {
+            viewer.set_appearance(theme, &font_family, font_size);
             let state = self.diff_view_states.borrow().get(&tab_id).cloned();
             let payload = serde_json::json!({
                 "requestId": request_id,
@@ -929,6 +900,78 @@ impl Workspace {
         }
     }
 
+    /// Creates the shared Monaco view the first time a diff or file needs it.
+    pub(super) fn ensure_code_viewer(&self) {
+        if self.code_viewer.borrow().is_some() {
+            return;
+        }
+        let view_states = self.diff_view_states.clone();
+        let current_request = self.diff_current_request.clone();
+        let rendered = self.diff_rendered.clone();
+        let file_rendered = self.file_rendered.clone();
+        let error_state = self.diff_error.clone();
+        let viewer = code_viewer::CodeViewer::new(move |event| match event {
+            code_viewer::ViewerEvent::ViewState { tab_id, state } => {
+                view_states.borrow_mut().insert(tab_id, state);
+            }
+            code_viewer::ViewerEvent::DiffRendered {
+                request_id,
+                line_changes,
+                character_changes,
+                ..
+            } => {
+                if current_request.borrow().as_deref() == Some(request_id.as_str()) {
+                    *rendered.borrow_mut() = Some((request_id, line_changes, character_changes));
+                }
+            }
+            code_viewer::ViewerEvent::FileRendered {
+                request_id,
+                line_count,
+                ..
+            } => {
+                if current_request.borrow().as_deref() == Some(request_id.as_str()) {
+                    *file_rendered.borrow_mut() = Some((request_id, line_count));
+                }
+            }
+            code_viewer::ViewerEvent::Error {
+                request_id: Some(request_id),
+                message,
+            } => {
+                if current_request.borrow().as_deref() == Some(request_id.as_str()) {
+                    *error_state.borrow_mut() = Some((request_id, message));
+                }
+            }
+            code_viewer::ViewerEvent::Ready { .. }
+            | code_viewer::ViewerEvent::Error {
+                request_id: None, ..
+            } => {}
+        });
+        self.diff_viewer_host.append(&viewer.widget());
+        *self.code_viewer.borrow_mut() = Some(Rc::new(viewer));
+    }
+
+    /// The viewer follows the terminal theme and font.
+    pub(super) fn viewer_appearance(&self) -> (&'static str, String, u32) {
+        let appearance = self.appearance.borrow().clone();
+        let description = FontDescription::from_string(&appearance.font);
+        let font_family = description
+            .family()
+            .map(|family| family.to_string())
+            .unwrap_or_else(|| "monospace".to_owned());
+        let font_size = (description.size() as f64 / gtk::pango::SCALE as f64)
+            .round()
+            .clamp(8.0, 48.0) as u32;
+        let theme = if matches!(
+            self.effective_terminal_theme(),
+            ThemeKey::NeutralLight | ThemeKey::SolarizedLight | ThemeKey::Light
+        ) {
+            "light"
+        } else {
+            "dark"
+        };
+        (theme, font_family, font_size)
+    }
+
     fn show_diff_placeholder(
         &self,
         _key: &DiffTabKey,
@@ -937,8 +980,20 @@ impl Workspace {
         byte_size: Option<u64>,
         metadata: &[String],
     ) {
+        self.show_viewer_placeholder(path, reason, byte_size, metadata);
+    }
+
+    /// Replaces the viewer with a message about why the content is not shown.
+    pub(super) fn show_viewer_placeholder(
+        &self,
+        path: &str,
+        reason: &str,
+        byte_size: Option<u64>,
+        metadata: &[String],
+    ) {
         *self.diff_current_request.borrow_mut() = None;
         *self.diff_rendered.borrow_mut() = None;
+        *self.file_rendered.borrow_mut() = None;
         let size = byte_size
             .map(|size| format!(" ({size} bytes)"))
             .unwrap_or_default();
@@ -952,7 +1007,7 @@ impl Workspace {
             .set_text(&format!("{path}\n{reason}{size}{metadata}"));
         self.diff_placeholder.set_visible(true);
         self.diff_viewer_host.set_visible(false);
-        if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+        if let Some(viewer) = self.code_viewer.borrow().as_ref() {
             viewer.clear();
         }
     }
@@ -965,11 +1020,17 @@ impl Workspace {
         self.diff_view_states.borrow_mut().remove(&tab_id);
         let next = self.workspace_tabs.borrow_mut().close_diff(key);
         self.render_workspace_tabs();
+        self.show_tab_after_close(next);
+    }
+
+    /// Shows the tab the model fell back to, or the empty page when none is left.
+    pub(super) fn show_tab_after_close(&self, next: Option<WorkspaceTabId>) {
         match next {
             Some(WorkspaceTabId::Session(id)) => self.activate_session(&id),
             Some(WorkspaceTabId::Diff(key)) => self.activate_diff_tab(&key),
+            Some(WorkspaceTabId::File(key)) => self.activate_file_tab(&key),
             None => {
-                if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+                if let Some(viewer) = self.code_viewer.borrow().as_ref() {
                     viewer.clear();
                 }
                 self.stack.set_visible_child_name(EMPTY_PAGE);
@@ -1050,11 +1111,33 @@ impl Workspace {
                     row.append(&close);
                     self.center_tabs.append(&row);
                 }
+                WorkspaceTabId::File(key) => {
+                    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                    row.add_css_class("linked");
+                    let button = gtk::ToggleButton::with_label(&file_tabs_ui::file_tab_label(key));
+                    button.set_active(active.as_ref() == Some(&tab));
+                    button.set_tooltip_text(Some(&file_tabs_ui::file_tab_title(key)));
+                    button.set_accessible_role(gtk::AccessibleRole::Tab);
+                    let workspace = self.clone();
+                    let key_for_click = key.clone();
+                    button.connect_clicked(move |_| workspace.activate_file_tab(&key_for_click));
+                    let close = gtk::Button::builder()
+                        .icon_name("window-close-symbolic")
+                        .tooltip_text("Close file tab")
+                        .build();
+                    close.add_css_class("flat");
+                    let workspace = self.clone();
+                    let key_for_close = key.clone();
+                    close.connect_clicked(move |_| workspace.close_file_tab(&key_for_close));
+                    row.append(&button);
+                    row.append(&close);
+                    self.center_tabs.append(&row);
+                }
             }
         }
     }
 
-    fn context_key_for_session(&self, session_id: &str) -> String {
+    pub(super) fn context_key_for_session(&self, session_id: &str) -> String {
         let Some(record) = self
             .sessions
             .borrow()
@@ -1081,7 +1164,7 @@ impl Workspace {
         }
     }
 
-    fn set_diff_actions_enabled(&self, enabled: bool) {
+    pub(super) fn set_diff_actions_enabled(&self, enabled: bool) {
         if let Some(action) = self
             .window
             .lookup_action("close-session")

@@ -202,6 +202,9 @@ impl Workspace {
                 let changes_sidebar_open = store
                     .preference("changesSidebarOpen")?
                     .and_then(|value| value.as_bool());
+                let changes_sidebar_page = store
+                    .preference(explorer_ui::SIDEBAR_PAGE_PREFERENCE)?
+                    .and_then(|value| value.as_str().map(str::to_owned));
                 let changes_base_refs = store
                     .preference("changesBaseRefs")?
                     .map(serde_json::from_value::<std::collections::HashMap<String, String>>)
@@ -272,6 +275,7 @@ impl Workspace {
                     pr_preferences,
                     claude_presets,
                     changes_sidebar_open,
+                    changes_sidebar_page,
                     changes_base_refs,
                     changes_commits_ago,
                     recovered,
@@ -290,6 +294,7 @@ impl Workspace {
                     pr_preferences,
                     claude_presets,
                     changes_sidebar_open,
+                    changes_sidebar_page,
                     changes_base_refs,
                     changes_commits_ago,
                     recovered,
@@ -315,6 +320,12 @@ impl Workspace {
                         .commits_ago
                         .set_value(changes_commits_ago as f64);
                     workspace.changes.updating_base.set(false);
+                    if changes_sidebar_page.as_deref() == Some(explorer_ui::FILES_PAGE) {
+                        workspace
+                            .changes
+                            .pages
+                            .set_visible_child_name(explorer_ui::FILES_PAGE);
+                    }
                     if let Some(open) = changes_sidebar_open {
                         workspace.changes.split.set_show_sidebar(open);
                         workspace.changes.toggle.set_active(open);
@@ -801,7 +812,12 @@ impl Workspace {
             .then(|| gio::File::for_uri(text).path())
             .flatten()
         {
-            self.open_file_in_emacs(path, None, None);
+            let session_id = self.session_id_for_terminal(terminal);
+            if path.is_file() {
+                self.open_file_from_session(session_id, path, None, None);
+            } else {
+                self.show_error(&format!("{} is not a file", path.display()));
+            }
         } else {
             let workspace = self.clone();
             gtk::UriLauncher::new(text).launch(
@@ -816,11 +832,21 @@ impl Workspace {
         }
     }
 
-    /// Opens a path printed in the terminal, resolved against where that terminal runs.
+    fn session_id_for_terminal(&self, terminal: &vte::Terminal) -> Option<String> {
+        self.sessions
+            .borrow()
+            .values()
+            .find(|session| &session.terminal == terminal)
+            .map(|session| session.record.id.clone())
+    }
+
+    /// Opens a path printed in the terminal in the file viewer, resolved against
+    /// where that terminal runs.
     fn open_terminal_file(&self, terminal: &vte::Terminal, text: &str) {
         let Some(link) = crate::file_links::parse_link(text) else {
             return;
         };
+        let session_id = self.session_id_for_terminal(terminal);
         // The shell's live directory (OSC 7) first, then where the session started.
         let mut bases = terminal
             .current_directory_uri()
@@ -857,18 +883,18 @@ impl Workspace {
                         None => format!("{} does not exist", link.path),
                     },
                 )?;
-                EmacsIntegration::from_environment().open_file(&path, link.line, link.column)?;
-                Ok(())
+                Ok((path, link.line, link.column))
             },
-            |workspace, result| {
-                if let Err(error) = result {
-                    workspace.show_error(&format!("Could not open file: {error}"));
+            move |workspace, result| match result {
+                Ok((path, line, column)) => {
+                    workspace.open_file_from_session(session_id, path, line, column);
                 }
+                Err(error) => workspace.show_error(&format!("Could not open file: {error}")),
             },
         );
     }
 
-    fn open_file_in_emacs(&self, path: PathBuf, line: Option<u32>, column: Option<u32>) {
+    pub(super) fn open_file_in_emacs(&self, path: PathBuf, line: Option<u32>, column: Option<u32>) {
         self.run_slow(
             move || EmacsIntegration::from_environment().open_file(&path, line, column),
             |workspace, result| {

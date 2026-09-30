@@ -16,7 +16,7 @@ impl Workspace {
     pub(super) fn close_search(&self) {
         self.search_bar.set_search_mode(false);
         if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
-            if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+            if let Some(viewer) = self.code_viewer.borrow().as_ref() {
                 viewer.focus();
             }
             return;
@@ -38,7 +38,7 @@ impl Workspace {
             return;
         }
         if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
-            if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+            if let Some(viewer) = self.code_viewer.borrow().as_ref() {
                 viewer.find(query.as_str(), forward);
             }
             return;

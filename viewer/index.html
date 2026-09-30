@@ -7,14 +7,15 @@
     <title>agmux diff</title>
   </head>
   <body>
-    <main id="viewer" aria-label="Read-only file comparison">
+    <main id="viewer" aria-label="Read-only file viewer">
       <header id="diff-heading" aria-live="polite">
         <strong id="file-name">No file selected</strong>
         <span id="version-labels"></span>
         <span id="metadata"></span>
       </header>
       <div id="editor" aria-label="File comparison"></div>
-      <p id="empty-state">Select a changed file to view its diff.</p>
+      <div id="file-editor" aria-label="File contents"></div>
+      <p id="empty-state">Select a file to view it.</p>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

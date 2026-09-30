@@ -1409,3 +1409,93 @@ fn a_restarted_agent_resumes_its_conversation_in_the_same_place() {
             .all(|session| session["id"] != first.as_str() && session["id"] != second.as_str())
     );
 }
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn files_page_lists_the_worktree_and_opens_files_read_only() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+    fn git(project: &std::path::Path, args: &[&str]) {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    let app = App::new();
+    let project = app.directory.path().join("files-project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    git(&project, &["init", "-q"]);
+    git(&project, &["config", "user.name", "Test"]);
+    git(&project, &["config", "user.email", "test@example.com"]);
+    std::fs::write(project.join("src/lib.rs"), "fn one() {}\nfn two() {}\n").unwrap();
+    std::fs::write(project.join(".gitignore"), "target/\n").unwrap();
+    git(&project, &["add", "."]);
+    git(&project, &["commit", "-qm", "base"]);
+    std::fs::create_dir(project.join("target")).unwrap();
+    std::fs::write(project.join("target/ignored"), "x").unwrap();
+    std::fs::write(project.join("notes.md"), "untracked\n").unwrap();
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c","exec sleep 30"],
+            "cwd":project,
+            "projectRoot":project,
+            "worktreePath":project,
+            "name":"files probe"
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"files"}))["shown"],
+        true
+    );
+
+    let wait_for = |id: &str, needle: &str| -> Value {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut last = Value::Null;
+        while Instant::now() < deadline {
+            let inspection = app.request("ui.inspect", json!({}));
+            last = find(&inspection["root"], id).cloned().unwrap_or(Value::Null);
+            if last["label"].as_str().is_some_and(|label| label.contains(needle)) {
+                return last;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        panic!("{id} never showed {needle}: {last}");
+    };
+    // .gitignore, notes.md and src/lib.rs; target/ is ignored.
+    let page = wait_for("files-page", "3 files");
+    assert_eq!(page["isVisible"], true);
+    assert_eq!(wait_for("changes-header", "Files")["role"], "tablist");
+    wait_for("files-tree", "tree: 3 rows");
+
+    let opened = app.request(
+        "ui.open_file",
+        json!({"sessionId":id,"path":"src/lib.rs","line":2,"column":4}),
+    );
+    assert_eq!(opened["opened"], true);
+    wait_for("diff-viewer", "rendered: 3 lines");
+    let tab = wait_for(opened["tabId"].as_str().unwrap(), "src/lib.rs (File)");
+    assert_eq!(tab["isSelected"], true);
+
+    let missing = app.request_body(
+        "ui.open_file",
+        json!({"sessionId":id,"path":"src/missing.rs"}),
+    );
+    assert!(matches!(missing, ResponseBody::Failure(_)), "{missing:?}");
+    app.request("session.close", json!({"sessionId":id}));
+}

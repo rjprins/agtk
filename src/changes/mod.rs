@@ -3,13 +3,21 @@ mod content;
 mod git;
 
 pub use base::{commits_ago_count, resolve_worktree_context, validate_base_ref};
-pub use content::{DiffDocumentResult, DiffPlaceholder, display_changed_path, read_diff_document};
+pub use content::{
+    DiffDocumentResult, DiffPlaceholder, FileDocument, FileDocumentResult, FilePlaceholder,
+    display_changed_path, read_diff_document, read_file_document,
+};
 pub use git::{
     ChangeStatus, DiffScope, GitStatusFile, parse_name_status_z, parse_status_porcelain_v2_z,
 };
 
 pub fn list_base_refs(root: &Path) -> Result<Vec<String>, String> {
     git::base_refs(root)
+}
+
+/// Every tracked or untracked, not ignored file below `root`, for the Files page.
+pub fn list_worktree_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
+    git::worktree_files(root)
 }
 
 pub fn commit_is_in_branch(context: &WorktreeContext, commit_oid: &str) -> Result<bool, String> {

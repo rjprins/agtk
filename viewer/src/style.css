@@ -53,13 +53,15 @@ body {
   text-overflow: ellipsis;
 }
 
-#editor {
+#editor,
+#file-editor {
   display: none;
   min-width: 0;
   min-height: 0;
 }
 
-#editor.visible {
+#editor.visible,
+#file-editor.visible {
   display: block;
 }
 

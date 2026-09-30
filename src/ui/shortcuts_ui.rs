@@ -82,7 +82,7 @@ impl Workspace {
 
         self.add_action("copy", true, |workspace| {
             if workspace.stack.visible_child_name().as_deref() == Some("changes-diff") {
-                if let Some(viewer) = workspace.diff_viewer.borrow().as_ref() {
+                if let Some(viewer) = workspace.code_viewer.borrow().as_ref() {
                     viewer.copy();
                 }
                 return;

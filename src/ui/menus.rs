@@ -198,6 +198,12 @@ impl Workspace {
         self.add_target_action("project-pull-requests", |workspace, root| {
             workspace.open_pr_for_project(root)
         });
+        self.add_target_action("open-in-emacs", |workspace, path| {
+            workspace.open_file_in_emacs(PathBuf::from(path), None, None)
+        });
+        self.add_target_action("copy-text", |workspace, text| {
+            workspace.window.clipboard().set_text(text);
+        });
         self.add_target_action("project-pin", |workspace, root| {
             let pinned = workspace
                 .project_summaries()

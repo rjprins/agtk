@@ -38,6 +38,11 @@ pub(super) enum ViewerEvent {
         line_changes: usize,
         character_changes: usize,
     },
+    FileRendered {
+        request_id: String,
+        tab_id: String,
+        line_count: usize,
+    },
     ViewState {
         tab_id: String,
         state: Value,
@@ -56,6 +61,11 @@ struct ViewerState {
 
 enum ViewerCommand {
     ShowDiff(String),
+    ShowFile(String),
+    Reveal {
+        line: u32,
+        column: Option<u32>,
+    },
     Clear,
     Find {
         query: String,
@@ -72,16 +82,17 @@ enum ViewerCommand {
     },
 }
 
-pub(super) struct DiffViewer {
+/// One Monaco WebView that shows either a diff or a whole file, read only.
+pub(super) struct CodeViewer {
     web_view: WebView,
     state: Rc<RefCell<ViewerState>>,
 }
 
-impl DiffViewer {
+impl CodeViewer {
     pub(super) fn new(on_event: impl Fn(ViewerEvent) + 'static) -> Self {
         REGISTER_RESOURCES.call_once(|| {
             gio::resources_register_include!("viewer.gresource")
-                .expect("embedded Changes viewer resources are invalid");
+                .expect("embedded code viewer resources are invalid");
         });
 
         let context = WebContext::new();
@@ -125,18 +136,18 @@ impl DiffViewer {
                 return;
             };
             if json.len() > MAX_EVENT_BYTES {
-                eprintln!("Changes viewer sent an oversized event");
+                eprintln!("Code viewer sent an oversized event");
                 return;
             }
             let event = match serde_json::from_str::<ViewerEvent>(json.as_str()) {
                 Ok(event) => event,
                 Err(error) => {
-                    eprintln!("Changes viewer sent an invalid event: {error}");
+                    eprintln!("Code viewer sent an invalid event: {error}");
                     return;
                 }
             };
             if !valid_event(&event) {
-                eprintln!("Changes viewer sent an out-of-bounds event");
+                eprintln!("Code viewer sent an out-of-bounds event");
                 return;
             }
             if matches!(event, ViewerEvent::Ready { .. }) {
@@ -185,6 +196,20 @@ impl DiffViewer {
         Ok(())
     }
 
+    pub(super) fn show_file(&self, file: &Value) -> Result<(), String> {
+        let json = serde_json::to_string(file).map_err(|error| error.to_string())?;
+        if json.len() > MAX_DIFF_BYTES {
+            return Err("file viewer payload is too large".to_owned());
+        }
+        self.enqueue(ViewerCommand::ShowFile(json));
+        Ok(())
+    }
+
+    /// Moves the cursor of the shown text to `line`, and `column` when given.
+    pub(super) fn reveal(&self, line: u32, column: Option<u32>) {
+        self.enqueue(ViewerCommand::Reveal { line, column });
+    }
+
     pub(super) fn clear(&self) {
         self.enqueue(ViewerCommand::Clear);
     }
@@ -231,10 +256,14 @@ impl DiffViewer {
         }
         let mut state = self.state.borrow_mut();
         match command {
-            ViewerCommand::ShowDiff(_) => {
-                state
-                    .queued
-                    .retain(|queued| !matches!(queued, ViewerCommand::ShowDiff(_)));
+            // Only the last shown document matters once the page is ready.
+            ViewerCommand::ShowDiff(_) | ViewerCommand::ShowFile(_) => {
+                state.queued.retain(|queued| {
+                    !matches!(
+                        queued,
+                        ViewerCommand::ShowDiff(_) | ViewerCommand::ShowFile(_)
+                    )
+                });
                 state.queued.push_back(command);
             }
             ViewerCommand::SetAppearance { .. } => {
@@ -247,8 +276,9 @@ impl DiffViewer {
             | ViewerCommand::Copy
             | ViewerCommand::PreviousChange
             | ViewerCommand::NextChange
-            | ViewerCommand::SaveViewState => state.queued.push_back(command),
-            ViewerCommand::Clear => state.queued.push_back(command),
+            | ViewerCommand::Reveal { .. }
+            | ViewerCommand::SaveViewState
+            | ViewerCommand::Clear => state.queued.push_back(command),
         }
         while state.queued.len() > 16 {
             state.queued.pop_front();
@@ -265,25 +295,33 @@ fn flush_queued(web_view: &WebView, state: &Rc<RefCell<ViewerState>>) {
 
 fn call_command(web_view: &WebView, command: ViewerCommand) {
     let (body, arguments) = match command {
-        ViewerCommand::ShowDiff(json) => {
+        ViewerCommand::ShowDiff(json) => (show_script("showDiff"), Some(document_args(json))),
+        ViewerCommand::ShowFile(json) => (show_script("showFile"), Some(document_args(json))),
+        ViewerCommand::Reveal { line, column } => {
             let args = glib::VariantDict::new(None);
-            args.insert("diffJson", json);
+            args.insert("line", line);
+            args.insert("column", column.unwrap_or(0));
             (
-                "try { const data = JSON.parse(diffJson); window.agmuxDiffViewer.showDiff(data); } catch (error) { let requestId = null; try { requestId = JSON.parse(diffJson).requestId; } catch (_) {} window.webkit?.messageHandlers?.agmux?.postMessage({ type: 'error', requestId, message: String(error).slice(0, 2048) }); }",
+                "window.agmuxViewer.reveal(line, column)".to_owned(),
                 Some(args.end()),
             )
         }
-        ViewerCommand::Clear => ("window.agmuxDiffViewer.clearDiff()", None),
+        ViewerCommand::Clear => ("window.agmuxViewer.clear()".to_owned(), None),
         ViewerCommand::Find { query, next } => {
             let args = glib::VariantDict::new(None);
             args.insert("query", query);
             args.insert("next", next);
-            ("window.agmuxDiffViewer.find(query, next)", Some(args.end()))
+            (
+                "window.agmuxViewer.find(query, next)".to_owned(),
+                Some(args.end()),
+            )
         }
-        ViewerCommand::Copy => ("window.agmuxDiffViewer.copySelection()", None),
-        ViewerCommand::PreviousChange => ("window.agmuxDiffViewer.moveToChange(false)", None),
-        ViewerCommand::NextChange => ("window.agmuxDiffViewer.moveToChange(true)", None),
-        ViewerCommand::SaveViewState => ("window.agmuxDiffViewer.saveViewState()", None),
+        ViewerCommand::Copy => ("window.agmuxViewer.copySelection()".to_owned(), None),
+        ViewerCommand::PreviousChange => {
+            ("window.agmuxViewer.moveToChange(false)".to_owned(), None)
+        }
+        ViewerCommand::NextChange => ("window.agmuxViewer.moveToChange(true)".to_owned(), None),
+        ViewerCommand::SaveViewState => ("window.agmuxViewer.saveViewState()".to_owned(), None),
         ViewerCommand::SetAppearance {
             theme,
             font_family,
@@ -294,23 +332,38 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             args.insert("fontFamily", font_family);
             args.insert("fontSize", font_size);
             (
-                "window.agmuxDiffViewer.setAppearance(theme, fontFamily, fontSize)",
+                "window.agmuxViewer.setAppearance(theme, fontFamily, fontSize)".to_owned(),
                 Some(args.end()),
             )
         }
     };
     web_view.call_async_javascript_function(
-        body,
+        &body,
         arguments.as_ref(),
         None,
         None,
         None::<&gio::Cancellable>,
         |result| {
             if let Err(error) = result {
-                eprintln!("Changes viewer call failed: {error}");
+                eprintln!("Code viewer call failed: {error}");
             }
         },
     );
+}
+
+fn document_args(json: String) -> glib::Variant {
+    let args = glib::VariantDict::new(None);
+    args.insert("documentJson", json);
+    args.end()
+}
+
+/// Parses the document in the page so a bad payload reports an error event instead of failing silently.
+fn show_script(function: &str) -> String {
+    format!(
+        "try {{ const data = JSON.parse(documentJson); window.agmuxViewer.{function}(data); }} \
+         catch (error) {{ let requestId = null; try {{ requestId = JSON.parse(documentJson).requestId; }} catch (_) {{}} \
+         window.webkit?.messageHandlers?.agmux?.postMessage({{ type: 'error', requestId, message: String(error).slice(0, 2048) }}); }}"
+    )
 }
 
 fn valid_event(event: &ViewerEvent) -> bool {
@@ -330,6 +383,17 @@ fn valid_event(event: &ViewerEvent) -> bool {
                 && tab_id.len() <= 128
                 && *line_changes <= 50_000
                 && *character_changes <= 100_000
+        }
+        ViewerEvent::FileRendered {
+            request_id,
+            tab_id,
+            line_count,
+        } => {
+            !request_id.is_empty()
+                && request_id.len() <= 128
+                && !tab_id.is_empty()
+                && tab_id.len() <= 128
+                && *line_count <= 50_001
         }
         ViewerEvent::ViewState { tab_id, state } => {
             !tab_id.is_empty() && tab_id.len() <= 128 && state.to_string().len() <= 24 * 1024

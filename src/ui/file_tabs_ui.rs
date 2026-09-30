@@ -1,0 +1,417 @@
+//! Read-only file tabs: one reusable buffer per worktree in the shared code viewer.
+
+use super::*;
+use crate::changes::{FileDocument, FileDocumentResult};
+use crate::workspace_tabs::{FileTabKey, WorkspaceTabId, WorkspaceTabs};
+
+#[derive(Debug, Default, Clone)]
+pub(super) struct FileTabState {
+    /// Line and column to put the cursor on once the text shows.
+    pub pending_position: Option<(u32, Option<u32>)>,
+    /// Identity of the content last shown, to notice changes on disk.
+    pub signature: Option<String>,
+    pub stale: bool,
+}
+
+/// The path as the tab shows it: relative inside the worktree, `~` elsewhere.
+pub(super) fn file_tab_title(key: &FileTabKey) -> String {
+    if let Ok(relative) = key.path.strip_prefix(&key.worktree_root)
+        && !relative.as_os_str().is_empty()
+    {
+        return relative.to_string_lossy().into_owned();
+    }
+    let home = glib::home_dir();
+    match key.path.strip_prefix(&home) {
+        Ok(rest) if !rest.as_os_str().is_empty() => format!("~/{}", rest.to_string_lossy()),
+        _ => key.path.to_string_lossy().into_owned(),
+    }
+}
+
+pub(super) fn file_tab_label(key: &FileTabKey) -> String {
+    key.path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file_tab_title(key))
+}
+
+impl Workspace {
+    /// Shows `key` in the owner's file buffer, or just moves the cursor when it is already shown.
+    pub(super) fn open_file_tab(
+        &self,
+        key: FileTabKey,
+        owner: String,
+        position: Option<(u32, Option<u32>)>,
+    ) -> Option<String> {
+        let tab = WorkspaceTabId::File(key.clone());
+        let tab_id = WorkspaceTabs::file_tab_id(&key);
+        let same_file_is_visible = self.workspace_tabs.borrow().visible_tab() == Some(&tab)
+            && self.stack.visible_child_name().as_deref() == Some("changes-diff");
+        let stale = self
+            .file_tabs
+            .borrow()
+            .get(&key)
+            .is_some_and(|state| state.stale);
+        if same_file_is_visible && !stale {
+            if let Some(viewer) = self.code_viewer.borrow().as_ref() {
+                if let Some((line, column)) = position {
+                    viewer.reveal(line, column);
+                }
+                viewer.focus();
+            }
+            return Some(tab_id);
+        }
+        let previous = self
+            .workspace_tabs
+            .borrow()
+            .context_tabs(&key.worktree_root)
+            .into_iter()
+            .filter_map(|tab| match tab {
+                WorkspaceTabId::File(open) if open != key => Some(open),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if self
+            .workspace_tabs
+            .borrow_mut()
+            .open_file(key.clone(), &owner)
+            .is_none()
+        {
+            self.show_error("Could not open this file in the selected worktree");
+            return None;
+        }
+        for open in previous {
+            self.file_tabs.borrow_mut().remove(&open);
+            self.diff_view_states
+                .borrow_mut()
+                .remove(&WorkspaceTabs::file_tab_id(&open));
+        }
+        self.file_tabs.borrow_mut().insert(
+            key.clone(),
+            FileTabState {
+                pending_position: position,
+                signature: None,
+                stale: false,
+            },
+        );
+        self.render_workspace_tabs();
+        self.activate_file_tab(&key);
+        Some(tab_id)
+    }
+
+    /// Opens a path in the context of the session that mentioned it, or the selected one.
+    pub(super) fn open_file_from_session(
+        &self,
+        session_id: Option<String>,
+        path: PathBuf,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Option<String> {
+        let owner = session_id
+            .filter(|id| self.sessions.borrow().contains_key(id))
+            .or_else(|| self.selected_session_id())?;
+        let context = self.context_key_for_session(&owner);
+        self.workspace_tabs
+            .borrow_mut()
+            .attach_session(owner.clone(), context.clone());
+        let key = FileTabKey {
+            worktree_root: context,
+            path,
+        };
+        self.open_file_tab(key, owner, line.map(|line| (line, column)))
+    }
+
+    pub(super) fn open_file_control(&self, pending: PendingRequest) {
+        let ControlCommand::UiOpenFile(params) = pending.request.command.clone() else {
+            return;
+        };
+        let request_id = pending.request.id.clone();
+        let Some(record) = self
+            .sessions
+            .borrow()
+            .get(&params.session_id)
+            .map(|session| session.record.clone())
+        else {
+            let _ = pending.respond(session_not_found(request_id, &params.session_id));
+            return;
+        };
+        let requested = PathBuf::from(&params.path);
+        let path = if requested.is_absolute() {
+            requested
+        } else {
+            match record.worktree_path.clone().or(record.cwd.clone()) {
+                Some(base) => base.join(requested),
+                None => {
+                    let _ = pending.respond(ControlResponse::failure(
+                        request_id,
+                        ErrorCode::OperationRefused,
+                        "This session has no worktree path",
+                        None,
+                    ));
+                    return;
+                }
+            }
+        };
+        if !path.is_file() {
+            let _ = pending.respond(ControlResponse::failure(
+                request_id,
+                ErrorCode::OperationRefused,
+                "No file exists at that path",
+                Some(serde_json::json!({ "path": path.to_string_lossy() })),
+            ));
+            return;
+        }
+        self.select_session_for_diff(&params.session_id);
+        match self.open_file_from_session(
+            Some(params.session_id),
+            path,
+            params.line,
+            params.column,
+        ) {
+            Some(tab_id) => {
+                let _ = pending.respond(ControlResponse::success(
+                    request_id,
+                    serde_json::json!({ "opened": true, "tabId": tab_id }),
+                ));
+            }
+            None => {
+                let _ = pending.respond(ControlResponse::failure(
+                    request_id,
+                    ErrorCode::OperationRefused,
+                    "Could not open the requested file tab",
+                    None,
+                ));
+            }
+        }
+    }
+
+    pub(super) fn activate_file_tab(&self, key: &FileTabKey) {
+        let tab = WorkspaceTabId::File(key.clone());
+        if !self.workspace_tabs.borrow_mut().select_tab(&tab) {
+            return;
+        }
+        self.stack.set_visible_child_name("changes-diff");
+        self.session_context_bar.set_visible(false);
+        self.context_pr.set_visible(false);
+        self.search_bar.set_search_mode(false);
+        let title = file_tab_title(key);
+        self.diff_heading.set_text(&title);
+        self.content_title.set_title(&title);
+        self.diff_navigation.set_visible(false);
+        self.open_in_emacs_button.set_visible(true);
+        self.diff_placeholder.set_text("Loading file…");
+        self.diff_placeholder.set_visible(true);
+        self.diff_viewer_host.set_visible(false);
+        self.render_workspace_tabs();
+        self.set_diff_actions_enabled(true);
+        self.update_open_in_emacs_button();
+        self.update_file_stale_banner(key);
+        self.load_file_tab(key.clone());
+    }
+
+    fn load_file_tab(&self, key: FileTabKey) {
+        let request = self.diff_request_sequence.get().wrapping_add(1);
+        self.diff_request_sequence.set(request);
+        *self.diff_current_request.borrow_mut() = None;
+        *self.file_rendered.borrow_mut() = None;
+        *self.diff_error.borrow_mut() = None;
+        let path = key.path.clone();
+        let title = file_tab_title(&key);
+        let result = self
+            .changes_io
+            .submit(move || crate::changes::read_file_document(&path, &title));
+        let workspace = self.clone();
+        glib::spawn_future_local(async move {
+            let result = result
+                .await
+                .unwrap_or_else(|_| Err("Changes worker stopped".to_owned()));
+            if workspace.workspace_tabs.borrow().visible_tab()
+                != Some(&WorkspaceTabId::File(key.clone()))
+            {
+                return;
+            }
+            match result {
+                Ok(document) => {
+                    let identity = match &document {
+                        FileDocumentResult::Text(text) => text.identity.clone(),
+                        FileDocumentResult::Placeholder(placeholder) => {
+                            placeholder.identity.clone()
+                        }
+                    };
+                    if let Some(state) = workspace.file_tabs.borrow_mut().get_mut(&key) {
+                        state.signature = Some(identity);
+                        state.stale = false;
+                    }
+                    workspace.update_file_stale_banner(&key);
+                    match document {
+                        FileDocumentResult::Text(text) => {
+                            workspace.show_file_document(&key, text, request)
+                        }
+                        FileDocumentResult::Placeholder(placeholder) => workspace
+                            .show_viewer_placeholder(
+                                &placeholder.path,
+                                &placeholder.reason,
+                                placeholder.byte_size,
+                                &[],
+                            ),
+                    }
+                }
+                Err(error) => workspace.show_viewer_placeholder(
+                    &file_tab_title(&key),
+                    "Could not load file",
+                    None,
+                    &[error],
+                ),
+            }
+        });
+    }
+
+    fn show_file_document(&self, key: &FileTabKey, document: FileDocument, request: u64) {
+        let tab_id = WorkspaceTabs::file_tab_id(key);
+        let request_id = format!("{tab_id}-{request}");
+        *self.diff_current_request.borrow_mut() = Some(request_id.clone());
+        *self.file_rendered.borrow_mut() = None;
+        *self.diff_error.borrow_mut() = None;
+        self.ensure_code_viewer();
+        let (theme, font_family, font_size) = self.viewer_appearance();
+        let Some(viewer) = self.code_viewer.borrow().as_ref().cloned() else {
+            return;
+        };
+        viewer.set_appearance(theme, &font_family, font_size);
+        let state = self.diff_view_states.borrow().get(&tab_id).cloned();
+        let position = self
+            .file_tabs
+            .borrow_mut()
+            .get_mut(key)
+            .and_then(|state| state.pending_position.take());
+        let inside_worktree = key.path.starts_with(&key.worktree_root);
+        let lines = if document.line_count == 1 {
+            "1 line".to_owned()
+        } else {
+            format!("{} lines", document.line_count)
+        };
+        let payload = serde_json::json!({
+            "requestId": request_id,
+            "tabId": tab_id,
+            "path": document.path,
+            "text": document.text,
+            "language": document.language,
+            "label": if inside_worktree { "Working tree" } else { "" },
+            "metadata": [lines],
+            "viewState": state,
+            "line": position.map(|(line, _)| line),
+            "column": position.and_then(|(_, column)| column),
+        });
+        if let Err(error) = viewer.show_file(&payload) {
+            self.show_viewer_placeholder(&document.path, &error, None, &[]);
+            return;
+        }
+        self.diff_placeholder.set_visible(false);
+        self.diff_viewer_host.set_visible(true);
+        viewer.focus();
+    }
+
+    /// Re-reads the shown file on each refresh and offers a reload when it changed.
+    pub(super) fn check_file_for_staleness(&self, key: &FileTabKey) {
+        let Some(expected) = self
+            .file_tabs
+            .borrow()
+            .get(key)
+            .and_then(|state| state.signature.clone())
+        else {
+            return;
+        };
+        let path = key.path.clone();
+        let title = file_tab_title(key);
+        let result = self
+            .changes_io
+            .submit(move || crate::changes::read_file_document(&path, &title));
+        let workspace = self.clone();
+        let key = key.clone();
+        glib::spawn_future_local(async move {
+            let result = result
+                .await
+                .unwrap_or_else(|_| Err("Changes worker stopped".to_owned()));
+            let still_expected = workspace
+                .file_tabs
+                .borrow()
+                .get(&key)
+                .is_some_and(|state| state.signature.as_deref() == Some(expected.as_str()));
+            if !still_expected {
+                return;
+            }
+            let stale = match result {
+                Ok(FileDocumentResult::Text(document)) => document.identity != expected,
+                Ok(FileDocumentResult::Placeholder(placeholder)) => {
+                    placeholder.identity != expected
+                }
+                Err(_) => true,
+            };
+            if let Some(state) = workspace.file_tabs.borrow_mut().get_mut(&key) {
+                state.stale = stale;
+            }
+            workspace.update_file_stale_banner(&key);
+        });
+    }
+
+    pub(super) fn update_file_stale_banner(&self, key: &FileTabKey) {
+        let active = self.workspace_tabs.borrow().visible_tab().cloned();
+        let stale = self
+            .file_tabs
+            .borrow()
+            .get(key)
+            .is_some_and(|state| state.stale);
+        let visible = self.stack.visible_child_name().as_deref() == Some("changes-diff")
+            && active == Some(WorkspaceTabId::File(key.clone()))
+            && stale;
+        self.diff_stale_label
+            .set_text("This file changed on disk. Reload to see the latest content.");
+        self.diff_reload_button.set_label("Reload file");
+        self.diff_reload_button.set_sensitive(stale);
+        self.diff_stale_banner.set_visible(visible);
+    }
+
+    pub(super) fn reload_active_file(&self, key: &FileTabKey) {
+        if let Some(state) = self.file_tabs.borrow_mut().get_mut(key) {
+            state.stale = false;
+            state.signature = None;
+        }
+        self.update_file_stale_banner(key);
+        self.load_file_tab(key.clone());
+    }
+
+    pub(super) fn close_file_tab(&self, key: &FileTabKey) {
+        self.file_tabs.borrow_mut().remove(key);
+        self.diff_view_states
+            .borrow_mut()
+            .remove(&WorkspaceTabs::file_tab_id(key));
+        let next = self.workspace_tabs.borrow_mut().close_file(key);
+        self.render_workspace_tabs();
+        self.show_tab_after_close(next);
+    }
+
+    /// The file behind the visible diff or file tab, if it exists on disk.
+    fn visible_document_path(&self) -> Option<PathBuf> {
+        match self.workspace_tabs.borrow().visible_tab()? {
+            WorkspaceTabId::File(key) => Some(key.path.clone()),
+            WorkspaceTabId::Diff(key) => {
+                use std::os::unix::ffi::OsStrExt;
+                let relative = key.new_path.as_deref().or(key.old_path.as_deref())?;
+                Some(Path::new(&key.worktree_root).join(std::ffi::OsStr::from_bytes(relative)))
+            }
+            WorkspaceTabId::Session(_) => None,
+        }
+        .filter(|path| path.is_file())
+    }
+
+    pub(super) fn open_visible_document_in_emacs(&self) {
+        match self.visible_document_path() {
+            Some(path) => self.open_file_in_emacs(path, None, None),
+            None => self.show_error("This file is not available on disk"),
+        }
+    }
+
+    pub(super) fn update_open_in_emacs_button(&self) {
+        self.open_in_emacs_button
+            .set_sensitive(self.visible_document_path().is_some());
+    }
+}

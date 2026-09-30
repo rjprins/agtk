@@ -37,6 +37,115 @@ pub struct DiffPlaceholder {
     pub identity: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "camelCase")]
+pub enum FileDocumentResult {
+    Text(FileDocument),
+    Placeholder(FilePlaceholder),
+}
+
+/// One worktree file for the read-only viewer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDocument {
+    pub path: String,
+    pub text: String,
+    pub language: Option<String>,
+    pub identity: String,
+    pub line_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePlaceholder {
+    pub path: String,
+    pub reason: String,
+    pub byte_size: Option<u64>,
+    pub identity: String,
+}
+
+/// Reads `path` for the file viewer with the diff limits. Symlinks are followed, so a
+/// link opens what it points at, and `display_path` is what the viewer shows.
+pub fn read_file_document(path: &Path, display_path: &str) -> Result<FileDocumentResult, String> {
+    let file_placeholder = |reason: &str, byte_size: Option<u64>, identity: String| {
+        Ok(FileDocumentResult::Placeholder(FilePlaceholder {
+            path: display_path.to_owned(),
+            reason: reason.to_owned(),
+            byte_size,
+            identity,
+        }))
+    };
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return file_placeholder("This file does not exist", None, "missing".to_owned());
+        }
+        Err(error) => return Err(format!("could not inspect file: {error}")),
+    };
+    if metadata.is_dir() {
+        return file_placeholder("This path is a directory", None, "directory".to_owned());
+    }
+    if !metadata.is_file() {
+        return file_placeholder(
+            "This path is not a regular file",
+            None,
+            "non-regular".to_owned(),
+        );
+    }
+    let size = metadata.len();
+    if size > MAX_TEXT_BYTES as u64 {
+        return file_placeholder(
+            "File is larger than the 2 MiB text limit",
+            Some(size),
+            format!("large:{size}"),
+        );
+    }
+    let file = File::open(path).map_err(|error| format!("could not open file: {error}"))?;
+    let mut bytes = Vec::with_capacity(size as usize);
+    file.take(MAX_TEXT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("could not read file: {error}"))?;
+    use std::os::unix::fs::PermissionsExt;
+    let mode = if metadata.permissions().mode() & 0o111 != 0 {
+        "100755"
+    } else {
+        "100644"
+    };
+    let identity = disk_identity(&bytes, mode);
+    if bytes.len() > MAX_TEXT_BYTES {
+        return file_placeholder(
+            "File is larger than the 2 MiB text limit",
+            Some(bytes.len() as u64),
+            identity,
+        );
+    }
+    if bytes.contains(&0) {
+        return file_placeholder(
+            "Binary content is not shown as text",
+            Some(bytes.len() as u64),
+            identity,
+        );
+    }
+    let line_count = line_count(&bytes);
+    if line_count > MAX_LINES {
+        return file_placeholder(
+            "File is larger than the 50,000 line limit",
+            Some(bytes.len() as u64),
+            identity,
+        );
+    }
+    let Ok(text) = String::from_utf8(bytes) else {
+        return file_placeholder("Text uses an unsupported encoding", Some(size), identity);
+    };
+    Ok(FileDocumentResult::Text(FileDocument {
+        path: display_path.to_owned(),
+        language: language_for_path(display_path),
+        text,
+        identity,
+        line_count,
+    }))
+}
+
 #[derive(Debug, Clone)]
 struct LoadedContent {
     bytes: Vec<u8>,
@@ -885,36 +994,35 @@ fn append_display_chars(output: &mut String, valid: &str) {
 
 fn language_for_path(path: &str) -> Option<String> {
     let filename = path.rsplit(['/', '\\']).next()?.to_ascii_lowercase();
-    let fixed = match filename.as_str() {
-        ".bashrc" | ".zshrc" => return Some("shell".to_owned()),
-        "dockerfile" => return Some("dockerfile".to_owned()),
-        _ => None,
-    };
-    if fixed.is_some() {
-        return fixed.map(str::to_owned);
+    match filename.as_str() {
+        ".bashrc" | ".zshrc" | ".zshenv" | ".profile" => return Some("shell".to_owned()),
+        "dockerfile" | "containerfile" => return Some("dockerfile".to_owned()),
+        // Lock files are TOML, which the INI grammar colors well enough.
+        "cargo.lock" => return Some("ini".to_owned()),
+        _ => {}
     }
     let extension = filename.rsplit_once('.')?.1;
     let language = match extension {
-        "c" | "cc" | "cpp" | "h" => "cpp",
+        "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "hxx" => "cpp",
         "cs" => "csharp",
         "css" => "css",
         "go" => "go",
-        "html" => "html",
-        "ini" => "ini",
+        "html" | "htm" => "html",
+        "ini" | "toml" | "cfg" | "conf" | "env" => "ini",
         "java" => "java",
-        "js" | "jsx" => "javascript",
-        "json" => "json",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "json" | "jsonc" | "json5" => "json",
         "md" => "markdown",
         "mdx" => "mdx",
         "php" => "php",
-        "py" => "python",
+        "py" | "pyi" => "python",
         "rb" => "ruby",
         "rs" => "rust",
         "scss" => "scss",
-        "sh" | "zsh" => "shell",
+        "sh" | "bash" | "zsh" => "shell",
         "sql" => "sql",
-        "svg" | "xml" => "xml",
-        "ts" | "tsx" => "typescript",
+        "svg" | "xml" | "xsl" | "csproj" | "props" | "targets" => "xml",
+        "ts" | "tsx" | "mts" | "cts" => "typescript",
         "yaml" | "yml" => "yaml",
         _ => return None,
     };

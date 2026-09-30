@@ -48,8 +48,10 @@ mod capture;
 mod changes_ui;
 mod claude_ui;
 mod controls;
-mod diff_viewer;
+mod code_viewer;
 mod emacs_ui;
+mod explorer_ui;
+mod file_tabs_ui;
 mod history_ui;
 mod inspection;
 mod launch_ui;
@@ -88,10 +90,13 @@ struct Workspace {
     diff_viewer_host: gtk::Box,
     diff_placeholder: gtk::Label,
     diff_heading: gtk::Label,
+    /// Previous and next change buttons; hidden while a whole file shows.
+    diff_navigation: gtk::Box,
+    open_in_emacs_button: gtk::Button,
     diff_stale_banner: gtk::Box,
     diff_stale_label: gtk::Label,
     diff_reload_button: gtk::Button,
-    diff_viewer: Rc<RefCell<Option<diff_viewer::DiffViewer>>>,
+    code_viewer: Rc<RefCell<Option<Rc<code_viewer::CodeViewer>>>>,
     diff_tab_data:
         Rc<RefCell<HashMap<crate::workspace_tabs::DiffTabKey, (ChangedFile, WorktreeContext)>>>,
     diff_document_signatures: Rc<RefCell<HashMap<crate::workspace_tabs::DiffTabKey, String>>>,
@@ -100,7 +105,9 @@ struct Workspace {
     diff_request_sequence: Rc<Cell<u64>>,
     diff_current_request: Rc<RefCell<Option<String>>>,
     diff_rendered: Rc<RefCell<Option<(String, usize, usize)>>>,
+    file_rendered: Rc<RefCell<Option<(String, usize)>>>,
     diff_error: Rc<RefCell<Option<(String, String)>>>,
+    file_tabs: Rc<RefCell<HashMap<crate::workspace_tabs::FileTabKey, file_tabs_ui::FileTabState>>>,
     changes: changes_ui::ChangesSidebar,
     changes_io: IoWorker,
     overlay: adw::ToastOverlay,
@@ -247,12 +254,21 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .tooltip_text("Next change")
         .build();
     diff_next.add_css_class("flat");
+    let diff_navigation = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    diff_navigation.append(&diff_previous);
+    diff_navigation.append(&diff_next);
     let diff_heading = gtk::Label::new(Some("Select a changed file"));
     diff_heading.set_xalign(0.0);
     diff_heading.set_hexpand(true);
-    diff_toolbar.append(&diff_previous);
-    diff_toolbar.append(&diff_next);
+    diff_heading.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    let open_in_emacs_button = gtk::Button::builder()
+        .icon_name("text-editor-symbolic")
+        .tooltip_text("Open this file in Emacs")
+        .build();
+    open_in_emacs_button.add_css_class("flat");
+    diff_toolbar.append(&diff_navigation);
     diff_toolbar.append(&diff_heading);
+    diff_toolbar.append(&open_in_emacs_button);
     diff_page.append(&diff_toolbar);
     let diff_stale_banner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     diff_stale_banner.set_margin_start(8);
@@ -497,10 +513,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         diff_viewer_host: diff_viewer_host.clone(),
         diff_placeholder: diff_placeholder.clone(),
         diff_heading: diff_heading.clone(),
+        diff_navigation: diff_navigation.clone(),
+        open_in_emacs_button: open_in_emacs_button.clone(),
         diff_stale_banner: diff_stale_banner.clone(),
         diff_stale_label: diff_stale_label.clone(),
         diff_reload_button: diff_reload_button.clone(),
-        diff_viewer: Rc::new(RefCell::new(None)),
+        code_viewer: Rc::new(RefCell::new(None)),
         diff_tab_data: Rc::new(RefCell::new(HashMap::new())),
         diff_document_signatures: Rc::new(RefCell::new(HashMap::new())),
         stale_diff_tabs: Rc::new(RefCell::new(HashSet::new())),
@@ -508,7 +526,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         diff_request_sequence: Rc::new(Cell::new(0)),
         diff_current_request: Rc::new(RefCell::new(None)),
         diff_rendered: Rc::new(RefCell::new(None)),
+        file_rendered: Rc::new(RefCell::new(None)),
         diff_error: Rc::new(RefCell::new(None)),
+        file_tabs: Rc::new(RefCell::new(HashMap::new())),
         changes: changes.clone(),
         changes_io: IoWorker::default(),
         overlay,
@@ -633,7 +653,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .refresh
         .connect_clicked(move |_| changes_workspace.refresh_changes());
     let reload_workspace = workspace.clone();
-    diff_reload_button.connect_clicked(move |_| reload_workspace.reload_active_diff());
+    diff_reload_button.connect_clicked(move |_| reload_workspace.reload_active_document());
+    let emacs_workspace = workspace.clone();
+    open_in_emacs_button
+        .connect_clicked(move |_| emacs_workspace.open_visible_document_in_emacs());
+    workspace.connect_explorer();
     let changes_workspace = workspace.clone();
     changes.toggle.connect_toggled(move |toggle| {
         changes_workspace
@@ -652,13 +676,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .connect_value_changed(move |_| base_workspace.select_changes_base());
     let diff_workspace = workspace.clone();
     diff_previous.connect_clicked(move |_| {
-        if let Some(viewer) = diff_workspace.diff_viewer.borrow().as_ref() {
+        if let Some(viewer) = diff_workspace.code_viewer.borrow().as_ref() {
             viewer.move_to_change(false);
         }
     });
     let diff_workspace = workspace.clone();
     diff_next.connect_clicked(move |_| {
-        if let Some(viewer) = diff_workspace.diff_viewer.borrow().as_ref() {
+        if let Some(viewer) = diff_workspace.code_viewer.borrow().as_ref() {
             viewer.move_to_change(true);
         }
     });
@@ -793,7 +817,7 @@ impl Workspace {
                     self.list.select_row(Some(&row));
                 }
             } else {
-                if let Some(viewer) = self.diff_viewer.borrow().as_ref() {
+                if let Some(viewer) = self.code_viewer.borrow().as_ref() {
                     viewer.clear();
                 }
                 self.stack.set_visible_child_name(EMPTY_PAGE);
@@ -829,6 +853,19 @@ impl Workspace {
             self.diff_document_signatures.borrow_mut().remove(&key);
             self.stale_diff_tabs.borrow_mut().remove(&key);
             self.diff_view_states.borrow_mut().remove(&tab_id);
+        }
+        let files = self
+            .file_tabs
+            .borrow()
+            .keys()
+            .filter(|key| key.worktree_root == context)
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in files {
+            self.file_tabs.borrow_mut().remove(&key);
+            self.diff_view_states
+                .borrow_mut()
+                .remove(&crate::workspace_tabs::WorkspaceTabs::file_tab_id(&key));
         }
     }
 

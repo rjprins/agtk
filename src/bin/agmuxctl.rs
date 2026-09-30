@@ -13,7 +13,7 @@ use agmux_native::control::{
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams,
     SessionIdParams, SessionKind, SessionSetStateParams, SessionState, ShortcutSetParams,
-    UiDiffScope, UiOpenDiffParams, UiShowParams, UiSurface, WaitCondition, WorktreeCreateParams,
+    UiDiffScope, UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WaitCondition, WorktreeCreateParams,
     WorktreeListParams, WorktreeReapParams,
 };
 use agmux_native::instance::{InstanceName, InstancePaths};
@@ -80,6 +80,9 @@ fn run() -> Result<(), Failure> {
         }
         [group, command, session_id, rest @ ..] if group == "ui" && command == "diff" => {
             ControlCommand::UiOpenDiff(parse_ui_diff(session_id, rest)?)
+        }
+        [group, command, session_id, rest @ ..] if group == "ui" && command == "file" => {
+            ControlCommand::UiOpenFile(parse_ui_file(session_id, rest)?)
         }
         [group, action, rest @ ..] if group == "appearance" && action == "set" => {
             parse_appearance_set(rest)?
@@ -161,6 +164,41 @@ fn parse_ui_diff(session_id: &str, arguments: &[String]) -> Result<UiOpenDiffPar
         scope,
         path,
         commit_id,
+    })
+}
+
+fn parse_ui_file(session_id: &str, arguments: &[String]) -> Result<UiOpenFileParams, Failure> {
+    let mut path = None;
+    let mut line = None;
+    let mut column = None;
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?
+            .clone();
+        let number = || {
+            value
+                .parse::<u32>()
+                .ok()
+                .filter(|number| *number > 0)
+                .ok_or_else(|| Failure::Usage(format!("{option} requires a positive number")))
+        };
+        match option {
+            "--path" => path = Some(value),
+            "--line" => line = Some(number()?),
+            "--column" => column = Some(number()?),
+            _ => return Err(Failure::Usage(format!("unknown ui file option: {option}"))),
+        }
+        index += 2;
+    }
+    let path = path.ok_or_else(|| Failure::Usage("ui file requires --path".to_owned()))?;
+    Ok(UiOpenFileParams {
+        session_id: session_id.to_owned(),
+        path,
+        line,
+        column,
     })
 }
 
@@ -324,6 +362,7 @@ fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
         "history" => Ok(UiSurface::History),
         "search" => Ok(UiSurface::Search),
         "changes" => Ok(UiSurface::Changes),
+        "files" => Ok(UiSurface::Files),
         "worktrees" => Ok(UiSurface::Worktrees),
         "agents" => Ok(UiSurface::Agents),
         "pull-requests" | "prs" => Ok(UiSurface::PullRequests),
@@ -1000,7 +1039,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session restart ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, SCOPE is all|staged|unstaged|untracked|committed|commit)"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session restart ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes and files, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

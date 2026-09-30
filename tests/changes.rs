@@ -101,3 +101,65 @@ fn unavailable_ancestor_keeps_selection_instead_of_falling_back_to_main() {
     );
     assert!(snapshot.commits.is_empty());
 }
+
+#[test]
+fn worktree_files_list_tracked_and_untracked_but_not_ignored_paths() {
+    let dir = repository();
+    let root = dir.path();
+    fs::create_dir_all(root.join("src/nested")).unwrap();
+    fs::write(root.join("src/nested/new.rs"), "fn main() {}\n").unwrap();
+    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::create_dir_all(root.join("target")).unwrap();
+    fs::write(root.join("target/ignored.txt"), "ignored\n").unwrap();
+    let mut files = agmux_native::changes::list_worktree_files(root).unwrap();
+    files.sort();
+    assert_eq!(
+        files,
+        [
+            b".gitignore".to_vec(),
+            b"file.txt".to_vec(),
+            b"src/nested/new.rs".to_vec(),
+        ]
+    );
+}
+
+#[test]
+fn file_documents_report_text_binary_and_missing_files() {
+    use agmux_native::changes::{FileDocumentResult, read_file_document};
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(root.join("main.rs"), "fn main() {}\nfn other() {}\n").unwrap();
+    fs::write(root.join("image.bin"), b"\x89PNG\0\0\0").unwrap();
+
+    let FileDocumentResult::Text(document) =
+        read_file_document(&root.join("main.rs"), "main.rs").unwrap()
+    else {
+        panic!("expected text");
+    };
+    assert_eq!(document.path, "main.rs");
+    assert_eq!(document.language.as_deref(), Some("rust"));
+    assert_eq!(document.line_count, 2);
+    assert!(document.identity.starts_with("disk:100644:"));
+
+    let FileDocumentResult::Placeholder(binary) =
+        read_file_document(&root.join("image.bin"), "image.bin").unwrap()
+    else {
+        panic!("expected a placeholder");
+    };
+    assert_eq!(binary.reason, "Binary content is not shown as text");
+    assert_eq!(binary.byte_size, Some(7));
+
+    let FileDocumentResult::Placeholder(missing) =
+        read_file_document(&root.join("gone.rs"), "gone.rs").unwrap()
+    else {
+        panic!("expected a placeholder");
+    };
+    assert_eq!(missing.reason, "This file does not exist");
+
+    let FileDocumentResult::Placeholder(directory) = read_file_document(root, ".").unwrap()
+    else {
+        panic!("expected a placeholder");
+    };
+    assert_eq!(directory.reason, "This path is a directory");
+}

@@ -18,6 +18,7 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Selectable session rows with explicit rename and same-worktree launch buttons
 - Embedded VTE terminals with true color, selection-to-clipboard, normal copy and paste, search, and live prompt history navigation
 - Read-only worktree Changes sidebar with staged, unstaged, untracked, branch, and commit file diffs in a unified Monaco viewer
+- A Files page beside Changes that lists every tracked and untracked worktree file, with a filter, and opens files read only in the same viewer
 - Shell, Codex, Claude, Gemini, and custom launches with exact working-directory and worktree context
 - Independent PTY hosts with bounded detached replay and explicit process-group shutdown
 - Persisted session metadata, ordering, project pins, collapsed groups, launch preferences, terminal themes, fonts, and keyboard overrides
@@ -29,7 +30,7 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Restart Agent in the row menu stops an agent and resumes its conversation in the same row with the same launch flags, so an updated Claude or Codex takes over. Restart Idle Agents in the main menu does this for every agent between turns and leaves busy ones running. An agent that has not taken a turn yet starts fresh.
 - Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
 - Emacs Magit and branch-review integration for the selected session
-- Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in Emacs at that line, or a URL to open it in the browser. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select. Ctrl+click opens immediately.
+- Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in the agmux file viewer at that line, or a URL to open it in the browser. The viewer's editor button opens the file in Emacs. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select. Ctrl+click opens immediately.
 - Azure DevOps PR attention, exact acknowledgement, source-worktree matching, manual review launch, and per-project opt-in auto-review
 - App-only PNG capture and structural UI inspection for isolated agent-driven testing
 - Local CLI and MCP control without exposing a network listener

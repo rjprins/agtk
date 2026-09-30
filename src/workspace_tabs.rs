@@ -11,16 +11,26 @@ pub struct DiffTabKey {
     pub new_path: Option<Vec<u8>>,
 }
 
+/// A file shown read-only. `path` is absolute so terminal links outside the
+/// worktree still open in the context (worktree) of the session that printed them.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileTabKey {
+    pub worktree_root: String,
+    pub path: std::path::PathBuf,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WorkspaceTabId {
     Session(String),
     Diff(DiffTabKey),
+    File(FileTabKey),
 }
 
 #[derive(Debug, Default)]
 struct ContextTabs {
     sessions: Vec<String>,
     diffs: Vec<DiffTabKey>,
+    files: Vec<FileTabKey>,
     active: Option<WorkspaceTabId>,
     recent: Vec<WorkspaceTabId>,
 }
@@ -75,11 +85,30 @@ impl WorkspaceTabs {
         tabs.diffs.clear();
         tabs.diffs.push(key.clone());
         tabs.recent
-            .retain(|tab| matches!(tab, WorkspaceTabId::Session(_)));
+            .retain(|tab| !matches!(tab, WorkspaceTabId::Diff(_)));
         self.selected_session = Some(context_owner.to_owned());
         self.record_visit(context_owner);
         self.active_context = Some(context.clone());
         let tab = WorkspaceTabId::Diff(key);
+        self.activate(&context, tab.clone());
+        Some(tab)
+    }
+
+    /// Shows `key` in the context's single reusable file buffer, like `open_diff`.
+    pub fn open_file(&mut self, key: FileTabKey, context_owner: &str) -> Option<WorkspaceTabId> {
+        let context = self.session_context.get(context_owner)?.clone();
+        if context != key.worktree_root {
+            return None;
+        }
+        let tabs = self.contexts.entry(context.clone()).or_default();
+        tabs.files.clear();
+        tabs.files.push(key.clone());
+        tabs.recent
+            .retain(|tab| !matches!(tab, WorkspaceTabId::File(_)));
+        self.selected_session = Some(context_owner.to_owned());
+        self.record_visit(context_owner);
+        self.active_context = Some(context.clone());
+        let tab = WorkspaceTabId::File(key);
         self.activate(&context, tab.clone());
         Some(tab)
     }
@@ -101,15 +130,16 @@ impl WorkspaceTabs {
     pub fn select_tab(&mut self, tab: &WorkspaceTabId) -> bool {
         match tab {
             WorkspaceTabId::Session(id) => self.select_session(id).is_some(),
-            WorkspaceTabId::Diff(key) => {
+            WorkspaceTabId::Diff(DiffTabKey { worktree_root, .. })
+            | WorkspaceTabId::File(FileTabKey { worktree_root, .. }) => {
                 let Some(context) = self.active_context.clone() else {
                     return false;
                 };
-                if context != key.worktree_root
+                if &context != worktree_root
                     || !self
                         .contexts
                         .get(&context)
-                        .is_some_and(|tabs| tabs.diffs.contains(key))
+                        .is_some_and(|tabs| tab_exists(tabs, tab))
                 {
                     return false;
                 }
@@ -122,9 +152,21 @@ impl WorkspaceTabs {
     pub fn close_diff(&mut self, key: &DiffTabKey) -> Option<WorkspaceTabId> {
         let tabs = self.contexts.get_mut(&key.worktree_root)?;
         tabs.diffs.retain(|open| open != key);
-        tabs.recent
-            .retain(|tab| tab != &WorkspaceTabId::Diff(key.clone()));
-        if tabs.active == Some(WorkspaceTabId::Diff(key.clone())) {
+        self.close_buffer(&key.worktree_root, WorkspaceTabId::Diff(key.clone()))
+    }
+
+    pub fn close_file(&mut self, key: &FileTabKey) -> Option<WorkspaceTabId> {
+        let tabs = self.contexts.get_mut(&key.worktree_root)?;
+        tabs.files.retain(|open| open != key);
+        self.close_buffer(&key.worktree_root, WorkspaceTabId::File(key.clone()))
+    }
+
+    /// After a diff or file tab closes, falls back to the most recent remaining tab.
+    fn close_buffer(&mut self, context: &str, closed: WorkspaceTabId) -> Option<WorkspaceTabId> {
+        let selected_session = self.selected_session.clone();
+        let tabs = self.contexts.get_mut(context)?;
+        tabs.recent.retain(|tab| tab != &closed);
+        if tabs.active == Some(closed) {
             tabs.active = tabs
                 .recent
                 .iter()
@@ -134,11 +176,12 @@ impl WorkspaceTabs {
                 .or_else(|| {
                     tabs.sessions
                         .iter()
-                        .find(|id| self.selected_session.as_deref() == Some(id.as_str()))
+                        .find(|id| selected_session.as_deref() == Some(id.as_str()))
                         .or_else(|| tabs.sessions.first())
                         .map(|id| WorkspaceTabId::Session(id.clone()))
                 })
-                .or_else(|| tabs.diffs.last().cloned().map(WorkspaceTabId::Diff));
+                .or_else(|| tabs.diffs.last().cloned().map(WorkspaceTabId::Diff))
+                .or_else(|| tabs.files.last().cloned().map(WorkspaceTabId::File));
         }
         self.visible_tab = tabs.active.clone();
         tabs.active.clone()
@@ -159,7 +202,8 @@ impl WorkspaceTabs {
                 .find(|tab| tab_exists(tabs, tab))
                 .cloned()
                 .or_else(|| tabs.sessions.first().cloned().map(WorkspaceTabId::Session))
-                .or_else(|| tabs.diffs.last().cloned().map(WorkspaceTabId::Diff));
+                .or_else(|| tabs.diffs.last().cloned().map(WorkspaceTabId::Diff))
+                .or_else(|| tabs.files.last().cloned().map(WorkspaceTabId::File));
         }
         if self.selected_session.as_deref() == Some(session_id) {
             self.selected_session = tabs.sessions.first().cloned();
@@ -187,6 +231,7 @@ impl WorkspaceTabs {
             .cloned()
             .map(WorkspaceTabId::Session)
             .chain(tabs.diffs.iter().cloned().map(WorkspaceTabId::Diff))
+            .chain(tabs.files.iter().cloned().map(WorkspaceTabId::File))
             .collect()
     }
 
@@ -221,6 +266,12 @@ impl WorkspaceTabs {
         format!("diff-{:016x}", hasher.finish())
     }
 
+    pub fn file_tab_id(key: &FileTabKey) -> String {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        format!("file-{:016x}", hasher.finish())
+    }
+
     fn record_visit(&mut self, session_id: &str) {
         self.session_history.retain(|id| id != session_id);
         self.session_history.push(session_id.to_owned());
@@ -240,12 +291,14 @@ fn tab_exists(tabs: &ContextTabs, tab: &WorkspaceTabId) -> bool {
     match tab {
         WorkspaceTabId::Session(id) => tabs.sessions.contains(id),
         WorkspaceTabId::Diff(key) => tabs.diffs.contains(key),
+        WorkspaceTabId::File(key) => tabs.files.contains(key),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::WorkspaceTabs;
+    use super::{FileTabKey, WorkspaceTabId, WorkspaceTabs};
+    use std::path::PathBuf;
 
     fn tabs_with(sessions: &[&str]) -> WorkspaceTabs {
         let mut tabs = WorkspaceTabs::default();
@@ -253,6 +306,49 @@ mod tests {
             tabs.attach_session(*id, "/repo");
         }
         tabs
+    }
+
+    fn file(path: &str) -> FileTabKey {
+        FileTabKey {
+            worktree_root: "/repo".to_owned(),
+            path: PathBuf::from(path),
+        }
+    }
+
+    #[test]
+    fn one_file_buffer_per_context_replaces_the_previous_file() {
+        let mut tabs = tabs_with(&["a"]);
+        tabs.select_session("a");
+        assert!(tabs.open_file(file("/repo/one.rs"), "a").is_some());
+        assert!(tabs.open_file(file("/repo/two.rs"), "a").is_some());
+        assert_eq!(
+            tabs.context_tabs("/repo"),
+            [
+                WorkspaceTabId::Session("a".to_owned()),
+                WorkspaceTabId::File(file("/repo/two.rs")),
+            ]
+        );
+        assert_eq!(
+            tabs.visible_tab(),
+            Some(&WorkspaceTabId::File(file("/repo/two.rs")))
+        );
+        // A file from another context cannot open in this session's buffer.
+        let mut elsewhere = file("/other/x.rs");
+        elsewhere.worktree_root = "/other".to_owned();
+        assert!(tabs.open_file(elsewhere, "a").is_none());
+    }
+
+    #[test]
+    fn closing_a_file_tab_returns_to_the_last_visited_tab() {
+        let mut tabs = tabs_with(&["a", "b"]);
+        tabs.select_session("a");
+        tabs.select_session("b");
+        tabs.open_file(file("/repo/one.rs"), "b");
+        assert_eq!(
+            tabs.close_file(&file("/repo/one.rs")),
+            Some(WorkspaceTabId::Session("b".to_owned()))
+        );
+        assert!(tabs.context_tabs("/repo").iter().all(|tab| matches!(tab, WorkspaceTabId::Session(_))));
     }
 
     #[test]

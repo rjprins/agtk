@@ -12,7 +12,8 @@ pub use protocol::{
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams,
     SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams, UiDiffScope,
-    UiOpenDiffParams, UiShowParams, UiSurface, WorktreeCreateParams, WorktreeListParams,
+    UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WorktreeCreateParams,
+    WorktreeListParams,
     WorktreeReapParams, control_timeout, decode_request, decode_response, encode_request,
     encode_response,
 };

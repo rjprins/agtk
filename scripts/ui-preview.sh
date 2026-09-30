@@ -3,7 +3,7 @@
 # Nothing touches the live instance or the desktop.
 #
 # Usage: scripts/ui-preview.sh [--dark] [--keep] [--font-size N] [SURFACE...]
-#   SURFACE: main changes launch appearance shortcuts history search worktrees agents
+#   SURFACE: main changes files launch appearance shortcuts history search worktrees agents
 #            pull-requests claude-models (default: all)
 #   --keep   leave the instance running and print how to drive it
 set -euo pipefail
@@ -21,7 +21,7 @@ while (($#)); do
   esac
   shift
 done
-((${#surfaces[@]})) || surfaces=(main changes launch appearance shortcuts history search worktrees agents pull-requests claude-models)
+((${#surfaces[@]})) || surfaces=(main changes files launch appearance shortcuts history search worktrees agents pull-requests claude-models)
 
 command -v mutter >/dev/null || { echo "ui-preview needs mutter" >&2; exit 1; }
 "$repo/scripts/build-viewer.sh"
@@ -185,7 +185,7 @@ for surface in "${surfaces[@]}"; do
   kill "$ui_pid"; wait "$ui_pid" 2>/dev/null || true
   start_ui
   ctl session select "$main_id" >/dev/null
-  if [[ $surface == changes ]]; then
+  if [[ $surface == changes || $surface == files ]]; then
     ctl session select "$(id_of 'cursor pagination')" >/dev/null
   fi
   # Prompt history only lives as long as one UI process.
@@ -204,6 +204,19 @@ for surface in "${surfaces[@]}"; do
       sleep 0.1
     done
     ((rendered)) || { echo "Changes diff did not render" >&2; exit 1; }
+  fi
+  if [[ $surface == files ]]; then
+    files_session=$(id_of 'cursor pagination')
+    ctl ui file "$files_session" --path src/orders.py --line 2 --column 5 >/dev/null
+    rendered=0
+    for _ in $(seq 40); do
+      if ctl ui inspect | grep -q '"label":"rendered:'; then
+        rendered=1
+        break
+      fi
+      sleep 0.1
+    done
+    ((rendered)) || { echo "File did not render" >&2; exit 1; }
   fi
   sleep 1.5
   capture "$surface"

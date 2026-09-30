@@ -34,6 +34,7 @@ pub enum ControlCommand {
     UiCapture,
     UiShow(UiShowParams),
     UiOpenDiff(UiOpenDiffParams),
+    UiOpenFile(UiOpenFileParams),
     AppearanceSet(AppearanceSetParams),
     ShortcutSet(ShortcutSetParams),
     ProjectSet(ProjectSetParams),
@@ -69,7 +70,7 @@ pub fn control_timeout(command: &ControlCommand) -> Duration {
         | ControlCommand::PrAcknowledge(_)
         | ControlCommand::PrSetAutoReview(_)
         | ControlCommand::PrLaunchReview(_) => PR_CONTROL_TIMEOUT,
-        ControlCommand::UiOpenDiff(_) => DIFF_CONTROL_TIMEOUT,
+        ControlCommand::UiOpenDiff(_) | ControlCommand::UiOpenFile(_) => DIFF_CONTROL_TIMEOUT,
         _ => DEFAULT_CONTROL_TIMEOUT,
     }
 }
@@ -284,6 +285,7 @@ pub enum UiSurface {
     History,
     Search,
     Changes,
+    Files,
     Worktrees,
     Agents,
     PullRequests,
@@ -314,6 +316,18 @@ pub struct UiOpenDiffParams {
     pub scope: UiDiffScope,
     pub path: String,
     pub commit_id: Option<String>,
+}
+
+/// Shows a file read-only. `path` is relative to the session worktree or absolute.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiOpenFileParams {
+    pub session_id: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -440,6 +454,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             let params: UiOpenDiffParams = decode_params(wire.params)?;
             validate_ui_open_diff(&params)?;
             ControlCommand::UiOpenDiff(params)
+        }
+        "ui.open_file" => {
+            let params: UiOpenFileParams = decode_params(wire.params)?;
+            validate_ui_open_file(&params)?;
+            ControlCommand::UiOpenFile(params)
         }
         "appearance.set" => {
             let params: AppearanceSetParams = decode_params(wire.params)?;
@@ -666,6 +685,7 @@ impl ControlCommand {
             Self::UiCapture => "ui.capture",
             Self::UiShow(_) => "ui.show",
             Self::UiOpenDiff(_) => "ui.open_diff",
+            Self::UiOpenFile(_) => "ui.open_file",
             Self::AppearanceSet(_) => "appearance.set",
             Self::ShortcutSet(_) => "shortcut.set",
             Self::ProjectSet(_) => "project.set",
@@ -703,6 +723,7 @@ impl ControlCommand {
             Self::UiCapture => Ok(("ui.capture", empty_params())),
             Self::UiShow(params) => Ok(("ui.show", serde_json::to_value(params)?)),
             Self::UiOpenDiff(params) => Ok(("ui.open_diff", serde_json::to_value(params)?)),
+            Self::UiOpenFile(params) => Ok(("ui.open_file", serde_json::to_value(params)?)),
             Self::AppearanceSet(params) => Ok(("appearance.set", serde_json::to_value(params)?)),
             Self::ShortcutSet(params) => Ok(("shortcut.set", serde_json::to_value(params)?)),
             Self::ProjectSet(params) => Ok(("project.set", serde_json::to_value(params)?)),
@@ -1079,6 +1100,28 @@ fn validate_ui_open_diff(params: &UiOpenDiffParams) -> Result<(), ControlError> 
             return Err(invalid_params("commitId is only valid for commit scope"));
         }
         (_, None) => {}
+    }
+    Ok(())
+}
+
+fn validate_ui_open_file(params: &UiOpenFileParams) -> Result<(), ControlError> {
+    use std::path::{Component, Path};
+
+    validate_session_id(&params.session_id)?;
+    let path = Path::new(&params.path);
+    if params.path.is_empty()
+        || params.path.len() > 4096
+        || params.path.contains('\0')
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
+    {
+        return Err(invalid_params(
+            "path must be a worktree-relative or absolute file path without ..",
+        ));
+    }
+    if params.line == Some(0) || params.column == Some(0) {
+        return Err(invalid_params("line and column start at 1"));
     }
     Ok(())
 }
