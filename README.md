@@ -1,97 +1,107 @@
 # agtk
 
-agtk is a personal, one-window workspace for terminal coding agents on Linux, Wayland, and GNOME. It keeps the useful shape of the original agmux, with grouped sessions in a persistent sidebar and one visible terminal, while replacing the browser terminal, WebSocket bridge, and tmux layer with GTK4 and VTE.
+agtk is a coding agent manager for GNOME. It runs Claude Code, Codex, Gemini and plain shells in one native window, grouped by project and git worktree.
 
-The application uses four cooperating binaries:
+![agtk with an agent session and the Changes sidebar](docs/screenshot.png)
 
-- `agtk` owns the GTK workspace and VTE terminals.
-- `agtk-session` owns one PTY and child process independently of the UI.
-- `agtkctl` exposes the versioned local control socket as machine-readable commands.
-- `agtk-mcp` maps MCP tools to that same control protocol.
+The sidebar shows every session and whether it is busy, waiting for you, or done. The terminal in the middle is a real VTE terminal. The Changes sidebar on the right shows what the agent changed in its worktree.
 
-Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. Reopening it discovers and reattaches those hosts. Machine reboot survival and durable terminal scrollback are intentionally out of scope.
+agtk is a personal project. I use it every day on Arch Linux with GNOME on Wayland. It is not tested on other setups, and things can change without notice.
 
-## Current features
+## Features
 
-- One compact native window with individual agent sessions grouped by project in the sidebar
-- Project headers with launch, pin, resume, worktree, and pull-request actions
-- Selectable session rows with explicit rename and same-worktree launch buttons
-- Embedded VTE terminals with true color, selection-to-clipboard, normal copy and paste, search, and live prompt history navigation
-- Read-only worktree Changes sidebar with staged, unstaged, untracked, branch, and commit file diffs in a unified Monaco viewer
-- A Files page beside Changes that lists every tracked and untracked worktree file, with a filter, and opens files read only in the same viewer
-- Shell, Codex, Claude, Gemini, and custom launches with exact working-directory and worktree context
-- Independent PTY hosts with bounded detached replay and explicit process-group shutdown
-- Persisted session metadata, ordering, project pins, collapsed groups, launch preferences, terminal themes, fonts, and keyboard overrides
-- Ctrl-plus and Ctrl-minus font scaling for the application chrome and every embedded terminal, persisted with appearance settings
-- Safe purpose-aware worktree creation and guarded reap with salvage and attic tags
-- A Resume Session dialog (`Ctrl+Shift+R`) that lists closed Claude and Codex conversations newest first under their own titles (your `/rename` name, else the provider's title), with where each one left off and the files it changed
-- Busy, waiting, ready, and idle agent states from Claude hooks and screen reading
-- An agent row that exited, for example after a reboot, resumes its conversation in place: press Enter in its terminal or choose Resume Conversation from the row menu
-- Restart Agent in the row menu stops an agent and resumes its conversation in the same row with the same launch flags, so an updated Claude or Codex takes over. Restart Idle Agents in the main menu does this for every agent between turns and leaves busy ones running. An agent that has not taken a turn yet starts fresh.
-- Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
-- Emacs Magit and branch-review integration for the selected session
-- Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in the agtk file viewer at that line, or a URL to open it in the browser. The viewer's editor button opens the file in Emacs. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select. Ctrl+click opens immediately.
-- Azure DevOps PR attention, exact acknowledgement, source-worktree matching, manual review launch, and per-project opt-in auto-review
-- App-only PNG capture and structural UI inspection for isolated agent-driven testing
-- Local CLI and MCP control without exposing a network listener
+Sessions
 
-In the Changes sidebar, choose **Compared with → Commits ago…** and enter a
-positive count to compare the current worktree with `HEAD~N`. The count defaults
-to 1 and is remembered across restarts. This follows first-parent history and
-includes staged, unstaged, and untracked changes under **All changes**. If that
-much history is unavailable, the sidebar shows a message so you can lower the count.
+- Sessions are grouped by project in the sidebar. Each project has buttons to launch, pin, resume, and manage worktrees and pull requests.
+- Launch Claude, Codex, Gemini, a shell, or a custom command in an exact directory and worktree.
+- Sessions keep running when the window closes, crashes, or is rebuilt. Start agtk again and it attaches to them.
+- Each agent row shows a state: busy, waiting, ready, or idle. See [Agent states](#agent-states).
+- Resume a closed Claude or Codex conversation with `Ctrl+Shift+R`. The list shows where each one stopped and which files it changed.
+- Restart Agent in the row menu stops an agent and resumes the same conversation, so an updated Claude or Codex takes over. Restart Idle Agents in the main menu does this for every agent that is between turns.
+- Switch Claude model and effort with presets.
+
+Terminal
+
+- True color, search, copy and paste, and prompt history.
+- Selected text is copied to the clipboard.
+- Click a file path such as `src/main.rs:42:7` to open it in the file viewer at that line. Click a URL to open it in the browser.
+- `Ctrl++` and `Ctrl+-` scale the font of the whole window.
+
+Changes and files
+
+- The Changes sidebar shows staged, unstaged, untracked, branch, and commit diffs. It is read only.
+- Choose what to compare with: a branch, or a number of commits back.
+- The Files page lists every file in the worktree, with a filter. Files open read only in the same viewer.
+
+Worktrees
+
+- Create a worktree with a generated branch name from the launch dialog.
+- Remove a finished worktree safely. agtk saves uncommitted work and tags the branch tip before it deletes anything.
+
+Integrations
+
+- Azure DevOps pull requests: see PRs that need your attention, and start a review in the matching worktree.
+- Emacs: open Magit or a branch review for the selected session.
+- A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.
+
+Sessions do not survive a reboot, and terminal scrollback is not saved. After a reboot, press Enter in the terminal of an agent to resume its conversation.
 
 ## Requirements
 
-The current build targets recent GTK APIs. The tested Arch packages are `gtk4`, `libadwaita`, `vte4`, and `sqlite`, plus a Rust toolchain. The observed baseline is GTK 4.22, libadwaita 1.9, VTE 0.84, and Rust 1.98. Building the bundled Changes viewer also requires Node.js and npm when viewer assets need to be prepared. Node.js is not needed when running the built application.
+- Linux with GNOME on Wayland
+- GTK 4.22, libadwaita 1.9, VTE 0.84, WebKitGTK 6.0, and SQLite
+- Rust 1.92 or newer
+- Node.js and npm, only to build the Changes viewer
 
-Azure PR support additionally needs the Azure CLI with the Azure DevOps extension and an existing local sign-in. Emacs actions need `emacsclient`. Codex and Claude need their respective command-line tools.
+On Arch Linux:
+
+```sh
+sudo pacman -S gtk4 libadwaita vte4 webkitgtk-6.0 sqlite rust nodejs npm
+```
+
+Optional tools:
+
+- `claude`, `codex`, or `gemini` for the agents you want to run
+- The Azure CLI with the Azure DevOps extension, signed in, for pull requests
+- `emacsclient` for the Emacs actions
 
 ## Build and run
 
-From a checkout, start the workspace with:
+Clone the repository and run:
 
 ```sh
 ./start.sh
 ```
 
-The script incrementally builds every cooperating debug binary and forwards any
-arguments to `agtk`. Build and run manually when needed:
+This builds the viewer and all binaries in debug mode, then starts agtk. Arguments are passed on to `agtk`.
+
+To build and run by hand:
 
 ```sh
+scripts/build-viewer.sh
 cargo build --bins
 ./target/debug/agtk
 ```
 
-The development UI finds `agtk-session` beside its own executable. Runtime sockets live below `$XDG_RUNTIME_DIR/agtk/default`. Durable metadata lives below `$XDG_STATE_HOME/agtk/default`, or `~/.local/state` when `XDG_STATE_HOME` is unset.
+## Install
 
-Useful executable overrides are `AGTK_CODEX_BIN`, `AGTK_CLAUDE_BIN`, `AGTK_EMACSCLIENT`, and `AGTK_AZURE_BIN`.
-
-## Local installation
-
-Install a release build, all helper binaries, and the GNOME desktop entry under `~/.local`:
+Install a release build and a GNOME launcher under `~/.local`:
 
 ```sh
 ./scripts/install-local.sh
 ```
 
-Set an absolute `PREFIX` to choose another location. The staged smoke test builds the release artifacts, installs into a disposable root, validates the desktop entry when the validator is available, and starts the installed MCP adapter with isolated paths:
+Then start "agtk" from the GNOME overview, or run `~/.local/bin/agtk`.
 
-```sh
-./scripts/smoke-install.sh
-```
+- To install somewhere else, set `PREFIX` to an absolute path.
+- To upgrade, run the installer again.
+- To remove agtk, run `./scripts/uninstall-local.sh`. Your saved sessions and settings are kept.
 
-Rerun the installer to upgrade the four binaries, desktop entry, and app icon in place. Remove only those installed files with:
+If agtk does not start from the overview, look in the user journal for its output.
 
-```sh
-./scripts/uninstall-local.sh
-```
+## Keyboard shortcuts
 
-Uninstalling preserves runtime and saved workspace data. After installation, launch “agtk” from the GNOME overview or run `~/.local/bin/agtk`. Startup diagnostics written to stdout or stderr by a desktop launch are available in the user journal.
-
-## Keyboard contract
-
-These shortcuts work while VTE has focus and can be changed through `[keys]`:
+These work while the terminal has focus. Change them under Keyboard Shortcuts in the main menu.
 
 | Action | Default |
 | --- | --- |
@@ -108,55 +118,9 @@ These shortcuts work while VTE has focus and can be changed through `[keys]`:
 | Search terminal | `Ctrl+Shift+F` |
 | Increase or decrease font size | `Ctrl++` or `Ctrl+-` |
 
-Selecting terminal text also copies a whitespace-cleaned version to the regular clipboard. Prompt history is retained only while the current GTK process is running.
+The Claude preset shortcut opens a chooser for the selected Claude session. Press the shortcut again to move to the next preset, Enter to apply it, and Escape to cancel. Apply a preset only when Claude is at an empty prompt.
 
-The launch surface follows the original agmux launch behavior. It keeps project and worktree fields editable, completes filesystem paths, remembers provider options per project, offers Claude, Codex, Gemini, and shell choices, and presents `+ New worktree`, `Current (...)`, and sorted Git worktree choices. New worktrees expose generated branch and base-branch fields before the session launches. Action controls use compact symbolic icons instead of bracket glyphs. Session rows use embedded provider icons for zsh, Claude, Codex, Gemini, Grok, and custom terminals.
-
-The Claude preset shortcut opens the chooser for a selected live Claude session. Repeating the shortcut cycles its focused preset, Enter applies it, and Escape cancels. Presets are editable as a validated JSON array in `[keys]`. Applying one assumes Claude is at an empty prompt.
-
-## UI preview
-
-Render the UI without touching the live instance or the desktop:
-
-```sh
-scripts/ui-preview.sh              # capture the main window and every dialog
-scripts/ui-preview.sh --dark launch
-```
-
-The script starts a private headless mutter compositor and an isolated instance with demo sessions, a demo repository, fake providers, and a fake Azure CLI. It prints the PNG paths. `--keep` leaves the instance running for `agtkctl`. The same compositor can run the UI test suite through `AGTK_TEST_DISPLAY`.
-
-## Local control
-
-`agtkctl` prints JSON to stdout. It accepts `--instance NAME` before the command, which keeps automated instances separate from the live `default` instance.
-
-```sh
-agtkctl state
-agtkctl session create --kind codex --cwd /absolute/project
-agtkctl session text SESSION_ID --lines 200
-agtkctl session restart SESSION_ID
-agtkctl ui inspect
-agtkctl ui capture
-agtkctl ui show pull-requests
-agtkctl ui show changes
-agtkctl ui diff SESSION_ID --scope unstaged --path src/main.rs
-agtkctl pr list /absolute/project
-agtkctl pr review /absolute/project 1234
-agtkctl claude presets
-agtkctl claude apply SESSION_ID opus-high
-```
-
-Hosted agent processes receive `AGTK_INSTANCE`, `AGTK_SESSION_ID`, and `AGTK_CONTROL_SOCKET`. A provider hook can report explicit readiness with:
-
-```sh
-agtkctl session state "$AGTK_SESSION_ID" busy
-agtkctl session state "$AGTK_SESSION_ID" waiting
-agtkctl session state "$AGTK_SESSION_ID" ready
-agtkctl session state "$AGTK_SESSION_ID" idle
-```
-
-Add `--hook-input` when the command runs as a Claude Code hook. agtkctl then reads the hook's JSON from stdin and records its `session_id`, so agtk knows which conversation the session holds and leaves it out of the Resume Session list.
-
-### Agent states
+## Agent states
 
 | Glyph | State | Meaning |
 |---|---|---|
@@ -165,28 +129,72 @@ Add `--hook-input` when the command runs as a Claude Code hook. agtkctl then rea
 | ● | ready | The turn finished and you have not viewed it yet |
 | ○ | idle | Nothing is running, or you viewed the finished turn |
 
-Selecting a ready session, or finishing a turn while you look at it, marks it viewed. The timer shows how long the session has been in its state.
+Selecting a ready session marks it as viewed. The timer shows how long the session has been in its state.
 
-Claude sessions launch with `--settings` pointing at generated hooks that call `agtkctl session state`, so no global Claude configuration is needed. Codex and Gemini sessions are read from the screen once a second, using status rules ported from [agent-manager](https://github.com/YoanWai/agent-manager). The screen also corrects Claude hooks where they cannot see, such as an Esc interrupt or a dialog after a turn ended. Submitted input marks agent sessions busy.
+Claude sessions report their state through hooks that agtk generates. You do not need to change your Claude configuration. Codex and Gemini sessions are read from the screen once a second, with status rules ported from [agent-manager](https://github.com/YoanWai/agent-manager).
+
+## Control from the command line
+
+`agtkctl` prints JSON to stdout.
+
+```sh
+agtkctl state
+agtkctl session create --kind codex --cwd /absolute/project
+agtkctl session text SESSION_ID --lines 200
+agtkctl session restart SESSION_ID
+agtkctl ui inspect
+agtkctl ui capture
+agtkctl ui show changes
+agtkctl ui diff SESSION_ID --scope unstaged --path src/main.rs
+agtkctl pr list /absolute/project
+agtkctl claude presets
+agtkctl claude apply SESSION_ID opus-high
+```
+
+Run `agtkctl --help` to see every command. Add `--instance NAME` before the command to talk to another instance than `default`.
+
+Processes inside a session get `AGTK_INSTANCE`, `AGTK_SESSION_ID`, and `AGTK_CONTROL_SOCKET`. A hook of your own can report the agent state:
+
+```sh
+agtkctl session state "$AGTK_SESSION_ID" busy
+```
+
+The states are `busy`, `waiting`, `ready`, and `idle`. Add `--hook-input` when the command runs as a Claude Code hook.
 
 ## MCP
 
-An MCP client can start the adapter as a local stdio server:
+Add `agtk-mcp` to an MCP client as a local stdio server:
 
 ```json
 {
   "mcpServers": {
     "agtk": {
-      "command": "/home/rutger/.local/bin/agtk-mcp",
+      "command": "/home/you/.local/bin/agtk-mcp",
       "args": ["--instance", "default"]
     }
   }
 }
 ```
 
-The tools cover sessions, terminal input and snapshots, read-only diff inspection, worktrees, recent provider sessions, Claude presets, Emacs actions, PR workflows, readiness callbacks, UI structure, and app-only PNG capture. The adapter never captures the desktop.
+The tools cover sessions, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, and screenshots of the agtk window. The server never captures the rest of the desktop.
 
-## Verification
+## Where things are stored
+
+- Settings and session data: `$XDG_STATE_HOME/agtk/default`, or `~/.local/state/agtk/default`
+- Sockets: `$XDG_RUNTIME_DIR/agtk/default`
+
+To use another program for a tool, set `AGTK_CLAUDE_BIN`, `AGTK_CODEX_BIN`, `AGTK_EMACSCLIENT`, or `AGTK_AZURE_BIN`.
+
+## Development
+
+agtk has four binaries:
+
+- `agtk` is the GTK window with the terminals.
+- `agtk-session` runs one terminal process. This is why sessions survive a restart of the window.
+- `agtkctl` is the command line tool.
+- `agtk-mcp` is the MCP server.
+
+Run the checks:
 
 ```sh
 cargo fmt --all -- --check
@@ -194,8 +202,17 @@ cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 ```
 
-The ignored `native_ui` suite requires a private Wayland compositor through `AGTK_TEST_DISPLAY`. It creates isolated runtime and state roots and never attaches to the live instance.
+Render the UI without touching your running agtk or your desktop:
 
-## Adoption status
+```sh
+scripts/ui-preview.sh              # capture the main window and every dialog
+scripts/ui-preview.sh --dark launch
+```
 
-The native feature implementation and isolated verification are complete. The browser version remains untouched and available until a real daily-use trial confirms the native workspace is comfortable enough to replace it.
+The script needs `mutter` and `sqlite3`. It starts a private headless compositor and a separate instance with demo sessions, and prints the PNG paths. Add `--keep` to leave the instance running so you can drive it with `agtkctl`.
+
+The UI tests use the same kind of compositor. Start one, then run:
+
+```sh
+AGTK_TEST_DISPLAY=$XDG_RUNTIME_DIR/DISPLAY_NAME cargo test --test native_ui -- --ignored --test-threads=1
+```
