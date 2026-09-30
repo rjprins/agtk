@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=agtk
-Comment=One-window workspace for terminal coding agents
+Comment=Coding agent manager for GNOME
 Exec=@BINDIR@/agtk
 TryExec=@BINDIR@/agtk
 Icon=nl.rutger.Agtk
 Terminal=false
 Categories=Development;
-Keywords=terminal;codex;claude;agent;worktree;
+Keywords=terminal;codex;claude;agent;AI;coding;worktree;gnome;gtk;
 StartupNotify=true
 StartupWMClass=nl.rutger.Agtk
