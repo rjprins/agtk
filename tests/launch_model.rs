@@ -47,21 +47,16 @@ fn new_worktree_uses_origin_main_as_the_default_base_branch() {
 
 #[test]
 fn choice_matching_searches_names_and_absolute_paths() {
-    assert!(choice_matches(
-        "orders",
-        "main-orders-overview",
-        "/home/rutger/shop/main-orders-overview"
-    ));
+    // The `~/` query expands to the real home directory.
+    let home = std::env::var("HOME").unwrap();
+    let path = format!("{home}/shop/main-orders-overview");
+    assert!(choice_matches("orders", "main-orders-overview", &path));
     assert!(choice_matches(
         "~/shop/main-orders",
         "main-orders-overview",
-        "/home/rutger/shop/main-orders-overview"
+        &path
     ));
-    assert!(!choice_matches(
-        "unrelated",
-        "main-orders-overview",
-        "/home/rutger/shop/main-orders-overview"
-    ));
+    assert!(!choice_matches("unrelated", "main-orders-overview", &path));
 }
 
 #[test]
