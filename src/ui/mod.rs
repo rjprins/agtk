@@ -305,6 +305,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .build();
     tabs_scroll.set_propagate_natural_height(true);
     tabs_scroll.set_size_request(-1, 42);
+    tabs_scroll.set_hexpand(true);
+    let tabs_bar = adw::HeaderBar::new();
+    tabs_bar.set_title_widget(Some(&tabs_scroll));
+    tabs_bar.set_show_start_title_buttons(false);
 
     let content_title = adw::WindowTitle::new("agmux", "");
     let content_bar = adw::HeaderBar::new();
@@ -351,21 +355,22 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     context_pr.append(&context_pr_threads);
 
     let main_pane = adw::ToolbarView::new();
-    main_pane.add_top_bar(&content_bar);
+    main_pane.add_top_bar(&tabs_bar);
     main_pane.add_top_bar(&context_pr);
-    main_pane.add_top_bar(&tabs_scroll);
+    main_pane.add_top_bar(&content_bar);
     let center_content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     center_content.append(&stack);
     main_pane.set_content(Some(&center_content));
 
     let changes = changes_ui::ChangesSidebar::new(&main_pane);
-    content_bar.pack_end(&changes.toggle);
+    tabs_bar.pack_end(&changes.toggle);
 
     // A plain paned keeps the sidebar drag-resizable; .sidebar-pane gives it the libadwaita look.
     sidebar_panel.add_css_class("sidebar-pane");
     sidebar_panel.set_size_request(sidebar::MIN_SIDEBAR_WIDTH, -1);
     sidebar_bar.set_show_end_title_buttons(false);
     content_bar.set_show_start_title_buttons(false);
+    content_bar.set_show_end_title_buttons(false);
     let split = gtk::Paned::new(gtk::Orientation::Horizontal);
     split.set_start_child(Some(&sidebar_panel));
     split.set_end_child(Some(&changes.split));
@@ -445,7 +450,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     sidebar_bar.pack_end(&sidebar_controls);
 
     session_context_bar.append(&claude_model_button);
-    session_context_bar.append(&menus.git_button);
+    tabs_bar.pack_end(&menus.git_button);
     session_context_bar.append(&history_button);
     session_context_bar.append(&search_button);
     // Header bars only flatten their direct children, and these sit in a box.
@@ -461,7 +466,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .icon_name("sidebar-show-symbolic")
         .tooltip_text("Toggle sidebar")
         .build();
-    content_bar.pack_start(&sidebar_toggle);
+    tabs_bar.pack_start(&sidebar_toggle);
     let toggled_sidebar = sidebar_panel.clone();
     sidebar_toggle.connect_clicked(move |_| {
         toggled_sidebar.set_visible(!toggled_sidebar.is_visible());
