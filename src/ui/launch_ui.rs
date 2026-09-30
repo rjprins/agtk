@@ -250,6 +250,9 @@ impl LaunchDialog {
         let args = adw::EntryRow::builder()
             .title("Extra Arguments (JSON array)")
             .build();
+        for entry in [&name, &prompt, &args] {
+            entry.set_activates_default(true);
+        }
         args.set_tooltip_text(Some(
             "For example [\"--model\", \"opus\"]; remembered per launch",
         ));
@@ -362,6 +365,7 @@ fn path_entry(label: &str, placeholder: &str, width: i32) -> gtk::Entry {
     let entry = gtk::Entry::builder()
         .placeholder_text(placeholder)
         .width_chars(width)
+        .activates_default(true)
         .build();
     entry.update_property(&[
         gtk::accessible::Property::Label(label),
