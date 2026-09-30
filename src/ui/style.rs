@@ -48,6 +48,9 @@ const CHROME_CSS: &str = r#"
   background: color-mix(in srgb, var(--accent-bg-color) 42%, transparent);
 }
 .session-list row:selected .session-title { font-weight: bold; }
+/* Where a dragged session will land. */
+.session-list row.drop-above { box-shadow: inset 0 3px var(--accent-bg-color); }
+.session-list row.drop-below { box-shadow: inset 0 -3px var(--accent-bg-color); }
 .session-state { min-width: 12px; font-weight: bold; }
 vte-terminal { padding: 6px 10px; }
 .session-state.state-busy { color: var(--warning-color); }

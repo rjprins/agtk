@@ -234,6 +234,53 @@ impl Workspace {
         }
     }
 
+    /// Whether a dragged session may land on `target`: only within its own group.
+    pub(super) fn can_reorder_session(&self, dragged: &str, target: &str) -> bool {
+        let sessions = self.sessions.borrow();
+        match (sessions.get(dragged), sessions.get(target)) {
+            (Some(dragged), Some(target)) => {
+                dragged.record.project_root == target.record.project_root
+            }
+            _ => false,
+        }
+    }
+
+    /// Moves `dragged` before or after `target` in the sidebar and saves the new order.
+    pub(super) fn reorder_session(&self, dragged: &str, target: &str, before: bool) -> bool {
+        if !self.can_reorder_session(dragged, target) {
+            return false;
+        }
+        let changed = {
+            let sessions = self.sessions.borrow();
+            let root = sessions[dragged].record.project_root.clone();
+            let mut group = sessions
+                .values()
+                .filter(|session| session.record.project_root == root)
+                .map(|session| (session.record.id.clone(), session.record.position))
+                .collect::<Vec<_>>();
+            group.sort_by(|left, right| (left.1, &left.0).cmp(&(right.1, &right.0)));
+            super::sidebar::reordered_positions(&group, dragged, target, before)
+        };
+        if changed.is_empty() {
+            return true;
+        }
+        let mut records = Vec::new();
+        {
+            let mut sessions = self.sessions.borrow_mut();
+            for (id, position) in changed {
+                if let Some(session) = sessions.get_mut(&id) {
+                    session.record.position = position;
+                    records.push(session.record.clone());
+                }
+            }
+        }
+        for record in records {
+            self.persist_record(record);
+        }
+        self.rebuild_sidebar();
+        true
+    }
+
     /// Replaces only the changed middle of the key list, so untouched rows keep focus.
     fn splice_sidebar(&self, keys: &[String]) {
         let model = &self.sidebar_model;

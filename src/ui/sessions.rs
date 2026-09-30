@@ -917,6 +917,63 @@ impl Workspace {
         );
     }
 
+    /// Rows drag their session id; dropping on another row of the same group reorders them.
+    fn enable_session_drag(&self, row: &gtk::ListBoxRow, id: &str) {
+        let source = gtk::DragSource::new();
+        source.set_actions(gtk::gdk::DragAction::MOVE);
+        let drag_id = id.to_owned();
+        source.connect_prepare(move |_, _, _| {
+            Some(gtk::gdk::ContentProvider::for_value(&drag_id.to_value()))
+        });
+        let icon_row = row.clone();
+        source.connect_drag_begin(move |source, _| {
+            let icon = gtk::WidgetPaintable::new(Some(&icon_row));
+            source.set_icon(Some(&icon), 0, 0);
+        });
+        row.add_controller(source);
+
+        let target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+        // Read the id on enter so motion can already refuse rows from other groups.
+        target.set_preload(true);
+        let motion_workspace = self.clone();
+        let motion_id = id.to_owned();
+        target.connect_motion(move |target, _, y| {
+            let Some(row) = target.widget().and_downcast::<gtk::ListBoxRow>() else {
+                return gtk::gdk::DragAction::empty();
+            };
+            let dragged = target.value().and_then(|value| value.get::<String>().ok());
+            let allowed = dragged.is_some_and(|dragged| {
+                motion_workspace.can_reorder_session(&dragged, &motion_id)
+            });
+            if !allowed {
+                clear_drop_marks(&row);
+                return gtk::gdk::DragAction::empty();
+            }
+            let before = drop_before(&row, y);
+            row.remove_css_class(if before { "drop-below" } else { "drop-above" });
+            row.add_css_class(if before { "drop-above" } else { "drop-below" });
+            gtk::gdk::DragAction::MOVE
+        });
+        target.connect_leave(|target| {
+            if let Some(row) = target.widget().and_downcast::<gtk::ListBoxRow>() {
+                clear_drop_marks(&row);
+            }
+        });
+        let drop_workspace = self.clone();
+        let drop_id = id.to_owned();
+        target.connect_drop(move |target, value, _, y| {
+            let Some(row) = target.widget().and_downcast::<gtk::ListBoxRow>() else {
+                return false;
+            };
+            clear_drop_marks(&row);
+            let Ok(dragged) = value.get::<String>() else {
+                return false;
+            };
+            drop_workspace.reorder_session(&dragged, &drop_id, drop_before(&row, y))
+        });
+        row.add_controller(target);
+    }
+
     pub(super) fn attach(
         &self,
         record: SessionRecord,
@@ -1127,6 +1184,7 @@ impl Workspace {
         content.append(&actions);
         row.set_child(Some(&content));
         menus::open_menu_on_right_click(&row, &actions);
+        self.enable_session_drag(&row, &id);
 
         self.sessions.borrow_mut().insert(
             id.clone(),
@@ -1305,6 +1363,16 @@ fn backfill_restored_session_context(
     if record.worktree_path.is_none() {
         record.worktree_path = location.worktree_path;
     }
+}
+
+/// The top half of a row drops before it, the bottom half after it.
+fn drop_before(row: &gtk::ListBoxRow, y: f64) -> bool {
+    y < f64::from(row.height()) / 2.0
+}
+
+fn clear_drop_marks(row: &gtk::ListBoxRow) {
+    row.remove_css_class("drop-above");
+    row.remove_css_class("drop-below");
 }
 
 fn focus_terminal_on_row_activation(row: &gtk::ListBoxRow, terminal: &vte::Terminal) {
