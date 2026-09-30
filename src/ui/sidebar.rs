@@ -62,7 +62,10 @@ pub(super) fn reordered_positions(
     ids.insert(if before { to } else { to + 1 }, dragged);
 
     // Discovered sessions can share a position; make the slots strictly increasing.
-    let mut slots = group.iter().map(|(_, position)| *position).collect::<Vec<_>>();
+    let mut slots = group
+        .iter()
+        .map(|(_, position)| *position)
+        .collect::<Vec<_>>();
     slots.sort_unstable();
     for index in 1..slots.len() {
         slots[index] = slots[index].max(slots[index - 1] + 1);

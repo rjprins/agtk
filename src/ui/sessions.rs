@@ -942,9 +942,8 @@ impl Workspace {
                 return gtk::gdk::DragAction::empty();
             };
             let dragged = target.value().and_then(|value| value.get::<String>().ok());
-            let allowed = dragged.is_some_and(|dragged| {
-                motion_workspace.can_reorder_session(&dragged, &motion_id)
-            });
+            let allowed = dragged
+                .is_some_and(|dragged| motion_workspace.can_reorder_session(&dragged, &motion_id));
             if !allowed {
                 clear_drop_marks(&row);
                 return gtk::gdk::DragAction::empty();
@@ -1116,21 +1115,13 @@ impl Workspace {
         label.add_css_class("session-title");
         primary.append(&label);
         mainline.append(&primary);
-        if let Some(worktree) = record.worktree_path.as_ref().or(record.cwd.as_ref()) {
-            let worktree_name = worktree
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| worktree.to_string_lossy().into_owned());
-            let worktree_label = gtk::Label::new(Some(&worktree_name));
-            worktree_label.set_xalign(0.0);
-            worktree_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-            worktree_label.set_tooltip_text(Some(&worktree.to_string_lossy()));
-            worktree_label.add_css_class("caption");
-            worktree_label.add_css_class("dim-label");
-            mainline.append(&worktree_label);
-        }
+        let worktree_label = gtk::Label::new(None);
+        worktree_label.set_xalign(0.0);
+        worktree_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        worktree_label.add_css_class("caption");
+        worktree_label.add_css_class("dim-label");
+        show_worktree_caption(&worktree_label, &record);
+        mainline.append(&worktree_label);
         content.append(&mainline);
         let elapsed_label = gtk::Label::new(None);
         elapsed_label.add_css_class("caption");
@@ -1147,6 +1138,13 @@ impl Workspace {
         let menu = gio::Menu::new();
         let edit_section = gio::Menu::new();
         edit_section.append_item(&menus::targeted_item("Rename…", "win.session-rename", &id));
+        if record.worktree_path.is_some() || record.cwd.is_some() {
+            edit_section.append_item(&menus::targeted_item(
+                "Change Worktree…",
+                "win.session-worktree",
+                &id,
+            ));
+        }
         if matches!(record.kind, SessionKind::Claude | SessionKind::Codex) {
             edit_section.append_item(&menus::targeted_item(
                 "Resume Conversation",
@@ -1194,6 +1192,7 @@ impl Workspace {
                 page: scroll,
                 row: row.clone(),
                 label,
+                worktree_label,
                 state_label,
                 elapsed_label,
                 history: Vec::new(),
@@ -1212,6 +1211,23 @@ impl Workspace {
         }
         Ok(())
     }
+}
+
+/// Shows the worktree name, or the cwd name for sessions outside a checkout.
+pub(super) fn show_worktree_caption(label: &gtk::Label, record: &SessionRecord) {
+    let Some(worktree) = record.worktree_path.as_ref().or(record.cwd.as_ref()) else {
+        label.set_visible(false);
+        return;
+    };
+    let name = worktree
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| worktree.to_string_lossy().into_owned());
+    label.set_text(&name);
+    label.set_tooltip_text(Some(&worktree.to_string_lossy()));
+    label.set_visible(true);
 }
 
 /// The hyperlink or matched link text under a point, with the tag of the pattern that matched.

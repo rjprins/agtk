@@ -206,6 +206,11 @@ fn every_core_method_decodes_to_a_typed_command() {
             "SessionRename",
         ),
         (
+            "session.set_worktree",
+            r#"{"sessionId":"shell-1","worktreePath":"/work/agtk-fix"}"#,
+            "SessionSetWorktree",
+        ),
+        (
             "session.close",
             r#"{"sessionId":"shell-1","allowMissing":true}"#,
             "SessionClose",

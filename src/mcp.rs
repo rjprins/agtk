@@ -245,6 +245,7 @@ impl<B: ControlBackend> McpServer<B> {
                 })
             }
             "rename_session" => ControlCommand::SessionRename(parse_args(arguments)?),
+            "set_session_worktree" => ControlCommand::SessionSetWorktree(parse_args(arguments)?),
             "open_magit" => ControlCommand::SessionOpenMagit(parse_args(arguments)?),
             "open_branch_review" => ControlCommand::SessionOpenBranchReview(parse_args(arguments)?),
             "list_agent_sessions" => ControlCommand::AgentList(parse_args(arguments)?),
@@ -629,6 +630,15 @@ fn tool_definitions() -> Vec<Value> {
             schema(
                 &[("sessionId", string()), ("name", string())],
                 &["sessionId", "name"],
+            ),
+        ),
+        tool(
+            "set_session_worktree",
+            "Set session worktree",
+            "Associate one session with a Git worktree: sidebar grouping, changes and Emacs follow it. The process keeps its own working directory. Call it with $AGTK_SESSION_ID after moving into a new worktree.",
+            schema(
+                &[("sessionId", string()), ("worktreePath", string())],
+                &["sessionId", "worktreePath"],
             ),
         ),
         tool(

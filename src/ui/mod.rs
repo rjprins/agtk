@@ -61,6 +61,7 @@ mod preferences_ui;
 mod projects_ui;
 mod provider_icons;
 mod search_ui;
+mod session_worktree_ui;
 mod sessions;
 mod shortcuts_ui;
 mod sidebar;
@@ -191,6 +192,8 @@ struct SessionView {
     page: gtk::ScrolledWindow,
     row: gtk::ListBoxRow,
     label: gtk::Label,
+    /// The worktree caption under the title; hidden when the session has no directory.
+    worktree_label: gtk::Label,
     state_label: gtk::Label,
     elapsed_label: gtk::Label,
     history: Vec<String>,

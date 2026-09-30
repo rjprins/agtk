@@ -1308,6 +1308,87 @@ fn sessions_group_by_project_and_worktree_with_durable_project_state() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn a_session_can_move_to_another_worktree_and_keeps_it_across_restart() {
+    let mut app = App::new();
+    let repo = app.directory.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    std::fs::write(repo.join("README.md"), "fixture\n").unwrap();
+    for arguments in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.name", "Agtk Test"],
+        vec!["config", "user.email", "agtk@example.invalid"],
+        vec!["add", "README.md"],
+        vec!["commit", "-m", "fixture"],
+        vec!["worktree", "add", "-b", "fix", "../repo-fix"],
+    ] {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+    let repo = repo.canonicalize().unwrap();
+    let fix = app
+        .directory
+        .path()
+        .join("repo-fix")
+        .canonicalize()
+        .unwrap();
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c", "exec sleep 30"],
+            "cwd":repo,
+            "projectRoot":repo,
+            "worktreePath":repo
+        }),
+    );
+    let id = session["id"].as_str().unwrap().to_owned();
+    assert_eq!(session["name"], "repo");
+
+    let moved = app.request(
+        "session.set_worktree",
+        json!({"sessionId":id,"worktreePath":fix}),
+    );
+    assert_eq!(moved["worktreePath"], fix.to_string_lossy().as_ref());
+    assert_eq!(moved["projectRoot"], repo.to_string_lossy().as_ref());
+    assert_eq!(
+        moved["name"], "repo-fix",
+        "a generated name follows the worktree"
+    );
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(
+        state["worktreeGroups"][0]["path"],
+        fix.to_string_lossy().as_ref()
+    );
+
+    let refused = app.request_body(
+        "session.set_worktree",
+        json!({"sessionId":id,"worktreePath":app.directory.path()}),
+    );
+    assert!(
+        matches!(refused, ResponseBody::Failure(ref error) if error.code == ErrorCode::OperationRefused),
+        "{refused:?}"
+    );
+
+    app.stop();
+    app.start();
+    let state = app.request("app.get_state", json!({}));
+    let recovered = state["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .unwrap();
+    assert_eq!(recovered["worktreePath"], fix.to_string_lossy().as_ref());
+    app.request("session.close", json!({"sessionId":id}));
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn control_api_completes_disposable_worktree_lifecycle() {
     let app = App::new();
     let repo = app.directory.path().join("repo");

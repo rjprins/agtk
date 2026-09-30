@@ -136,6 +136,13 @@ impl Workspace {
             self.rename_session(&session_id, name, Some(pending));
             return;
         }
+        if let ControlCommand::SessionSetWorktree(params) = &pending.request.command
+            && self.sessions.borrow().contains_key(&params.session_id)
+        {
+            let (session_id, path) = (params.session_id.clone(), params.worktree_path.clone());
+            self.set_session_worktree(&session_id, path, Some(pending));
+            return;
+        }
 
         let id = pending.request.id.clone();
         let response = match &pending.request.command {
@@ -321,6 +328,7 @@ impl Workspace {
                 }
             }
             ControlCommand::SessionRename(params) => session_not_found(id, &params.session_id),
+            ControlCommand::SessionSetWorktree(params) => session_not_found(id, &params.session_id),
             ControlCommand::SessionRestart(params) => session_not_found(id, &params.session_id),
             ControlCommand::SessionClose(params) => {
                 if params.allow_missing {

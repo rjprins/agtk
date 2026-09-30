@@ -10,8 +10,8 @@ use agtk::control::{
     ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, GetTextParams, PrAcknowledgeParams,
     ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams, SessionKind,
-    SessionSetStateParams, ShortcutSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
-    WorktreeListParams, WorktreeReapParams,
+    SessionSetStateParams, SetSessionWorktreeParams, ShortcutSetParams, UiShowParams, UiSurface,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -303,6 +303,19 @@ fn session_mutation_commands_have_typed_protocol_mappings() {
         ControlCommand::SessionRename(RenameSessionParams {
             session_id: "shell-42".to_owned(),
             name: "Build".to_owned(),
+        }),
+    );
+    assert_fixture_command(
+        &[
+            "session",
+            "worktree",
+            "shell-42",
+            "--path",
+            "/work/agtk-fix",
+        ],
+        ControlCommand::SessionSetWorktree(SetSessionWorktreeParams {
+            session_id: "shell-42".to_owned(),
+            worktree_path: "/work/agtk-fix".into(),
         }),
     );
     assert_fixture_command(

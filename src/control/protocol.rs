@@ -56,6 +56,7 @@ pub enum ControlCommand {
     SessionSendInput(SendInputParams),
     SessionGetText(GetTextParams),
     SessionRename(RenameSessionParams),
+    SessionSetWorktree(SetSessionWorktreeParams),
     SessionClose(CloseSessionParams),
     SessionRestart(SessionIdParams),
     SessionSetState(SessionSetStateParams),
@@ -127,6 +128,13 @@ pub struct GetTextParams {
 pub struct RenameSessionParams {
     pub session_id: String,
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetSessionWorktreeParams {
+    pub session_id: String,
+    pub worktree_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -571,6 +579,12 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             validate_name(&params.name)?;
             ControlCommand::SessionRename(params)
         }
+        "session.set_worktree" => {
+            let params: SetSessionWorktreeParams = decode_params(wire.params)?;
+            validate_session_id(&params.session_id)?;
+            validate_absolute_path(&params.worktree_path, "worktree path")?;
+            ControlCommand::SessionSetWorktree(params)
+        }
         "session.close" => {
             let params: CloseSessionParams = decode_params(wire.params)?;
             validate_session_id(&params.session_id)?;
@@ -707,6 +721,7 @@ impl ControlCommand {
             Self::SessionSendInput(_) => "session.send_input",
             Self::SessionGetText(_) => "session.get_text",
             Self::SessionRename(_) => "session.rename",
+            Self::SessionSetWorktree(_) => "session.set_worktree",
             Self::SessionClose(_) => "session.close",
             Self::SessionRestart(_) => "session.restart",
             Self::SessionSetState(_) => "session.set_state",
@@ -753,6 +768,9 @@ impl ControlCommand {
             }
             Self::SessionGetText(params) => Ok(("session.get_text", serde_json::to_value(params)?)),
             Self::SessionRename(params) => Ok(("session.rename", serde_json::to_value(params)?)),
+            Self::SessionSetWorktree(params) => {
+                Ok(("session.set_worktree", serde_json::to_value(params)?))
+            }
             Self::SessionClose(params) => Ok(("session.close", serde_json::to_value(params)?)),
             Self::SessionRestart(params) => Ok(("session.restart", serde_json::to_value(params)?)),
             Self::SessionSetState(params) => {

@@ -175,6 +175,9 @@ impl Workspace {
         self.add_target_action("session-rename", |workspace, id| {
             workspace.start_session_rename(id)
         });
+        self.add_target_action("session-worktree", |workspace, id| {
+            workspace.start_session_worktree_change(id)
+        });
         self.add_target_action("session-launch-here", |workspace, id| {
             if let Some((root, worktree)) = workspace.session_launch_target(id) {
                 workspace.open_launch_for_worktree(&root, &worktree);

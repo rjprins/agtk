@@ -30,6 +30,14 @@ pub(crate) fn next_worktree_session_name(
     }
 }
 
+/// Whether `name` is one this module generated for `worktree_path`, so it may follow a move.
+pub(crate) fn follows_worktree_name(name: &str, worktree_path: Option<&Path>) -> bool {
+    worktree_path
+        .and_then(|path| path.file_name())
+        .and_then(|base| base.to_str())
+        .is_some_and(|base| session_name_increment(base, name).is_some())
+}
+
 fn session_name_increment(base: &str, name: &str) -> Option<u64> {
     if name == base {
         return Some(1);
@@ -43,7 +51,7 @@ fn session_name_increment(base: &str, name: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::next_worktree_session_name;
+    use super::{follows_worktree_name, next_worktree_session_name};
     use crate::persist::SessionRecord;
     use std::path::{Path, PathBuf};
 
@@ -85,6 +93,16 @@ mod tests {
             next_worktree_session_name("codex-123", Some(Path::new("/work/agtk")), &sessions,),
             "agtk"
         );
+    }
+
+    #[test]
+    fn only_generated_names_follow_the_worktree() {
+        let worktree = Some(Path::new("/work/agtk"));
+        assert!(follows_worktree_name("agtk", worktree));
+        assert!(follows_worktree_name("agtk 3", worktree));
+        assert!(!follows_worktree_name("agtk 1", worktree));
+        assert!(!follows_worktree_name("PR 12 review", worktree));
+        assert!(!follows_worktree_name("agtk", None));
     }
 
     #[test]

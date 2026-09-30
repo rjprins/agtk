@@ -2,7 +2,10 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
-use agtk::control::{ClaudePresetApplyParams, ControlCommand, PrListParams, SendInputParams};
+use agtk::control::{
+    ClaudePresetApplyParams, ControlCommand, PrListParams, SendInputParams,
+    SetSessionWorktreeParams,
+};
 use agtk::mcp::{ControlBackend, McpServer};
 use serde_json::{Value, json};
 
@@ -63,6 +66,7 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "open_file",
             "kill_session",
             "rename_session",
+            "set_session_worktree",
             "open_magit",
             "open_branch_review",
             "list_agent_sessions",
@@ -140,6 +144,31 @@ fn send_input_maps_to_the_typed_local_control_protocol() {
             text: "hello".to_owned(),
             append_enter: true,
         })]
+    );
+}
+
+#[test]
+fn setting_a_session_worktree_maps_to_the_typed_local_control_protocol() {
+    let mut server = McpServer::new(MockBackend::default());
+    let response = server
+        .handle(request(
+            8,
+            "tools/call",
+            json!({
+                "name":"set_session_worktree",
+                "arguments":{"sessionId":"session-1","worktreePath":"/work/agtk-fix"}
+            }),
+        ))
+        .unwrap();
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        [ControlCommand::SessionSetWorktree(
+            SetSessionWorktreeParams {
+                session_id: "session-1".to_owned(),
+                worktree_path: "/work/agtk-fix".into(),
+            }
+        )]
     );
 }
 

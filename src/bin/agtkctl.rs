@@ -12,9 +12,9 @@ use agtk::control::{
     ControlClient, ControlCommand, ControlRequest, CreateSessionParams, ErrorCode, GetTextParams,
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectSetParams, RenameSessionParams, ResponseBody, SendInputParams,
-    SessionIdParams, SessionKind, SessionSetStateParams, SessionState, ShortcutSetParams,
-    UiDiffScope, UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WaitCondition,
-    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
+    SessionIdParams, SessionKind, SessionSetStateParams, SessionState, SetSessionWorktreeParams,
+    ShortcutSetParams, UiDiffScope, UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface,
+    WaitCondition, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agtk::instance::{InstanceName, InstancePaths};
 use agtk::providers::AgentProvider;
@@ -438,6 +438,15 @@ fn parse_session_command(action: &str, arguments: &[String]) -> Result<ControlCo
                     name: name.clone(),
                 }))
             }
+            _ => Err(usage_failure()),
+        },
+        "worktree" => match arguments {
+            [session_id, flag, path] if flag == "--path" => Ok(ControlCommand::SessionSetWorktree(
+                SetSessionWorktreeParams {
+                    session_id: session_id.clone(),
+                    worktree_path: path.into(),
+                },
+            )),
             _ => Err(usage_failure()),
         },
         "close" => match arguments {
@@ -1039,7 +1048,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session restart ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes and files, SCOPE is all|staged|unstaged|untracked|committed|commit)"
+    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes and files, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {
