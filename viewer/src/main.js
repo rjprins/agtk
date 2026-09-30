@@ -24,6 +24,8 @@ import 'monaco-editor/languages/definitions/typescript/register';
 import 'monaco-editor/languages/definitions/xml/register';
 import 'monaco-editor/languages/definitions/yaml/register';
 import 'monaco-editor/languages/features/json/register';
+// The diff markers use the icon font. Without this it only loads with the JSON chunk.
+import 'monaco-editor/features/codicon/register';
 
 import { languageForPath } from './language.js';
 import './style.css';
