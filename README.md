@@ -1,5 +1,13 @@
 # agtk
 
+## Why I made this
+
+I run several coding agents at the same time, each in its own worktree. Keeping them in separate terminal tabs did not work: I lost track of which agent was waiting for me, and of what each one had changed.
+
+agtk was inspired by [Orca](https://github.com/stablyai/orca). Orca puts the worktree first, and you work from there. I wanted the agent sessions first: which ones need me now, what they did, and where they run. The worktree is context for a session, not the other way round.
+
+## What it is
+
 agtk is a coding agent manager for GNOME. It runs Claude Code, Codex, Gemini and plain shells in one native window, grouped by project and git worktree.
 
 ![agtk with an agent session and the Changes sidebar](docs/screenshot.png)
