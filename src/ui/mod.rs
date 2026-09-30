@@ -160,6 +160,7 @@ struct Workspace {
     pr_poll_io: IoWorker,
     /// Poll steps still running; a new poll waits until this is zero.
     pr_polls: Rc<Cell<usize>>,
+    pr_polled_at: Rc<Cell<Option<std::time::Instant>>>,
     /// Sidebar project roots that were checked, with the PR state key of the Azure DevOps ones.
     azure_projects: Rc<RefCell<HashMap<String, Option<String>>>>,
     // Bumped on each session selection so queued PR lookups for older selections skip.
@@ -609,6 +610,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         slow_io: IoWorker::default(),
         pr_poll_io: IoWorker::default(),
         pr_polls: Rc::new(Cell::new(0)),
+        pr_polled_at: Rc::new(Cell::new(None)),
         azure_projects: Rc::new(RefCell::new(HashMap::new())),
         pr_context_generation: Arc::new(AtomicU64::new(0)),
         store: Rc::new(RefCell::new(None)),

@@ -26,7 +26,7 @@ struct PreloadedPrContext {
 }
 
 /// How often the sidebar's PR buttons look for new activity.
-const PR_POLL_INTERVAL: Duration = Duration::from_secs(60);
+const PR_POLL_INTERVAL: Duration = Duration::from_secs(120);
 
 /// Widest the PR list grows inside the dialog.
 const PR_CONTENT_WIDTH: i32 = 1400;
@@ -110,10 +110,15 @@ impl PrDialog {
 impl Workspace {
     pub(super) fn connect_prs(&self) {
         let workspace = self.clone();
-        glib::timeout_add_local(PR_POLL_INTERVAL, move || {
-            workspace.poll_pull_requests();
+        // Tick faster than the interval so a poll is never a whole round late.
+        glib::timeout_add_local(PR_POLL_INTERVAL / 4, move || {
+            workspace.poll_pull_requests_if_focused();
             glib::ControlFlow::Continue
         });
+        // Catch up when the user comes back after the polls were paused.
+        let workspace = self.clone();
+        self.window
+            .connect_is_active_notify(move |_| workspace.poll_pull_requests_if_focused());
         let workspace = self.clone();
         self.prs
             .refresh
@@ -900,11 +905,28 @@ impl Workspace {
         roots.iter().any(|root| !projects.contains_key(root))
     }
 
+    /// Polls pause while no agtk window has focus, and never run more often than the interval.
+    fn poll_pull_requests_if_focused(&self) {
+        let focused = self
+            .application
+            .windows()
+            .iter()
+            .any(|window| window.is_active());
+        let due = self
+            .pr_polled_at
+            .get()
+            .is_none_or(|polled_at| polled_at.elapsed() >= PR_POLL_INTERVAL);
+        if focused && due {
+            self.poll_pull_requests();
+        }
+    }
+
     /// Finds the Azure DevOps projects in the sidebar and refreshes their PR attention.
     pub(super) fn poll_pull_requests(&self) {
         if self.store.borrow().is_none() || self.pr_polls.get() > 0 {
             return;
         }
+        self.pr_polled_at.set(Some(std::time::Instant::now()));
         let roots = self
             .project_summaries()
             .into_iter()
