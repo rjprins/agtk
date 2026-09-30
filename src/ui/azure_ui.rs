@@ -24,6 +24,9 @@ struct PreloadedPrContext {
     context: PrContext,
 }
 
+/// Widest the PR list grows inside the dialog.
+const PR_CONTENT_WIDTH: i32 = 1400;
+
 /// The pull request dialog for one Azure DevOps project.
 #[derive(Clone)]
 pub(super) struct PrDialog {
@@ -65,14 +68,28 @@ impl PrDialog {
         active.set_header_suffix(Some(&loading));
         active.add(&list);
 
-        let page = adw::PreferencesPage::new();
-        page.add(&project);
-        page.add(&active);
+        // A preferences page caps its content at 600px, which wraps the PR titles.
+        let groups = gtk::Box::new(gtk::Orientation::Vertical, 24);
+        groups.append(&project);
+        groups.append(&active);
+        let clamp = adw::Clamp::builder()
+            .maximum_size(PR_CONTENT_WIDTH)
+            .tightening_threshold(PR_CONTENT_WIDTH)
+            .margin_top(24)
+            .margin_bottom(24)
+            .margin_start(12)
+            .margin_end(12)
+            .child(&groups)
+            .build();
+        let page = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&clamp)
+            .build();
         let refresh = gtk::Button::builder()
             .icon_name("view-refresh-symbolic")
             .tooltip_text("Refresh active pull requests")
             .build();
-        let modal = modal::Modal::new(parent, "Pull Requests", 900, 720, &page);
+        let modal = modal::Modal::new(parent, "Pull Requests", 1200, 720, &page);
         modal.header().pack_start(&refresh);
         Self {
             modal,
