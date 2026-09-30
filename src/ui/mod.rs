@@ -848,12 +848,13 @@ impl Workspace {
             if let Some(row) = row {
                 self.list.select_row(Some(&row));
             } else if let Some(fallback_id) = fallback {
-                if let Some(row) = self
+                // Release the borrow first: selecting a row re-enters the sessions map.
+                let row = self
                     .sessions
                     .borrow()
                     .get(&fallback_id)
-                    .map(|session| session.row.clone())
-                {
+                    .map(|session| session.row.clone());
+                if let Some(row) = row {
                     self.list.select_row(Some(&row));
                 }
             } else {

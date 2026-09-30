@@ -1076,12 +1076,13 @@ impl Workspace {
                     let workspace = self.clone();
                     let session_id = session_id.clone();
                     button.connect_clicked(move |_| {
-                        if let Some(row) = workspace
+                        // Release the borrow first: selecting a row re-enters the sessions map.
+                        let row = workspace
                             .sessions
                             .borrow()
                             .get(&session_id)
-                            .map(|s| s.row.clone())
-                        {
+                            .map(|s| s.row.clone());
+                        if let Some(row) = row {
                             workspace.list.select_row(Some(&row));
                         }
                         workspace.activate_session(&session_id);
