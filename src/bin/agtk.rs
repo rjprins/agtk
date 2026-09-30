@@ -1,12 +1,12 @@
 use adw::prelude::*;
-use agmux_native::instance::{InstanceName, InstancePaths};
-use agmux_native::ui;
+use agtk::instance::{InstanceName, InstancePaths};
+use agtk::ui;
 
 fn main() -> glib::ExitCode {
     let instance = match InstanceName::from_environment() {
         Ok(instance) => instance,
         Err(error) => {
-            eprintln!("Invalid AGMUX_INSTANCE: {error}");
+            eprintln!("Invalid AGTK_INSTANCE: {error}");
             return glib::ExitCode::FAILURE;
         }
     };

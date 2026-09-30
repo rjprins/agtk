@@ -12,15 +12,15 @@ use code_viewer::{CodeViewer, ViewerEvent};
 use webkit6::prelude::*;
 
 fn main() -> glib::ExitCode {
-    let display = std::env::var("AGMUX_TEST_DISPLAY")
-        .expect("AGMUX_TEST_DISPLAY must name the private Wayland socket before GTK starts");
+    let display = std::env::var("AGTK_TEST_DISPLAY")
+        .expect("AGTK_TEST_DISPLAY must name the private Wayland socket before GTK starts");
     assert!(
         PathBuf::from(display).is_absolute(),
-        "AGMUX_TEST_DISPLAY must be an absolute path"
+        "AGTK_TEST_DISPLAY must be an absolute path"
     );
 
     let app = adw::Application::builder()
-        .application_id("nl.rutger.AgmuxNative.ChangesViewerPreview")
+        .application_id("nl.rutger.Agtk.ChangesViewerPreview")
         .build();
     app.connect_activate(|app| {
         let viewer = Rc::new(CodeViewer::new(|event| match &event {
@@ -62,9 +62,9 @@ fn main() -> glib::ExitCode {
 
         let viewer = viewer.clone();
         let app = app.clone();
-        let capture_path = std::env::var_os("AGMUX_DIFF_CAPTURE")
+        let capture_path = std::env::var_os("AGTK_DIFF_CAPTURE")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp/agmux-diff-viewer-preview.png"));
+            .unwrap_or_else(|| PathBuf::from("/tmp/agtk-diff-viewer-preview.png"));
         glib::timeout_add_local_once(Duration::from_secs(5), move || {
             // The app never captures the viewer, so the preview snapshots the WebView itself.
             let web_view = viewer

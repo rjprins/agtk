@@ -1,9 +1,9 @@
-use agmux_native::appearance::ThemeKey;
-use agmux_native::control::{
+use agtk::appearance::ThemeKey;
+use agtk::control::{
     AppState, AppearanceSummary, AttentionSummary, Bounds, CaptureResult, SessionKind,
     SessionState, SessionSummary, ShortcutSummary, TextSnapshot, UiInspection, UiNode, WindowState,
 };
-use agmux_native::shortcuts::ShortcutAction;
+use agtk::shortcuts::ShortcutAction;
 
 #[test]
 fn application_state_has_a_stable_machine_readable_shape() {
@@ -30,15 +30,15 @@ fn application_state_has_a_stable_machine_readable_shape() {
             width: 1200,
             height: 800,
         },
-        projects: vec![agmux_native::control::ProjectSummary {
-            root: "/work/agmux".to_owned(),
-            name: "agmux".to_owned(),
+        projects: vec![agtk::control::ProjectSummary {
+            root: "/work/agtk".to_owned(),
+            name: "agtk".to_owned(),
             is_pinned: true,
             is_collapsed: false,
         }],
-        worktree_groups: vec![agmux_native::control::WorktreeGroupSummary {
-            project_root: "/work/agmux".to_owned(),
-            path: "/work/agmux-feature".to_owned(),
+        worktree_groups: vec![agtk::control::WorktreeGroupSummary {
+            project_root: "/work/agtk".to_owned(),
+            path: "/work/agtk-feature".to_owned(),
             branch: "feature".to_owned(),
             session_ids: vec!["shell-1".to_owned()],
         }],
@@ -85,14 +85,14 @@ fn application_state_has_a_stable_machine_readable_shape() {
             }],
             "window": { "width": 1200, "height": 800 },
             "projects": [{
-                "root": "/work/agmux",
-                "name": "agmux",
+                "root": "/work/agtk",
+                "name": "agtk",
                 "isPinned": true,
                 "isCollapsed": false
             }],
             "worktreeGroups": [{
-                "projectRoot": "/work/agmux",
-                "path": "/work/agmux-feature",
+                "projectRoot": "/work/agtk",
+                "path": "/work/agtk-feature",
                 "branch": "feature",
                 "sessionIds": ["shell-1"]
             }],
@@ -138,7 +138,7 @@ fn terminal_text_snapshot_has_truncation_metadata() {
 #[test]
 fn capture_result_identifies_the_private_png_and_its_digest() {
     let result = CaptureResult {
-        path: "/run/user/1000/agmux-native/test/captures/capture-1.png".into(),
+        path: "/run/user/1000/agtk/test/captures/capture-1.png".into(),
         width: 1200,
         height: 800,
         sha256: "abc123".to_owned(),
@@ -147,7 +147,7 @@ fn capture_result_identifies_the_private_png_and_its_digest() {
     assert_eq!(
         serde_json::to_value(result).expect("serialize capture result"),
         serde_json::json!({
-            "path": "/run/user/1000/agmux-native/test/captures/capture-1.png",
+            "path": "/run/user/1000/agtk/test/captures/capture-1.png",
             "width": 1200,
             "height": 800,
             "sha256": "abc123"
@@ -161,7 +161,7 @@ fn ui_inspection_describes_controls_without_terminal_or_clipboard_content() {
         root: UiNode {
             id: "main-window".to_owned(),
             role: "window".to_owned(),
-            label: Some("agmux native".to_owned()),
+            label: Some("agtk".to_owned()),
             is_visible: true,
             is_enabled: true,
             is_selected: false,

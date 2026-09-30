@@ -1,4 +1,4 @@
-//! Shared domain and session-lifecycle code for agmux native.
+//! Shared domain and session-lifecycle code for agtk.
 
 pub mod agent_hooks;
 pub mod agent_status;

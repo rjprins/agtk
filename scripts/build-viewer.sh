@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 viewer_dir="$repo_root/viewer"
-build_stamp="$viewer_dir/dist/.agmux-viewer-build"
+build_stamp="$viewer_dir/dist/.agtk-viewer-build"
 needs_build=0
 
 if [[ ! -d "$viewer_dir/node_modules" ]]; then

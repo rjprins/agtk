@@ -1,13 +1,13 @@
-# agmux native
+# agtk
 
-agmux native is a personal, one-window workspace for terminal coding agents on Linux, Wayland, and GNOME. It keeps the useful shape of the original agmux, with grouped sessions in a persistent sidebar and one visible terminal, while replacing the browser terminal, WebSocket bridge, and tmux layer with GTK4 and VTE.
+agtk is a personal, one-window workspace for terminal coding agents on Linux, Wayland, and GNOME. It keeps the useful shape of the original agmux, with grouped sessions in a persistent sidebar and one visible terminal, while replacing the browser terminal, WebSocket bridge, and tmux layer with GTK4 and VTE.
 
 The application uses four cooperating binaries:
 
-- `agmux-native` owns the GTK workspace and VTE terminals.
-- `agmux-session` owns one PTY and child process independently of the UI.
-- `agmuxctl` exposes the versioned local control socket as machine-readable commands.
-- `agmux-mcp` maps MCP tools to that same control protocol.
+- `agtk` owns the GTK workspace and VTE terminals.
+- `agtk-session` owns one PTY and child process independently of the UI.
+- `agtkctl` exposes the versioned local control socket as machine-readable commands.
+- `agtk-mcp` maps MCP tools to that same control protocol.
 
 Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. Reopening it discovers and reattaches those hosts. Machine reboot survival and durable terminal scrollback are intentionally out of scope.
 
@@ -30,7 +30,7 @@ Closing, crashing, or rebuilding the GTK process does not stop hosted sessions. 
 - Restart Agent in the row menu stops an agent and resumes its conversation in the same row with the same launch flags, so an updated Claude or Codex takes over. Restart Idle Agents in the main menu does this for every agent between turns and leaves busy ones running. An agent that has not taken a turn yet starts fresh.
 - Configurable Claude model and effort presets that send the native `/model` and `/effort` commands
 - Emacs Magit and branch-review integration for the selected session
-- Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in the agmux file viewer at that line, or a URL to open it in the browser. The viewer's editor button opens the file in Emacs. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select. Ctrl+click opens immediately.
+- Click a file path in terminal output, such as `src/main.rs:42:7`, to open it in the agtk file viewer at that line, or a URL to open it in the browser. The viewer's editor button opens the file in Emacs. Paths resolve against the shell's current directory and the repository root. A plain click opens after the double-click delay so drags and double-clicks still select. Ctrl+click opens immediately.
 - Azure DevOps PR attention, exact acknowledgement, source-worktree matching, manual review launch, and per-project opt-in auto-review
 - App-only PNG capture and structural UI inspection for isolated agent-driven testing
 - Local CLI and MCP control without exposing a network listener
@@ -56,16 +56,16 @@ From a checkout, start the workspace with:
 ```
 
 The script incrementally builds every cooperating debug binary and forwards any
-arguments to `agmux-native`. Build and run manually when needed:
+arguments to `agtk`. Build and run manually when needed:
 
 ```sh
 cargo build --bins
-./target/debug/agmux-native
+./target/debug/agtk
 ```
 
-The development UI finds `agmux-session` beside its own executable. Runtime sockets live below `$XDG_RUNTIME_DIR/agmux-native/default`. Durable metadata lives below `$XDG_STATE_HOME/agmux-native/default`, or `~/.local/state` when `XDG_STATE_HOME` is unset.
+The development UI finds `agtk-session` beside its own executable. Runtime sockets live below `$XDG_RUNTIME_DIR/agtk/default`. Durable metadata lives below `$XDG_STATE_HOME/agtk/default`, or `~/.local/state` when `XDG_STATE_HOME` is unset.
 
-Useful executable overrides are `AGMUX_CODEX_BIN`, `AGMUX_CLAUDE_BIN`, `AGMUX_EMACSCLIENT`, and `AGMUX_AZURE_BIN`.
+Useful executable overrides are `AGTK_CODEX_BIN`, `AGTK_CLAUDE_BIN`, `AGTK_EMACSCLIENT`, and `AGTK_AZURE_BIN`.
 
 ## Local installation
 
@@ -87,7 +87,7 @@ Rerun the installer to upgrade the four binaries, desktop entry, and app icon in
 ./scripts/uninstall-local.sh
 ```
 
-Uninstalling preserves runtime and saved workspace data. After installation, launch “agmux native” from the GNOME overview or run `~/.local/bin/agmux-native`. Startup diagnostics written to stdout or stderr by a desktop launch are available in the user journal.
+Uninstalling preserves runtime and saved workspace data. After installation, launch “agtk” from the GNOME overview or run `~/.local/bin/agtk`. Startup diagnostics written to stdout or stderr by a desktop launch are available in the user journal.
 
 ## Keyboard contract
 
@@ -123,38 +123,38 @@ scripts/ui-preview.sh              # capture the main window and every dialog
 scripts/ui-preview.sh --dark launch
 ```
 
-The script starts a private headless mutter compositor and an isolated instance with demo sessions, a demo repository, fake providers, and a fake Azure CLI. It prints the PNG paths. `--keep` leaves the instance running for `agmuxctl`. The same compositor can run the UI test suite through `AGMUX_TEST_DISPLAY`.
+The script starts a private headless mutter compositor and an isolated instance with demo sessions, a demo repository, fake providers, and a fake Azure CLI. It prints the PNG paths. `--keep` leaves the instance running for `agtkctl`. The same compositor can run the UI test suite through `AGTK_TEST_DISPLAY`.
 
 ## Local control
 
-`agmuxctl` prints JSON to stdout. It accepts `--instance NAME` before the command, which keeps automated instances separate from the live `default` instance.
+`agtkctl` prints JSON to stdout. It accepts `--instance NAME` before the command, which keeps automated instances separate from the live `default` instance.
 
 ```sh
-agmuxctl state
-agmuxctl session create --kind codex --cwd /absolute/project
-agmuxctl session text SESSION_ID --lines 200
-agmuxctl session restart SESSION_ID
-agmuxctl ui inspect
-agmuxctl ui capture
-agmuxctl ui show pull-requests
-agmuxctl ui show changes
-agmuxctl ui diff SESSION_ID --scope unstaged --path src/main.rs
-agmuxctl pr list /absolute/project
-agmuxctl pr review /absolute/project 1234
-agmuxctl claude presets
-agmuxctl claude apply SESSION_ID opus-high
+agtkctl state
+agtkctl session create --kind codex --cwd /absolute/project
+agtkctl session text SESSION_ID --lines 200
+agtkctl session restart SESSION_ID
+agtkctl ui inspect
+agtkctl ui capture
+agtkctl ui show pull-requests
+agtkctl ui show changes
+agtkctl ui diff SESSION_ID --scope unstaged --path src/main.rs
+agtkctl pr list /absolute/project
+agtkctl pr review /absolute/project 1234
+agtkctl claude presets
+agtkctl claude apply SESSION_ID opus-high
 ```
 
-Hosted agent processes receive `AGMUX_INSTANCE`, `AGMUX_SESSION_ID`, and `AGMUX_CONTROL_SOCKET`. A provider hook can report explicit readiness with:
+Hosted agent processes receive `AGTK_INSTANCE`, `AGTK_SESSION_ID`, and `AGTK_CONTROL_SOCKET`. A provider hook can report explicit readiness with:
 
 ```sh
-agmuxctl session state "$AGMUX_SESSION_ID" busy
-agmuxctl session state "$AGMUX_SESSION_ID" waiting
-agmuxctl session state "$AGMUX_SESSION_ID" ready
-agmuxctl session state "$AGMUX_SESSION_ID" idle
+agtkctl session state "$AGTK_SESSION_ID" busy
+agtkctl session state "$AGTK_SESSION_ID" waiting
+agtkctl session state "$AGTK_SESSION_ID" ready
+agtkctl session state "$AGTK_SESSION_ID" idle
 ```
 
-Add `--hook-input` when the command runs as a Claude Code hook. agmuxctl then reads the hook's JSON from stdin and records its `session_id`, so agmux knows which conversation the session holds and leaves it out of the Resume Session list.
+Add `--hook-input` when the command runs as a Claude Code hook. agtkctl then reads the hook's JSON from stdin and records its `session_id`, so agtk knows which conversation the session holds and leaves it out of the Resume Session list.
 
 ### Agent states
 
@@ -167,7 +167,7 @@ Add `--hook-input` when the command runs as a Claude Code hook. agmuxctl then re
 
 Selecting a ready session, or finishing a turn while you look at it, marks it viewed. The timer shows how long the session has been in its state.
 
-Claude sessions launch with `--settings` pointing at generated hooks that call `agmuxctl session state`, so no global Claude configuration is needed. Codex and Gemini sessions are read from the screen once a second, using status rules ported from [agent-manager](https://github.com/YoanWai/agent-manager). The screen also corrects Claude hooks where they cannot see, such as an Esc interrupt or a dialog after a turn ended. Submitted input marks agent sessions busy.
+Claude sessions launch with `--settings` pointing at generated hooks that call `agtkctl session state`, so no global Claude configuration is needed. Codex and Gemini sessions are read from the screen once a second, using status rules ported from [agent-manager](https://github.com/YoanWai/agent-manager). The screen also corrects Claude hooks where they cannot see, such as an Esc interrupt or a dialog after a turn ended. Submitted input marks agent sessions busy.
 
 ## MCP
 
@@ -176,8 +176,8 @@ An MCP client can start the adapter as a local stdio server:
 ```json
 {
   "mcpServers": {
-    "agmux-native": {
-      "command": "/home/rutger/.local/bin/agmux-mcp",
+    "agtk": {
+      "command": "/home/rutger/.local/bin/agtk-mcp",
       "args": ["--instance", "default"]
     }
   }
@@ -194,7 +194,7 @@ cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 ```
 
-The ignored `native_ui` suite requires a private Wayland compositor through `AGMUX_TEST_DISPLAY`. It creates isolated runtime and state roots and never attaches to the live instance.
+The ignored `native_ui` suite requires a private Wayland compositor through `AGTK_TEST_DISPLAY`. It creates isolated runtime and state roots and never attaches to the live instance.
 
 ## Adoption status
 

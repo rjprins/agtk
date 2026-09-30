@@ -1,10 +1,10 @@
-use agmux_native::control::{SessionKind, SessionState};
-use agmux_native::persist::{SessionRecord, Store};
+use agtk::control::{SessionKind, SessionState};
+use agtk::persist::{SessionRecord, Store};
 
 #[test]
 fn session_identity_associations_order_and_preferences_survive_reopen() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state/agmux.db");
+    let path = dir.path().join("state/agtk.db");
     let mut record = SessionRecord::discovered("session-a", dir.path().join("a.sock"));
     record.name = "Review native UI".into();
     record.kind = SessionKind::Codex;
@@ -33,7 +33,7 @@ fn session_identity_associations_order_and_preferences_survive_reopen() {
 #[test]
 fn refuses_a_database_from_a_newer_application_without_modifying_it() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("agmux.db");
+    let path = dir.path().join("agtk.db");
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.pragma_update(None, "user_version", 999).unwrap();
     drop(conn);

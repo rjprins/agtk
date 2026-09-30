@@ -12,10 +12,10 @@ use webkit6::{
     WebView,
 };
 
-const SCHEME: &str = "agmux-diff";
-const ORIGIN: &str = "agmux-diff://viewer/";
-const RESOURCE_PREFIX: &str = "/nl/rutger/AgmuxNative/viewer/";
-const MESSAGE_HANDLER: &str = "agmux";
+const SCHEME: &str = "agtk-diff";
+const ORIGIN: &str = "agtk-diff://viewer/";
+const RESOURCE_PREFIX: &str = "/nl/rutger/Agtk/viewer/";
+const MESSAGE_HANDLER: &str = "agtk";
 const MAX_EVENT_BYTES: usize = 32 * 1024;
 const MAX_DIFF_BYTES: usize = 4 * 1024 * 1024 + MAX_EVENT_BYTES;
 
@@ -178,7 +178,7 @@ impl CodeViewer {
             false
         });
         web_view.connect_create(|_, _| None);
-        web_view.load_uri("agmux-diff://viewer/index.html");
+        web_view.load_uri("agtk-diff://viewer/index.html");
 
         Self { web_view, state }
     }
@@ -302,26 +302,26 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             args.insert("line", line);
             args.insert("column", column.unwrap_or(0));
             (
-                "window.agmuxViewer.reveal(line, column)".to_owned(),
+                "window.agtkViewer.reveal(line, column)".to_owned(),
                 Some(args.end()),
             )
         }
-        ViewerCommand::Clear => ("window.agmuxViewer.clear()".to_owned(), None),
+        ViewerCommand::Clear => ("window.agtkViewer.clear()".to_owned(), None),
         ViewerCommand::Find { query, next } => {
             let args = glib::VariantDict::new(None);
             args.insert("query", query);
             args.insert("next", next);
             (
-                "window.agmuxViewer.find(query, next)".to_owned(),
+                "window.agtkViewer.find(query, next)".to_owned(),
                 Some(args.end()),
             )
         }
-        ViewerCommand::Copy => ("window.agmuxViewer.copySelection()".to_owned(), None),
+        ViewerCommand::Copy => ("window.agtkViewer.copySelection()".to_owned(), None),
         ViewerCommand::PreviousChange => {
-            ("window.agmuxViewer.moveToChange(false)".to_owned(), None)
+            ("window.agtkViewer.moveToChange(false)".to_owned(), None)
         }
-        ViewerCommand::NextChange => ("window.agmuxViewer.moveToChange(true)".to_owned(), None),
-        ViewerCommand::SaveViewState => ("window.agmuxViewer.saveViewState()".to_owned(), None),
+        ViewerCommand::NextChange => ("window.agtkViewer.moveToChange(true)".to_owned(), None),
+        ViewerCommand::SaveViewState => ("window.agtkViewer.saveViewState()".to_owned(), None),
         ViewerCommand::SetAppearance {
             theme,
             font_family,
@@ -332,7 +332,7 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             args.insert("fontFamily", font_family);
             args.insert("fontSize", font_size);
             (
-                "window.agmuxViewer.setAppearance(theme, fontFamily, fontSize)".to_owned(),
+                "window.agtkViewer.setAppearance(theme, fontFamily, fontSize)".to_owned(),
                 Some(args.end()),
             )
         }
@@ -360,9 +360,9 @@ fn document_args(json: String) -> glib::Variant {
 /// Parses the document in the page so a bad payload reports an error event instead of failing silently.
 fn show_script(function: &str) -> String {
     format!(
-        "try {{ const data = JSON.parse(documentJson); window.agmuxViewer.{function}(data); }} \
+        "try {{ const data = JSON.parse(documentJson); window.agtkViewer.{function}(data); }} \
          catch (error) {{ let requestId = null; try {{ requestId = JSON.parse(documentJson).requestId; }} catch (_) {{}} \
-         window.webkit?.messageHandlers?.agmux?.postMessage({{ type: 'error', requestId, message: String(error).slice(0, 2048) }}); }}"
+         window.webkit?.messageHandlers?.agtk?.postMessage({{ type: 'error', requestId, message: String(error).slice(0, 2048) }}); }}"
     )
 }
 

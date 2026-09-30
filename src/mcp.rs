@@ -17,7 +17,7 @@ use crate::providers::AgentProvider;
 
 pub const MODERN_MCP_VERSION: &str = "2026-07-28";
 pub const LEGACY_MCP_VERSION: &str = "2025-11-25";
-const SERVER_NAME: &str = "agmux-native";
+const SERVER_NAME: &str = "agtk";
 const MAX_MCP_MESSAGE_BYTES: usize = 1024 * 1024;
 const MAX_CAPTURE_BYTES: u64 = 32 * 1024 * 1024;
 const SUPPORTED_VERSIONS: [&str; 5] = [
@@ -267,7 +267,7 @@ impl<B: ControlBackend> McpServer<B> {
                 return Ok(ToolOutput::Capture { value, data });
             }
             "set_session_state" => ControlCommand::SessionSetState(parse_args(arguments)?),
-            _ => return Err(format!("unknown agmux tool: {name}")),
+            _ => return Err(format!("unknown agtk tool: {name}")),
         };
         let value = self.backend.call(command)?;
         let value = match name {
@@ -470,11 +470,11 @@ fn capture_data(value: &Value) -> Result<String, String> {
 }
 
 fn server_info() -> Value {
-    json!({"name":SERVER_NAME,"title":"agmux native","version":env!("CARGO_PKG_VERSION")})
+    json!({"name":SERVER_NAME,"title":"agtk","version":env!("CARGO_PKG_VERSION")})
 }
 
 fn server_instructions() -> &'static str {
-    "Controls one named local agmux-native instance. Use exact session IDs, inspect before mutation, and only close disposable or explicitly targeted sessions."
+    "Controls one named local agtk instance. Use exact session IDs, inspect before mutation, and only close disposable or explicitly targeted sessions."
 }
 
 fn error_code_name(code: crate::control::ErrorCode) -> &'static str {
@@ -576,7 +576,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "open_diff",
             "Open file diff",
-            "Open a read-only diff from the selected agent worktree in agmux.",
+            "Open a read-only diff from the selected agent worktree in agtk.",
             schema(
                 &[
                     ("sessionId", string()),
@@ -600,7 +600,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "open_file",
             "Open file",
-            "Show a worktree file read-only in agmux, at an optional line and column.",
+            "Show a worktree file read-only in agtk, at an optional line and column.",
             schema(
                 &[
                     ("sessionId", string()),
@@ -783,7 +783,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "inspect_ui",
             "Inspect UI",
-            "Return the bounded logical agmux widget tree without terminal or clipboard contents.",
+            "Return the bounded logical agtk widget tree without terminal or clipboard contents.",
             empty_schema(),
         ),
         tool(

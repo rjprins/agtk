@@ -10,7 +10,7 @@ impl ChromeStyle {
     pub(super) fn install(display: &gtk::gdk::Display) -> Self {
         let provider = gtk::CssProvider::new();
         provider.connect_parsing_error(|_, section, error| {
-            eprintln!("agmux CSS error at {section:?}: {error}");
+            eprintln!("agtk CSS error at {section:?}: {error}");
         });
         gtk::style_context_add_provider_for_display(
             display,

@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=agmux native
+Name=agtk
 Comment=One-window workspace for terminal coding agents
-Exec=@BINDIR@/agmux-native
-TryExec=@BINDIR@/agmux-native
-Icon=nl.rutger.AgmuxNative
+Exec=@BINDIR@/agtk
+TryExec=@BINDIR@/agtk
+Icon=nl.rutger.Agtk
 Terminal=false
 Categories=Development;
 Keywords=terminal;codex;claude;agent;worktree;
 StartupNotify=true
-StartupWMClass=nl.rutger.AgmuxNative
+StartupWMClass=nl.rutger.Agtk

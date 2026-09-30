@@ -1,4 +1,4 @@
-use agmux_native::terminal_text::{bounded_terminal_text, cleanup_copied_text, copyable_selection};
+use agtk::terminal_text::{bounded_terminal_text, cleanup_copied_text, copyable_selection};
 
 #[test]
 fn copyable_selection_returns_cleaned_text_only_for_nonempty_selections() {

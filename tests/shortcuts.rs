@@ -1,4 +1,4 @@
-use agmux_native::shortcuts::{ShortcutAction, ShortcutPreferences};
+use agtk::shortcuts::{ShortcutAction, ShortcutPreferences};
 
 #[test]
 fn shortcut_defaults_preserve_the_approved_keyboard_contract() {

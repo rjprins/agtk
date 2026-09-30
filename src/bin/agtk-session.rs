@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use agmux_native::session::run_session_host;
+use agtk::session::run_session_host;
 use nix::unistd::setsid;
 
 fn main() -> ExitCode {
@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     }) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("agmux-session: {error}");
+            eprintln!("agtk-session: {error}");
             ExitCode::FAILURE
         }
     }
@@ -25,7 +25,7 @@ fn parse_args() -> std::io::Result<(PathBuf, Vec<String>)> {
     if args.next().as_deref() != Some("--socket") {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "usage: agmux-session --socket PATH -- COMMAND [ARG...]",
+            "usage: agtk-session --socket PATH -- COMMAND [ARG...]",
         ));
     }
     let socket_path = args.next().map(PathBuf::from).ok_or_else(|| {

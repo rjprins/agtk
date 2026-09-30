@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agmux_native::session::receive_attachment;
+use agtk::session::receive_attachment;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
@@ -27,7 +27,7 @@ fn session_host_preserves_x11_clipboard_access_on_wayland() {
             "printf 'wayland:%s:%s\\n' \"$WAYLAND_DISPLAY\" \"$XDG_RUNTIME_DIR\"; ",
             "printf 'ready\\n'; sleep 30"
         );
-        let mut host = Command::new(env!("CARGO_BIN_EXE_agmux-session"))
+        let mut host = Command::new(env!("CARGO_BIN_EXE_agtk-session"))
             .args(["--socket", socket_path.to_str().unwrap()])
             .args(["--", "/bin/sh", "-c", script])
             .env("DISPLAY", ":99")
@@ -79,7 +79,7 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
         "IFS= read -r second; printf 'again:%s\\n' \"$second\"; sleep 30"
     );
 
-    let mut host = Command::new(env!("CARGO_BIN_EXE_agmux-session"))
+    let mut host = Command::new(env!("CARGO_BIN_EXE_agtk-session"))
         .args(["--socket", socket_path.to_str().expect("UTF-8 socket path")])
         .args(["--", "/bin/sh", "-c", script])
         .stdin(Stdio::null())
@@ -109,7 +109,7 @@ fn session_host_survives_disconnect_and_accepts_reattachment() {
         initial_output.push_str(&read_until(&mut first_pty, "ready", Duration::from_secs(2)));
     }
     assert!(initial_output.contains("env:xterm-256color:truecolor"));
-    assert!(initial_output.contains("color-vars:unset:agmux-native:unset"));
+    assert!(initial_output.contains("color-vars:unset:agtk:unset"));
     first_pty.write_all(b"one\n").expect("write first input");
     assert!(read_until(&mut first_pty, "got:one", Duration::from_secs(2)).contains("got:one"));
 
@@ -134,7 +134,7 @@ fn session_host_escalates_shutdown_for_a_signal_resistant_child() {
     let directory = tempfile::tempdir().expect("create runtime directory");
     let socket_path = directory.path().join("stubborn.sock");
     let script = "trap '' HUP TERM; printf 'child:%s\\n' \"$$\"; while :; do sleep 10; done";
-    let mut host = Command::new(env!("CARGO_BIN_EXE_agmux-session"))
+    let mut host = Command::new(env!("CARGO_BIN_EXE_agtk-session"))
         .args([
             "--socket",
             socket_path.to_str().unwrap(),
@@ -257,7 +257,7 @@ fn session_host_drops_a_client_that_stops_reading() {
 }
 
 fn spawn_host(socket_path: &Path, script: &str) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_agmux-session"))
+    Command::new(env!("CARGO_BIN_EXE_agtk-session"))
         .args([
             "--socket",
             socket_path.to_str().unwrap(),

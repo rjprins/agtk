@@ -43,13 +43,13 @@ impl SessionLaunchPlan {
         let command = params.command.unwrap_or_else(|| match params.kind {
             SessionKind::Shell => env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()),
             SessionKind::Codex => {
-                env::var("AGMUX_CODEX_BIN").unwrap_or_else(|_| "codex".to_owned())
+                env::var("AGTK_CODEX_BIN").unwrap_or_else(|_| "codex".to_owned())
             }
             SessionKind::Claude => {
-                env::var("AGMUX_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned())
+                env::var("AGTK_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned())
             }
             SessionKind::Gemini => {
-                env::var("AGMUX_GEMINI_BIN").unwrap_or_else(|_| "gemini".to_owned())
+                env::var("AGTK_GEMINI_BIN").unwrap_or_else(|_| "gemini".to_owned())
             }
             SessionKind::Custom => String::new(),
         });
@@ -148,7 +148,7 @@ impl SessionHostLaunchPlan {
             OsString::from("--quiet"),
             OsString::from("--collect"),
             OsString::from("--expand-environment=no"),
-            OsString::from(format!("--unit=agmux-session-{instance}-{session_id}")),
+            OsString::from(format!("--unit=agtk-session-{instance}-{session_id}")),
             OsString::from("--"),
             host_binary.clone().into_os_string(),
         ];

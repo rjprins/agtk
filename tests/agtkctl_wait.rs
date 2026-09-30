@@ -2,7 +2,7 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use agmux_native::control::{ControlCommand, ControlResponse, ControlServer, GetTextParams};
+use agtk::control::{ControlCommand, ControlResponse, ControlServer, GetTextParams};
 use serde_json::json;
 
 #[test]
@@ -10,7 +10,7 @@ fn wait_prints_the_observation_that_satisfies_terminal_text() {
     let directory = tempfile::tempdir().expect("create temporary directory");
     let socket = directory
         .path()
-        .join("agmux-native/wait-success/control.sock");
+        .join("agtk/wait-success/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         for text in ["starting", "build complete"] {
@@ -32,7 +32,7 @@ fn wait_prints_the_observation_that_satisfies_terminal_text() {
         }
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args([
             "--instance",
             "wait-success",
@@ -48,13 +48,13 @@ fn wait_prints_the_observation_that_satisfies_terminal_text() {
             "--poll-ms",
             "1",
         ])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
-        .expect("run agmuxctl wait");
+        .expect("run agtkctl wait");
 
     assert!(
         output.status.success(),
-        "agmuxctl wait failed: {}",
+        "agtkctl wait failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
@@ -69,7 +69,7 @@ fn wait_uses_exit_code_four_when_the_deadline_expires() {
     let directory = tempfile::tempdir().expect("create temporary directory");
     let socket = directory
         .path()
-        .join("agmux-native/wait-timeout/control.sock");
+        .join("agtk/wait-timeout/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         while let Ok(pending) = requests.recv_timeout(Duration::from_millis(50)) {
@@ -84,7 +84,7 @@ fn wait_uses_exit_code_four_when_the_deadline_expires() {
         }
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args([
             "--instance",
             "wait-timeout",
@@ -97,9 +97,9 @@ fn wait_uses_exit_code_four_when_the_deadline_expires() {
             "--poll-ms",
             "1",
         ])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
-        .expect("run agmuxctl wait");
+        .expect("run agtkctl wait");
 
     assert_eq!(output.status.code(), Some(4));
     assert!(output.stdout.is_empty());
@@ -112,7 +112,7 @@ fn wait_supports_selected_session_and_session_state_conditions() {
     let directory = tempfile::tempdir().expect("create temporary directory");
     let socket = directory
         .path()
-        .join("agmux-native/wait-state/control.sock");
+        .join("agtk/wait-state/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         for _ in 0..2 {
@@ -131,7 +131,7 @@ fn wait_supports_selected_session_and_session_state_conditions() {
         }
     });
 
-    let selected = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let selected = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args([
             "--instance",
             "wait-state",
@@ -141,12 +141,12 @@ fn wait_supports_selected_session_and_session_state_conditions() {
             "--timeout-ms",
             "1000",
         ])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
         .expect("wait for selected session");
     assert!(selected.status.success());
 
-    let ready = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let ready = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args([
             "--instance",
             "wait-state",
@@ -158,7 +158,7 @@ fn wait_supports_selected_session_and_session_state_conditions() {
             "--timeout-ms",
             "1000",
         ])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
         .expect("wait for session state");
     assert!(ready.status.success());

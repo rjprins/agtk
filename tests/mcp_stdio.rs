@@ -2,7 +2,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::thread;
 
-use agmux_native::control::{ControlCommand, ControlResponse, ControlServer};
+use agtk::control::{ControlCommand, ControlResponse, ControlServer};
 use serde_json::{Value, json};
 
 #[test]
@@ -10,7 +10,7 @@ fn stdio_server_bridges_a_real_mcp_tool_call_to_the_native_socket() {
     let directory = tempfile::tempdir().unwrap();
     let socket = directory
         .path()
-        .join("agmux-native/mcp-integration/control.sock");
+        .join("agtk/mcp-integration/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).unwrap();
     let responder = thread::spawn(move || {
         let pending = requests.recv().unwrap();
@@ -28,9 +28,9 @@ fn stdio_server_bridges_a_real_mcp_tool_call_to_the_native_socket() {
             .unwrap();
     });
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agmux-mcp"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agtk-mcp"))
         .args(["--instance", "mcp-integration"])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -54,7 +54,7 @@ fn stdio_server_bridges_a_real_mcp_tool_call_to_the_native_socket() {
     let output = child.wait_with_output().unwrap();
     assert!(
         output.status.success(),
-        "agmux-mcp failed: {}",
+        "agtk-mcp failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let responses = String::from_utf8(output.stdout)

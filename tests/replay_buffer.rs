@@ -1,4 +1,4 @@
-use agmux_native::session::ReplayBuffer;
+use agtk::session::ReplayBuffer;
 
 #[test]
 fn replay_buffer_keeps_the_most_recent_bytes() {

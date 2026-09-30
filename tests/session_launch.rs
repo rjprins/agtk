@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use agmux_native::control::{CreateSessionParams, SessionKind};
-use agmux_native::session::{SessionHostLaunchPlan, SessionLaunchPlan};
+use agtk::control::{CreateSessionParams, SessionKind};
+use agtk::session::{SessionHostLaunchPlan, SessionLaunchPlan};
 
 #[test]
 fn custom_session_plan_preserves_validated_launch_details() {
@@ -55,7 +55,7 @@ fn session_plan_rejects_a_missing_working_directory() {
         kind: SessionKind::Shell,
         command: Some("/bin/sh".to_owned()),
         args: Vec::new(),
-        cwd: Some(PathBuf::from("/definitely/missing/agmux-native")),
+        cwd: Some(PathBuf::from("/definitely/missing/agtk")),
         name: None,
         project_root: None,
         worktree_path: None,
@@ -71,7 +71,7 @@ fn session_plan_rejects_a_missing_working_directory() {
 fn session_plan_rejects_a_missing_executable() {
     let params = CreateSessionParams {
         kind: SessionKind::Custom,
-        command: Some("/definitely/missing/agmux-command".to_owned()),
+        command: Some("/definitely/missing/agtk-command".to_owned()),
         args: Vec::new(),
         cwd: None,
         name: None,
@@ -93,7 +93,7 @@ fn session_plan_rejects_missing_project_and_nul_arguments() {
         args: Vec::new(),
         cwd: None,
         name: None,
-        project_root: Some(PathBuf::from("/definitely/missing/agmux-project")),
+        project_root: Some(PathBuf::from("/definitely/missing/agtk-project")),
         worktree_path: None,
         initial_input: None,
     };
@@ -126,10 +126,10 @@ fn session_plan_rejects_missing_project_and_nul_arguments() {
 fn session_host_plan_uses_an_independent_systemd_user_scope() {
     let plan = SessionHostLaunchPlan::new(
         Some(PathBuf::from("/usr/bin/systemd-run")),
-        PathBuf::from("/opt/agmux/agmux-session"),
+        PathBuf::from("/opt/agtk/agtk-session"),
         "default",
         "codex-123-0",
-        PathBuf::from("/run/user/1000/agmux-native/default/sessions/codex-123-0.sock"),
+        PathBuf::from("/run/user/1000/agtk/default/sessions/codex-123-0.sock"),
         PathBuf::from("/usr/bin/codex"),
         vec!["resume".to_owned(), "conversation-id".to_owned()],
     );
@@ -149,11 +149,11 @@ fn session_host_plan_uses_an_independent_systemd_user_scope() {
             "--quiet",
             "--collect",
             "--expand-environment=no",
-            "--unit=agmux-session-default-codex-123-0",
+            "--unit=agtk-session-default-codex-123-0",
             "--",
-            "/opt/agmux/agmux-session",
+            "/opt/agtk/agtk-session",
             "--socket",
-            "/run/user/1000/agmux-native/default/sessions/codex-123-0.sock",
+            "/run/user/1000/agtk/default/sessions/codex-123-0.sock",
             "--",
             "/usr/bin/codex",
             "resume",
@@ -167,7 +167,7 @@ fn session_host_plan_uses_an_independent_systemd_user_scope() {
 fn session_host_plan_falls_back_to_direct_launch_without_systemd_run() {
     let plan = SessionHostLaunchPlan::new(
         None,
-        PathBuf::from("/opt/agmux/agmux-session"),
+        PathBuf::from("/opt/agtk/agtk-session"),
         "test-instance",
         "claude-456-1",
         PathBuf::from("/tmp/claude-456-1.sock"),
@@ -181,7 +181,7 @@ fn session_host_plan_falls_back_to_direct_launch_without_systemd_run() {
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
 
-    assert_eq!(command.get_program(), "/opt/agmux/agmux-session");
+    assert_eq!(command.get_program(), "/opt/agtk/agtk-session");
     assert_eq!(
         args,
         [

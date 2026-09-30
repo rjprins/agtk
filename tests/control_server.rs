@@ -4,7 +4,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
 use std::time::Duration;
 
-use agmux_native::control::{ControlCommand, ControlResponse, ControlServer};
+use agtk::control::{ControlCommand, ControlResponse, ControlServer};
 use serde_json::json;
 
 #[test]

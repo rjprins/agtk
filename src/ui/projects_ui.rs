@@ -467,8 +467,8 @@ mod sidebar_tests {
     #[test]
     fn project_keys_round_trip() {
         let key = SidebarKey::project_key(
-            "/work/agmux",
-            "agmux",
+            "/work/agtk",
+            "agtk",
             ProjectSettings {
                 is_pinned: true,
                 is_collapsed: false,
@@ -482,7 +482,7 @@ mod sidebar_tests {
         else {
             panic!("project key did not parse");
         };
-        assert_eq!((root, name), ("/work/agmux", "agmux"));
+        assert_eq!((root, name), ("/work/agtk", "agtk"));
         assert!(settings.is_pinned && !settings.is_collapsed);
     }
 }

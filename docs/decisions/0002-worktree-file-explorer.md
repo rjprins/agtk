@@ -1,4 +1,4 @@
-# ADR-0002: Browse and open any worktree file in agmux
+# ADR-0002: Browse and open any worktree file in agtk
 
 ## Status
 
@@ -32,5 +32,5 @@ Deferred. Agents change many files quickly, and monitoring a large tree costs mo
 
 ## Consequences
 
-- `ui.open_file`, `agmuxctl ui file` and the MCP `open_file` tool open a file the way a terminal click does.
+- `ui.open_file`, `agtkctl ui file` and the MCP `open_file` tool open a file the way a terminal click does.
 - Language servers will run in Rust per worktree and language. Monaco providers forward requests over the existing message bridge, so definition results in other files open in the same file buffer.

@@ -21,7 +21,7 @@ impl InstanceName {
     }
 
     pub fn from_environment() -> Result<Self, InvalidInstanceName> {
-        let value = std::env::var("AGMUX_INSTANCE").unwrap_or_else(|_| "default".to_owned());
+        let value = std::env::var("AGTK_INSTANCE").unwrap_or_else(|_| "default".to_owned());
         Self::parse(&value)
     }
 
@@ -31,10 +31,10 @@ impl InstanceName {
 
     pub fn application_id(&self) -> String {
         if self.0 == "default" {
-            return "nl.rutger.AgmuxNative".to_owned();
+            return "nl.rutger.Agtk".to_owned();
         }
         let suffix = self.0.replace('-', "_");
-        format!("nl.rutger.AgmuxNative.Devel.i_{suffix}")
+        format!("nl.rutger.Agtk.Devel.i_{suffix}")
     }
 }
 
@@ -60,8 +60,8 @@ pub struct InstancePaths {
 
 impl InstancePaths {
     pub fn new(name: InstanceName, runtime_root: &Path, state_root: &Path) -> Self {
-        let runtime_dir = runtime_root.join("agmux-native").join(name.as_str());
-        let state_dir = state_root.join("agmux-native").join(name.as_str());
+        let runtime_dir = runtime_root.join("agtk").join(name.as_str());
+        let state_dir = state_root.join("agtk").join(name.as_str());
         Self {
             name,
             runtime_dir,
@@ -70,11 +70,11 @@ impl InstancePaths {
     }
 
     pub fn from_environment(name: InstanceName) -> Self {
-        let runtime_root = std::env::var_os("AGMUX_RUNTIME_ROOT")
+        let runtime_root = std::env::var_os("AGTK_RUNTIME_ROOT")
             .or_else(|| std::env::var_os("XDG_RUNTIME_DIR"))
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir);
-        let state_root = std::env::var_os("AGMUX_STATE_ROOT")
+        let state_root = std::env::var_os("AGTK_STATE_ROOT")
             .or_else(|| std::env::var_os("XDG_STATE_HOME"))
             .map(PathBuf::from)
             .or_else(|| {
@@ -105,7 +105,7 @@ impl InstancePaths {
     }
 
     pub fn database(&self) -> PathBuf {
-        self.state_dir.join("agmux.db")
+        self.state_dir.join("agtk.db")
     }
 
     /// Parsed facts about Claude and Codex logs, so they are not reread on every open.

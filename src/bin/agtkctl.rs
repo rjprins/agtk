@@ -3,10 +3,10 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agmux_native::appearance::ThemeKey;
-use agmux_native::azure::PrAttention;
-use agmux_native::claude_presets::ClaudeModelPreset;
-use agmux_native::control::{
+use agtk::appearance::ThemeKey;
+use agtk::azure::PrAttention;
+use agtk::claude_presets::ClaudeModelPreset;
+use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ClaudePresetApplyParams, ClaudePresetsSetParams, ClientError, CloseSessionParams,
     ControlClient, ControlCommand, ControlRequest, CreateSessionParams, ErrorCode, GetTextParams,
@@ -16,10 +16,10 @@ use agmux_native::control::{
     UiDiffScope, UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WaitCondition, WorktreeCreateParams,
     WorktreeListParams, WorktreeReapParams,
 };
-use agmux_native::instance::{InstanceName, InstancePaths};
-use agmux_native::providers::AgentProvider;
-use agmux_native::shortcuts::ShortcutAction;
-use agmux_native::worktrees::DeleteBranch;
+use agtk::instance::{InstanceName, InstancePaths};
+use agtk::providers::AgentProvider;
+use agtk::shortcuts::ShortcutAction;
+use agtk::worktrees::DeleteBranch;
 
 const EXIT_USAGE_OR_PROTOCOL: u8 = 2;
 const EXIT_CONNECTION: u8 = 3;
@@ -1039,7 +1039,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session restart ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes and files, SCOPE is all|staged|unstaged|untracked|committed|commit)"
+    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session restart ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes and files, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {
@@ -1063,7 +1063,7 @@ fn client_exit_code(error: &ClientError) -> u8 {
 enum Failure {
     Usage(String),
     Client(ClientError),
-    Server(agmux_native::control::ControlError),
+    Server(agtk::control::ControlError),
     Timeout(String),
 }
 

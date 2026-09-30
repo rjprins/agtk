@@ -458,7 +458,7 @@ impl WorktreeManager {
         }
         let nonce = now_millis();
         let stage =
-            std::env::temp_dir().join(format!("agmux-salvage-{}-{nonce}", std::process::id()));
+            std::env::temp_dir().join(format!("agtk-salvage-{}-{nonce}", std::process::id()));
         fs::create_dir(&stage)?;
         let result = (|| {
             for path in &paths {
@@ -510,7 +510,7 @@ impl WorktreeManager {
             &head[..head.len().min(7)]
         );
         let message = format!(
-            "reaped by agmux-native{}",
+            "reaped by agtk{}",
             salvage
                 .map(|path| format!(", salvage: {}", path.display()))
                 .unwrap_or_default()
@@ -964,10 +964,12 @@ fn branch_upstream(repo_root: &Path, branch: &str) -> BranchUpstream {
 }
 
 fn worktree_template(repo_root: &Path) -> String {
-    git_text(repo_root, ["config", "--get", "agmux.worktreeTemplate"])
-        .ok()
+    // Repos configured for the old agmux keep working.
+    ["agtk.worktreeTemplate", "agmux.worktreeTemplate"]
+        .into_iter()
+        .filter_map(|key| git_text(repo_root, ["config", "--get", key]).ok())
         .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+        .find(|value| !value.is_empty())
         .unwrap_or_else(|| "../{repo-name}-{branch}".to_owned())
 }
 

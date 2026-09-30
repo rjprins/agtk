@@ -99,7 +99,7 @@ fn classify_agent_sessions(
         .collect()
 }
 
-/// A running agent row whose conversation agmux does not know yet.
+/// A running agent row whose conversation agtk does not know yet.
 #[derive(Debug, Clone)]
 struct UnclaimedAgent {
     session_id: String,
@@ -323,7 +323,7 @@ pub(super) struct AgentDialog {
     /// Set while the list changes its selection itself.
     selecting: Rc<Cell<bool>>,
     pub(super) hidden: Rc<RefCell<HashSet<String>>>,
-    /// Names given in agmux, by session key. They win over the log's title.
+    /// Names given in agtk, by session key. They win over the log's title.
     pub(super) names: Rc<RefCell<HashMap<String, String>>>,
     pub(super) hidden_loaded: Rc<Cell<bool>>,
     pub(super) selected: Rc<RefCell<Option<ProviderSession>>>,
@@ -950,7 +950,7 @@ impl Workspace {
         }
         let Some(conversation_id) = record.conversation_id.clone() else {
             self.show_error(
-                "agmux does not know this session's conversation. Find it with Resume Session.",
+                "agtk does not know this session's conversation. Find it with Resume Session.",
             );
             return;
         };
@@ -2070,8 +2070,8 @@ mod tests {
             item(
                 "Review the launch flow",
                 "codex-review",
-                "/work/agmux-feature",
-                Some("/work/agmux"),
+                "/work/agtk-feature",
+                Some("/work/agtk"),
             ),
             item(
                 "Fix the terminal",
@@ -2090,7 +2090,7 @@ mod tests {
             1
         );
         assert_eq!(
-            filter_agent_sessions(&sessions, None, "agmux", &HashMap::new()).len(),
+            filter_agent_sessions(&sessions, None, "agtk", &HashMap::new()).len(),
             1
         );
         assert_eq!(
@@ -2108,13 +2108,13 @@ mod tests {
         let session = item(
             "Review the launch flow",
             "codex-review",
-            "/work/agmux-feature-with-a-long-descriptive-name",
-            Some("/work/agmux"),
+            "/work/agtk-feature-with-a-long-descriptive-name",
+            Some("/work/agtk"),
         );
 
         assert_eq!(
             agent_worktree_name(&session).as_deref(),
-            Some("agmux-feature-with-a-long-descriptive-name")
+            Some("agtk-feature-with-a-long-descriptive-name")
         );
     }
 
@@ -2124,7 +2124,7 @@ mod tests {
             "Review the launch flow",
             "codex-review",
             "/tmp/session-location",
-            Some("/work/agmux"),
+            Some("/work/agtk"),
         );
         session.worktree_path = Some(PathBuf::from("/worktrees/native-session-picker"));
 
@@ -2139,8 +2139,8 @@ mod tests {
             item(
                 "Review the launch flow",
                 "codex-review",
-                "/work/agmux-feature",
-                Some("/work/agmux"),
+                "/work/agtk-feature",
+                Some("/work/agtk"),
             ),
             item(
                 "Fix the terminal",
@@ -2152,7 +2152,7 @@ mod tests {
 
         let filtered = filter_agent_sessions(
             &sessions,
-            Some(PathBuf::from("/work/agmux").as_path()),
+            Some(PathBuf::from("/work/agtk").as_path()),
             "",
             &HashMap::new(),
         );
@@ -2166,16 +2166,16 @@ mod tests {
         let sessions = vec![session(
             "Nested session",
             "codex-nested",
-            "/work/agmux/crates/native",
+            "/work/agtk/crates/native",
         )];
-        let roots = vec![PathBuf::from("/work"), PathBuf::from("/work/agmux")];
+        let roots = vec![PathBuf::from("/work"), PathBuf::from("/work/agtk")];
         let manager = WorktreeManager::new(PathBuf::from("/tmp/unused-attic"));
 
         let classified = classify_agent_sessions(sessions, &roots, &manager);
 
         assert_eq!(
             classified[0].project_root,
-            Some(PathBuf::from("/work/agmux"))
+            Some(PathBuf::from("/work/agtk"))
         );
     }
 
@@ -2210,8 +2210,8 @@ mod tests {
         let mut session = item(
             "Changes sidebar resizable",
             "a",
-            "/work/agmux",
-            Some("/work/agmux"),
+            "/work/agtk",
+            Some("/work/agtk"),
         );
         session.session.first_prompt = Some("Make the right sidebar draggable".to_owned());
         session.session.branch = Some("main".to_owned());
@@ -2234,16 +2234,16 @@ mod tests {
 
     #[test]
     fn location_leaves_out_the_main_checkout_and_default_branch() {
-        let mut main = item("A", "a", "/work/agmux", Some("/work/agmux"));
+        let mut main = item("A", "a", "/work/agtk", Some("/work/agtk"));
         main.session.branch = Some("main".to_owned());
-        assert_eq!(agent_location_label(&main), "agmux");
+        assert_eq!(agent_location_label(&main), "agtk");
 
-        let mut feature = item("B", "b", "/work/agmux-cleanup", Some("/work/agmux"));
+        let mut feature = item("B", "b", "/work/agtk-cleanup", Some("/work/agtk"));
         feature.session.branch = Some("cleanup-euw".to_owned());
-        assert_eq!(agent_location_label(&feature), "agmux · cleanup-euw");
+        assert_eq!(agent_location_label(&feature), "agtk · cleanup-euw");
 
-        let detached = item("C", "c", "/work/agmux-review", Some("/work/agmux"));
-        assert_eq!(agent_location_label(&detached), "agmux · agmux-review");
+        let detached = item("C", "c", "/work/agtk-review", Some("/work/agtk"));
+        assert_eq!(agent_location_label(&detached), "agtk · agtk-review");
     }
 
     #[test]

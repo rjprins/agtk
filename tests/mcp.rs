@@ -2,10 +2,10 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
-use agmux_native::control::{
+use agtk::control::{
     ClaudePresetApplyParams, ControlCommand, PrListParams, SendInputParams,
 };
-use agmux_native::mcp::{ControlBackend, McpServer};
+use agtk::mcp::{ControlBackend, McpServer};
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -152,7 +152,7 @@ fn pull_request_listing_maps_to_the_typed_local_control_protocol() {
             "tools/call",
             json!({
                 "name":"list_pull_requests",
-                "arguments":{"projectRoot":"/work/agmux"}
+                "arguments":{"projectRoot":"/work/agtk"}
             }),
         ))
         .unwrap();
@@ -160,7 +160,7 @@ fn pull_request_listing_maps_to_the_typed_local_control_protocol() {
     assert_eq!(
         server.backend().calls.borrow().as_slice(),
         &[ControlCommand::PrList(PrListParams {
-            project_root: "/work/agmux".into(),
+            project_root: "/work/agtk".into(),
         })]
     );
 }

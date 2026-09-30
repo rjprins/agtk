@@ -1,7 +1,7 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agmux_native::control::{
+use agtk::control::{
     ControlClient, ControlCommand, ControlRequest, ControlResponse, ControlServer,
     PROTOCOL_VERSION, ResponseBody,
 };

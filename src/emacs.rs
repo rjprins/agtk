@@ -36,7 +36,7 @@ pub struct EmacsIntegration {
 impl EmacsIntegration {
     pub fn from_environment() -> Self {
         Self::new(
-            std::env::var_os("AGMUX_EMACSCLIENT")
+            std::env::var_os("AGTK_EMACSCLIENT")
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| OsString::from("emacsclient")),
         )
@@ -81,12 +81,12 @@ impl EmacsIntegration {
         let mut command = Command::new(&self.command);
         command.args(["-n", "-a", "", "--eval", form]);
         if let Some(display) =
-            std::env::var_os("AGMUX_EMACS_DISPLAY").filter(|value| !value.is_empty())
+            std::env::var_os("AGTK_EMACS_DISPLAY").filter(|value| !value.is_empty())
         {
             command.env("DISPLAY", display);
         }
         if let Some(authority) =
-            std::env::var_os("AGMUX_EMACS_XAUTHORITY").filter(|value| !value.is_empty())
+            std::env::var_os("AGTK_EMACS_XAUTHORITY").filter(|value| !value.is_empty())
         {
             command.env("XAUTHORITY", authority);
         }
@@ -137,10 +137,10 @@ pub fn build_branch_review_eval(worktree_path: &Path, base_branch: Option<&str>)
     if let Some(base) = base_branch.map(str::trim).filter(|base| !base.is_empty()) {
         let base = elisp_string(base);
         body.extend([
-            format!("      (let ((agmux-branch-review-base {base}))"),
+            format!("      (let ((agtk-branch-review-base {base}))"),
             "        (require 'cl-lib)".to_owned(),
             "        (cl-letf (((symbol-function 'magit-read-branch-or-commit)".to_owned(),
-            "                   (lambda (&rest _) agmux-branch-review-base)))".to_owned(),
+            "                   (lambda (&rest _) agtk-branch-review-base)))".to_owned(),
             "          (call-interactively 'branch-review-with-base))))".to_owned(),
         ]);
     } else {
@@ -196,6 +196,7 @@ pub fn resolve_branch_review_base(cwd: &Path) -> EmacsResult<Option<String>> {
     for key in [
         "vscode-merge-base",
         "gh-merge-base",
+        "agtk-base-branch",
         "agmux-base-branch",
         "merge-base",
     ] {

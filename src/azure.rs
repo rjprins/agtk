@@ -140,7 +140,7 @@ pub struct AzureClient {
 impl AzureClient {
     pub fn from_environment() -> Self {
         Self::new(
-            std::env::var_os("AGMUX_AZURE_BIN")
+            std::env::var_os("AGTK_AZURE_BIN")
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| OsString::from("az")),
         )

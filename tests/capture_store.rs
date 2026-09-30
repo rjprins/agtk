@@ -1,7 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
-use agmux_native::capture::store_png_capture;
+use agtk::capture::store_png_capture;
 
 #[test]
 fn capture_store_creates_unique_private_files_with_sha256_metadata() {

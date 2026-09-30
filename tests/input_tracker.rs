@@ -1,4 +1,4 @@
-use agmux_native::history::{InputTracker, history_needle};
+use agtk::history::{InputTracker, history_needle};
 
 #[test]
 fn input_tracker_emits_a_compacted_prompt_on_submit() {

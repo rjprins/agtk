@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::thread;
 
-use agmux_native::appearance::ThemeKey;
-use agmux_native::azure::PrAttention;
-use agmux_native::claude_presets::{ClaudeEffort, ClaudeModelPreset};
-use agmux_native::control::{
+use agtk::appearance::ThemeKey;
+use agtk::azure::PrAttention;
+use agtk::claude_presets::{ClaudeEffort, ClaudeModelPreset};
+use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, GetTextParams, PrAcknowledgeParams,
@@ -13,15 +13,15 @@ use agmux_native::control::{
     SessionSetStateParams, ShortcutSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
     WorktreeListParams, WorktreeReapParams,
 };
-use agmux_native::providers::AgentProvider;
-use agmux_native::shortcuts::ShortcutAction;
-use agmux_native::worktrees::DeleteBranch;
+use agtk::providers::AgentProvider;
+use agtk::shortcuts::ShortcutAction;
+use agtk::worktrees::DeleteBranch;
 use serde_json::json;
 
 #[test]
 fn state_command_prints_the_application_result_as_json() {
     let directory = tempfile::tempdir().expect("create temporary directory");
-    let socket = directory.path().join("agmux-native/test-cli/control.sock");
+    let socket = directory.path().join("agtk/test-cli/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         let pending = requests.recv().expect("receive state request");
@@ -35,15 +35,15 @@ fn state_command_prints_the_application_result_as_json() {
             .expect("respond to state request");
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args(["--instance", "test-cli", "state"])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
-        .expect("run agmuxctl");
+        .expect("run agtkctl");
 
     assert!(
         output.status.success(),
-        "agmuxctl failed: {}",
+        "agtkctl failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
@@ -57,7 +57,7 @@ fn state_command_prints_the_application_result_as_json() {
 #[test]
 fn ui_inspect_command_requests_the_logical_widget_tree() {
     let directory = tempfile::tempdir().expect("create temporary directory");
-    let socket = directory.path().join("agmux-native/test-cli/control.sock");
+    let socket = directory.path().join("agtk/test-cli/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         let pending = requests.recv().expect("receive UI inspection request");
@@ -71,15 +71,15 @@ fn ui_inspect_command_requests_the_logical_widget_tree() {
             .expect("respond to UI inspection request");
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args(["--instance", "test-cli", "ui", "inspect"])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
-        .expect("run agmuxctl");
+        .expect("run agtkctl");
 
     assert!(
         output.status.success(),
-        "agmuxctl failed: {}",
+        "agtkctl failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
@@ -93,7 +93,7 @@ fn ui_inspect_command_requests_the_logical_widget_tree() {
 #[test]
 fn ui_capture_command_requests_an_app_only_png() {
     let directory = tempfile::tempdir().expect("create temporary directory");
-    let socket = directory.path().join("agmux-native/test-cli/control.sock");
+    let socket = directory.path().join("agtk/test-cli/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         let pending = requests.recv().expect("receive UI capture request");
@@ -107,15 +107,15 @@ fn ui_capture_command_requests_an_app_only_png() {
             .expect("respond to UI capture request");
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args(["--instance", "test-cli", "ui", "capture"])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
-        .expect("run agmuxctl");
+        .expect("run agtkctl");
 
     assert!(
         output.status.success(),
-        "agmuxctl failed: {}",
+        "agtkctl failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(output.stderr.is_empty());
@@ -135,9 +135,9 @@ fn ui_show_command_opens_a_named_transient_surface() {
 #[test]
 fn pr_acknowledge_command_preserves_the_exact_attention_marker() {
     assert_fixture_command(
-        &["pr", "acknowledge", "/work/agmux", "42", "review"],
+        &["pr", "acknowledge", "/work/agtk", "42", "review"],
         ControlCommand::PrAcknowledge(PrAcknowledgeParams {
-            project_root: "/work/agmux".into(),
+            project_root: "/work/agtk".into(),
             pull_request_id: 42,
             marker: PrAttention::Review,
         }),
@@ -175,7 +175,7 @@ fn claude_presets_command_has_a_typed_protocol_mapping() {
 #[test]
 fn session_text_command_requests_a_bounded_snapshot() {
     let directory = tempfile::tempdir().expect("create temporary directory");
-    let socket = directory.path().join("agmux-native/test-cli/control.sock");
+    let socket = directory.path().join("agtk/test-cli/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         let pending = requests.recv().expect("receive terminal text request");
@@ -200,7 +200,7 @@ fn session_text_command_requests_a_bounded_snapshot() {
             .expect("respond to terminal text request");
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args([
             "--instance",
             "test-cli",
@@ -210,13 +210,13 @@ fn session_text_command_requests_a_bounded_snapshot() {
             "--lines",
             "75",
         ])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
-        .expect("run agmuxctl");
+        .expect("run agtkctl");
 
     assert!(
         output.status.success(),
-        "agmuxctl failed: {}",
+        "agtkctl failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
@@ -236,11 +236,11 @@ fn session_text_command_requests_a_bounded_snapshot() {
 fn connection_failure_uses_the_documented_exit_code() {
     let directory = tempfile::tempdir().expect("create temporary directory");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args(["--instance", "missing", "state"])
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
-        .expect("run agmuxctl");
+        .expect("run agtkctl");
 
     assert_eq!(output.status.code(), Some(3));
     assert!(output.stdout.is_empty());
@@ -383,14 +383,14 @@ fn project_set_command_has_a_typed_protocol_mapping() {
         &[
             "project",
             "set",
-            "/work/agmux",
+            "/work/agtk",
             "--pinned",
             "true",
             "--collapsed",
             "false",
         ],
         ControlCommand::ProjectSet(ProjectSetParams {
-            root: "/work/agmux".into(),
+            root: "/work/agtk".into(),
             is_pinned: Some(true),
             is_collapsed: Some(false),
         }),
@@ -400,16 +400,16 @@ fn project_set_command_has_a_typed_protocol_mapping() {
 #[test]
 fn worktree_commands_have_typed_protocol_mappings() {
     assert_fixture_command(
-        &["worktree", "list", "/work/agmux"],
+        &["worktree", "list", "/work/agtk"],
         ControlCommand::WorktreeList(WorktreeListParams {
-            project_root: "/work/agmux".into(),
+            project_root: "/work/agtk".into(),
         }),
     );
     assert_fixture_command(
         &[
             "worktree",
             "create",
-            "/work/agmux",
+            "/work/agtk",
             "--branch",
             "native-ui",
             "--base",
@@ -418,7 +418,7 @@ fn worktree_commands_have_typed_protocol_mappings() {
             "Build native UI",
         ],
         ControlCommand::WorktreeCreate(WorktreeCreateParams {
-            project_root: "/work/agmux".into(),
+            project_root: "/work/agtk".into(),
             branch: "native-ui".to_owned(),
             base_branch: Some("main".to_owned()),
             purpose: "Build native UI".to_owned(),
@@ -428,7 +428,7 @@ fn worktree_commands_have_typed_protocol_mappings() {
         &[
             "worktree",
             "reap",
-            "/work/agmux-native-ui",
+            "/work/agtk-ui",
             "--expected-head",
             "0123456789abcdef",
             "--expected-status-hash",
@@ -437,7 +437,7 @@ fn worktree_commands_have_typed_protocol_mappings() {
             "force",
         ],
         ControlCommand::WorktreeReap(WorktreeReapParams {
-            path: "/work/agmux-native-ui".into(),
+            path: "/work/agtk-ui".into(),
             expected_head: "0123456789abcdef".to_owned(),
             expected_status_hash: "abcdef".to_owned(),
             delete_branch: DeleteBranch::Force,
@@ -476,17 +476,17 @@ fn agent_and_readiness_commands_have_typed_protocol_mappings() {
             "claude",
             "claude-1",
             "--cwd",
-            "/work/agmux",
+            "/work/agtk",
             "--project-root",
-            "/work/agmux",
+            "/work/agtk",
             "--name",
             "Recovered",
         ],
         ControlCommand::AgentRestore(AgentRestoreParams {
             provider: AgentProvider::Claude,
             provider_session_id: "claude-1".to_owned(),
-            cwd: Some("/work/agmux".into()),
-            project_root: Some("/work/agmux".into()),
+            cwd: Some("/work/agtk".into()),
+            project_root: Some("/work/agtk".into()),
             worktree_path: None,
             name: Some("Recovered".to_owned()),
         }),
@@ -503,7 +503,7 @@ fn agent_and_readiness_commands_have_typed_protocol_mappings() {
 
 fn assert_fixture_command(arguments: &[&str], expected: ControlCommand) -> Output {
     let directory = tempfile::tempdir().expect("create temporary directory");
-    let socket = directory.path().join("agmux-native/test-cli/control.sock");
+    let socket = directory.path().join("agtk/test-cli/control.sock");
     let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
     let worker = thread::spawn(move || {
         let pending = requests.recv().expect("receive CLI request");
@@ -514,16 +514,16 @@ fn assert_fixture_command(arguments: &[&str], expected: ControlCommand) -> Outpu
             .expect("respond to CLI request");
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_agmuxctl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
         .args(["--instance", "test-cli"])
         .args(arguments)
-        .env("AGMUX_RUNTIME_ROOT", directory.path())
+        .env("AGTK_RUNTIME_ROOT", directory.path())
         .output()
-        .expect("run agmuxctl");
+        .expect("run agtkctl");
 
     assert!(
         output.status.success(),
-        "agmuxctl failed: {}",
+        "agtkctl failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(

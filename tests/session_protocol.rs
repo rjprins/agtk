@@ -3,7 +3,7 @@ use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::thread;
 
-use agmux_native::session::{receive_attachment, send_attachment};
+use agtk::session::{receive_attachment, send_attachment};
 
 #[test]
 fn attachment_transfers_replay_bytes_and_the_pty_descriptor() {

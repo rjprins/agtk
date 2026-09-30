@@ -81,7 +81,7 @@ let activeChangeIndex = -1;
 let findState = { query: '', index: -1 };
 
 function sendEvent(event) {
-  window.webkit?.messageHandlers?.agmux?.postMessage(event);
+  window.webkit?.messageHandlers?.agtk?.postMessage(event);
 }
 
 function ensureFileEditor() {
@@ -151,7 +151,7 @@ function showDiff({
 
   clear();
   modelSequence += 1;
-  const uriRoot = `inmemory://agmux/diff/${modelSequence}`;
+  const uriRoot = `inmemory://agtk/diff/${modelSequence}`;
   const selectedLanguage = language || languageForPath(path) || 'plaintext';
   const originalModel = monaco.editor.createModel(
     original,
@@ -202,7 +202,7 @@ function showFile({
   const model = monaco.editor.createModel(
     text,
     selectedLanguage,
-    monaco.Uri.parse(`inmemory://agmux/file/${modelSequence}`),
+    monaco.Uri.parse(`inmemory://agtk/file/${modelSequence}`),
   );
 
   mode = 'file';
@@ -323,7 +323,7 @@ function setAppearance(theme, fontFamily, fontSize) {
   if (fileEditor) applyAppearance(fileEditor);
 }
 
-window.agmuxViewer = Object.freeze({
+window.agtkViewer = Object.freeze({
   clear,
   copySelection,
   find,

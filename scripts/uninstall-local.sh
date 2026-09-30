@@ -16,11 +16,11 @@ case "$task_prefix" in
     *[!A-Za-z0-9_./-]*) printf '%s\n' "PREFIX contains unsupported characters" >&2; exit 2 ;;
 esac
 
-for task_binary in agmux-native agmux-session agmuxctl agmux-mcp; do
+for task_binary in agtk agtk-session agtkctl agtk-mcp; do
     rm -f -- "$task_destdir$task_prefix/bin/$task_binary"
 done
-rm -f -- "$task_destdir$task_prefix/share/applications/nl.rutger.AgmuxNative.desktop"
-rm -f -- "$task_destdir$task_prefix/share/icons/hicolor/scalable/apps/nl.rutger.AgmuxNative.svg"
+rm -f -- "$task_destdir$task_prefix/share/applications/nl.rutger.Agtk.desktop"
+rm -f -- "$task_destdir$task_prefix/share/icons/hicolor/scalable/apps/nl.rutger.Agtk.svg"
 
 if [ -z "$task_destdir" ] && command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$task_prefix/share/applications" >/dev/null 2>&1 || true
@@ -30,8 +30,8 @@ if [ -z "$task_destdir" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; t
 fi
 
 if [ -n "$task_destdir" ]; then
-    printf '%s\n' "Removed staged agmux native files from $task_destdir$task_prefix"
+    printf '%s\n' "Removed staged agtk files from $task_destdir$task_prefix"
 else
-    printf '%s\n' "Uninstalled agmux native from $task_prefix"
+    printf '%s\n' "Uninstalled agtk from $task_prefix"
 fi
 printf '%s\n' "Runtime and saved workspace data were preserved"

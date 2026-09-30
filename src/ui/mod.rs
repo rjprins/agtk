@@ -214,7 +214,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .child(&list)
         .build();
     let sidebar_brand_icon = provider_icons::brand_icon();
-    let sidebar_heading = gtk::Label::new(Some("agmux"));
+    let sidebar_heading = gtk::Label::new(Some("agtk"));
     sidebar_heading.add_css_class("title");
     let sidebar_header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     sidebar_header.append(&sidebar_brand_icon);
@@ -311,7 +311,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let tabs_bar = adw::HeaderBar::new();
     tabs_bar.set_show_start_title_buttons(false);
 
-    let content_title = adw::WindowTitle::new("agmux", "");
+    let content_title = adw::WindowTitle::new("agtk", "");
     // Keep long session names and prompts ellipsized rather than forcing a wrap.
     // https://gnome.pages.gitlab.gnome.org/libadwaita/doc/1-latest/class.Clamp.html
     let compact_title = adw::Clamp::builder()
@@ -495,7 +495,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     overlay.set_child(Some(&split));
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("agmux")
+        .title("agtk")
         .default_width(1200)
         .default_height(800)
         .content(&overlay)
@@ -592,7 +592,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         sidebar_toggle: sidebar_toggle.clone(),
         surface_anchors: surface_anchors.clone(),
         paths,
-        host_binary: sibling_binary("agmux-session"),
+        host_binary: sibling_binary("agtk-session"),
         sessions: Rc::new(RefCell::new(HashMap::new())),
         closing_sessions: Rc::new(RefCell::new(HashSet::new())),
         selected_session: Rc::new(RefCell::new(None)),
@@ -911,7 +911,7 @@ impl Workspace {
                 .map(|session| session.record.name.clone())
         });
         self.content_title
-            .set_title(name.as_deref().unwrap_or("agmux"));
+            .set_title(name.as_deref().unwrap_or("agtk"));
     }
 
     fn run_io<T: Send + 'static>(

@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use agmux_native::agent_status::{ScreenTracker, Signal, apply_hook, resolve, rules_for};
-use agmux_native::control::{SessionKind, SessionState};
+use agtk::agent_status::{ScreenTracker, Signal, apply_hook, resolve, rules_for};
+use agtk::control::{SessionKind, SessionState};
 
 // Screens below are real captures from agent-manager's status tests
 // (internal/status/status_test.go), which these rules are ported from.

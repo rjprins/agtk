@@ -1,7 +1,7 @@
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use agmux_native::command_runner::run_bounded;
+use agtk::command_runner::run_bounded;
 
 #[test]
 fn runner_returns_bounded_text_output() {

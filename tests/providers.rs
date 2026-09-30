@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::fs;
 
-use agmux_native::control::SessionKind;
-use agmux_native::providers::{
+use agtk::control::SessionKind;
+use agtk::providers::{
     AgentProvider, DiscoveryRoots, ProviderDiscovery, RestoreTarget, recent_mutated_paths,
 };
 

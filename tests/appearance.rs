@@ -1,4 +1,4 @@
-use agmux_native::appearance::{AppearancePreferences, ThemeKey, resolve_system_theme, theme};
+use agtk::appearance::{AppearancePreferences, ThemeKey, resolve_system_theme, theme};
 
 #[test]
 fn registry_preserves_every_original_agmux_theme() {

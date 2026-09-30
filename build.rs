@@ -6,7 +6,7 @@ fn main() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let viewer = root.join("viewer");
     let dist = viewer.join("dist");
-    let stamp = dist.join(".agmux-viewer-build");
+    let stamp = dist.join(".agtk-viewer-build");
     let source_files = [
         viewer.join("index.html"),
         viewer.join("vite.config.js"),
@@ -24,7 +24,7 @@ fn main() {
         .and_then(|metadata| metadata.modified())
         .unwrap_or_else(|_| {
             panic!(
-                "The embedded Changes viewer is missing. Run scripts/build-viewer.sh before building agmux-native."
+                "The embedded Changes viewer is missing. Run scripts/build-viewer.sh before building agtk."
             )
         });
     for path in source_files
@@ -33,7 +33,7 @@ fn main() {
     {
         if modified(path).is_some_and(|time| time > stamp_time) {
             panic!(
-                "The embedded Changes viewer is stale because {} changed. Run scripts/build-viewer.sh before building agmux-native.",
+                "The embedded Changes viewer is stale because {} changed. Run scripts/build-viewer.sh before building agtk.",
                 path.display()
             );
         }
@@ -42,7 +42,7 @@ fn main() {
     let index = dist.join("index.html");
     if !index.is_file() {
         panic!(
-            "The embedded Changes viewer is missing. Run scripts/build-viewer.sh before building agmux-native."
+            "The embedded Changes viewer is missing. Run scripts/build-viewer.sh before building agtk."
         );
     }
 
@@ -54,7 +54,7 @@ fn main() {
         .expect("Cargo did not provide OUT_DIR")
         .join("viewer.gresource.xml");
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gresources>\n  <gresource prefix=\"/nl/rutger/AgmuxNative/viewer\">\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gresources>\n  <gresource prefix=\"/nl/rutger/Agtk/viewer\">\n",
     );
     for path in files {
         let alias = path

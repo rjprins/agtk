@@ -445,7 +445,7 @@ impl Workspace {
             root: UiNode {
                 id: "main-window".to_owned(),
                 role: "window".to_owned(),
-                label: Some("agmux".to_owned()),
+                label: Some("agtk".to_owned()),
                 is_visible: self.window.is_visible(),
                 is_enabled: self.window.is_sensitive(),
                 is_selected: false,
@@ -459,7 +459,7 @@ impl Workspace {
                     UiNode {
                         id: "sidebar".to_owned(),
                         role: "complementary".to_owned(),
-                        label: Some("agmux".to_owned()),
+                        label: Some("agtk".to_owned()),
                         is_visible: self.sidebar_panel.is_visible(),
                         is_enabled: self.sidebar_panel.is_sensitive(),
                         is_selected: false,
@@ -468,7 +468,7 @@ impl Workspace {
                             UiNode {
                                 id: "brand".to_owned(),
                                 role: "heading".to_owned(),
-                                label: Some("agmux".to_owned()),
+                                label: Some("agtk".to_owned()),
                                 is_visible: self.sidebar_header.is_visible(),
                                 is_enabled: self.sidebar_header.is_sensitive(),
                                 is_selected: false,

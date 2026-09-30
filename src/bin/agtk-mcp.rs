@@ -2,15 +2,15 @@ use std::env;
 use std::io;
 use std::process::ExitCode;
 
-use agmux_native::control::ControlClient;
-use agmux_native::instance::{InstanceName, InstancePaths};
-use agmux_native::mcp::{McpServer, SocketControlBackend};
+use agtk::control::ControlClient;
+use agtk::instance::{InstanceName, InstancePaths};
+use agtk::mcp::{McpServer, SocketControlBackend};
 
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("agmux-mcp: {error}");
+            eprintln!("agtk-mcp: {error}");
             ExitCode::FAILURE
         }
     }

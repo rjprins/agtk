@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use super::WorktreeContext;
 use super::git::{git_argument, oid_from_output, output_text, run_git};
 
-const BASE_CONFIG_KEYS: [&str; 4] = [
+// The agmux key is still set on branches the old agmux created.
+const BASE_CONFIG_KEYS: [&str; 5] = [
+    "agtk-base-branch",
     "agmux-base-branch",
     "vscode-merge-base",
     "gh-merge-base",

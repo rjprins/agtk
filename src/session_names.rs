@@ -58,40 +58,40 @@ mod tests {
     #[test]
     fn first_unnamed_session_uses_worktree_name() {
         assert_eq!(
-            next_worktree_session_name("codex-123", Some(Path::new("/work/agmux-native")), &[]),
-            "agmux-native"
+            next_worktree_session_name("codex-123", Some(Path::new("/work/agtk")), &[]),
+            "agtk"
         );
     }
 
     #[test]
     fn later_unnamed_sessions_use_the_next_worktree_increment() {
         let sessions = vec![
-            session("agmux-native", "/work/agmux-native"),
-            session("agmux-native 2", "/work/agmux-native"),
-            session("agmux-native 4", "/work/agmux-native"),
+            session("agtk", "/work/agtk"),
+            session("agtk 2", "/work/agtk"),
+            session("agtk 4", "/work/agtk"),
         ];
 
         assert_eq!(
             next_worktree_session_name(
                 "codex-123",
-                Some(Path::new("/work/agmux-native")),
+                Some(Path::new("/work/agtk")),
                 &sessions,
             ),
-            "agmux-native 5"
+            "agtk 5"
         );
     }
 
     #[test]
     fn increments_are_scoped_by_full_worktree_path() {
-        let sessions = vec![session("agmux-native", "/other/agmux-native")];
+        let sessions = vec![session("agtk", "/other/agtk")];
 
         assert_eq!(
             next_worktree_session_name(
                 "codex-123",
-                Some(Path::new("/work/agmux-native")),
+                Some(Path::new("/work/agtk")),
                 &sessions,
             ),
-            "agmux-native"
+            "agtk"
         );
     }
 

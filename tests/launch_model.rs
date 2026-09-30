@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use agmux_native::control::SessionKind;
-use agmux_native::launch_model::{
+use agtk::control::SessionKind;
+use agtk::launch_model::{
     DEFAULT_BASE_BRANCH, carried_agent_args, choice_matches, directory_choices, path_completions,
     provider_args, worktree_choices,
 };
@@ -10,16 +10,16 @@ use serde_json::json;
 #[test]
 fn worktree_choices_keep_current_pinned_then_sort_real_worktrees() {
     let choices = worktree_choices(
-        "/work/agmux",
+        "/work/agtk",
         [
-            ("/work/agmux-zeta".to_owned(), "zeta".to_owned()),
-            ("/work/agmux-alpha".to_owned(), "alpha".to_owned()),
-            ("/work/agmux".to_owned(), "agmux".to_owned()),
+            ("/work/agtk-zeta".to_owned(), "zeta".to_owned()),
+            ("/work/agtk-alpha".to_owned(), "alpha".to_owned()),
+            ("/work/agtk".to_owned(), "agtk".to_owned()),
         ],
     );
 
-    assert_eq!(choices[0].value, "/work/agmux");
-    assert_eq!(choices[0].label, "Current (agmux)");
+    assert_eq!(choices[0].value, "/work/agtk");
+    assert_eq!(choices[0].label, "Current (agtk)");
     assert_eq!(choices[1].label, "alpha");
     assert_eq!(choices[2].label, "zeta");
 }
@@ -27,8 +27,8 @@ fn worktree_choices_keep_current_pinned_then_sort_real_worktrees() {
 #[test]
 fn worktree_choices_treat_trailing_project_separators_as_the_current_tree() {
     let choices = worktree_choices(
-        "/work/agmux/",
-        [("/work/agmux".to_owned(), "agmux".to_owned())],
+        "/work/agtk/",
+        [("/work/agtk".to_owned(), "agtk".to_owned())],
     );
 
     assert_eq!(
@@ -36,7 +36,7 @@ fn worktree_choices_treat_trailing_project_separators_as_the_current_tree() {
             .iter()
             .map(|choice| choice.value.as_str())
             .collect::<Vec<_>>(),
-        vec!["/work/agmux/"]
+        vec!["/work/agtk/"]
     );
 }
 
@@ -104,16 +104,16 @@ fn path_completions_only_return_matching_directories() {
 fn empty_worktree_selection_uses_the_project_directory() {
     let project = PathBuf::from("/tmp/project");
     assert_eq!(
-        agmux_native::launch_model::effective_worktree_path(Some(&project), None),
+        agtk::launch_model::effective_worktree_path(Some(&project), None),
         Some(project.clone())
     );
     let selected = PathBuf::from("/tmp/project-worktree");
     assert_eq!(
-        agmux_native::launch_model::effective_worktree_path(Some(&project), Some(&selected)),
+        agtk::launch_model::effective_worktree_path(Some(&project), Some(&selected)),
         Some(selected)
     );
     assert_eq!(
-        agmux_native::launch_model::effective_worktree_path(None, None),
+        agtk::launch_model::effective_worktree_path(None, None),
         None
     );
 }
@@ -122,7 +122,7 @@ fn empty_worktree_selection_uses_the_project_directory() {
 fn launch_paths_expand_home_directory_shorthand() {
     let home = std::env::var_os("HOME").expect("HOME is set for launch path expansion");
     assert_eq!(
-        agmux_native::launch_model::expand_user_path("~/fastapi-restly"),
+        agtk::launch_model::expand_user_path("~/fastapi-restly"),
         PathBuf::from(home).join("fastapi-restly")
     );
 }

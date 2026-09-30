@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render agmux in a private headless GNOME compositor and capture every surface.
+# Render agtk in a private headless GNOME compositor and capture every surface.
 # Nothing touches the live instance or the desktop.
 #
 # Usage: scripts/ui-preview.sh [--dark] [--keep] [--font-size N] [SURFACE...]
@@ -29,9 +29,9 @@ cargo build --quiet --manifest-path "$repo/Cargo.toml" --bins
 bin="$repo/target/debug"
 
 # Unix sockets need a short path, so runtime files live under XDG_RUNTIME_DIR.
-work=$(mktemp -d "${TMPDIR:-/tmp}/agmux-preview.XXXXXX")
-runtime="${XDG_RUNTIME_DIR:-/tmp}/agmux-run-$$"
-display="agmux-preview-$$"
+work=$(mktemp -d "${TMPDIR:-/tmp}/agtk-preview.XXXXXX")
+runtime="${XDG_RUNTIME_DIR:-/tmp}/agtk-run-$$"
+display="agtk-preview-$$"
 out="$work/captures"
 mkdir -p "$runtime" "$out" "$work/state" "$work/claude" "$work/codex"
 
@@ -39,7 +39,7 @@ pids=()
 compositor=""
 cleanup() {
   if ((keep)); then return; fi
-  if [[ -S "$runtime/agmux-native/preview/control.sock" ]]; then
+  if [[ -S "$runtime/agtk/preview/control.sock" ]]; then
     for id in $(ctl state 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4); do
       ctl session close "$id" >/dev/null 2>&1 || true
     done
@@ -64,9 +64,9 @@ cat > "$work/fake-az" <<'AZ'
 #!/bin/sh
 case "$1 $2 $3" in
   'account show --query') echo 'reviewer@example.com' ;;
-  'repos pr list') cat "$AGMUX_AZURE_PRS_FILE" ;;
+  'repos pr list') cat "$AGTK_AZURE_PRS_FILE" ;;
   'repos pr work-item') printf '%s\n' '[{"id":2417,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Implement cursor pagination"}}]' ;;
-  'devops invoke --org') cat "$AGMUX_AZURE_THREADS_FILE" ;;
+  'devops invoke --org') cat "$AGTK_AZURE_THREADS_FILE" ;;
   *) echo 'unexpected az command' >&2; exit 2 ;;
 esac
 AZ
@@ -132,14 +132,14 @@ printf '%s\n' \
   > "$work/claude/projects/demo/claude-preview-1.jsonl"
 
 export WAYLAND_DISPLAY="$display" GDK_BACKEND=wayland GSK_RENDERER=cairo
-export AGMUX_INSTANCE=preview AGMUX_RUNTIME_ROOT="$runtime" AGMUX_STATE_ROOT="$work/state"
+export AGTK_INSTANCE=preview AGTK_RUNTIME_ROOT="$runtime" AGTK_STATE_ROOT="$work/state"
 export CLAUDE_CONFIG_DIR="$work/claude" CODEX_HOME="$work/codex"
-export AGMUX_CLAUDE_BIN="$work/claude-bin" AGMUX_CODEX_BIN="$work/codex-bin"
-export AGMUX_AZURE_BIN="$work/fake-az" AGMUX_AZURE_PRS_FILE="$work/azure-prs.json"
-export AGMUX_AZURE_THREADS_FILE="$work/azure-threads.json" AGMUX_EMACSCLIENT=/bin/true
+export AGTK_CLAUDE_BIN="$work/claude-bin" AGTK_CODEX_BIN="$work/codex-bin"
+export AGTK_AZURE_BIN="$work/fake-az" AGTK_AZURE_PRS_FILE="$work/azure-prs.json"
+export AGTK_AZURE_THREADS_FILE="$work/azure-threads.json" AGTK_EMACSCLIENT=/bin/true
 ((dark)) && export ADW_DEBUG_COLOR_SCHEME=prefer-dark
 
-ctl() { "$bin/agmuxctl" --instance preview "$@"; }
+ctl() { "$bin/agtkctl" --instance preview "$@"; }
 id_of() { ctl state | grep -o "\"id\":\"[^\"]*\"[^}]*\"name\":\"$1\"" | head -1 | cut -d'"' -f4; }
 
 setsid dbus-run-session -- mutter --headless --wayland --no-x11 --virtual-monitor 1400x900 \
@@ -148,7 +148,7 @@ compositor=$!
 for _ in $(seq 50); do [[ -S "${XDG_RUNTIME_DIR:-/tmp}/$display" ]] && break; sleep 0.2; done
 
 start_ui() {
-  "$bin/agmux-native" >>"$work/app.log" 2>&1 &
+  "$bin/agtk" >>"$work/app.log" 2>&1 &
   ui_pid=$!
   for _ in $(seq 100); do ctl state >/dev/null 2>&1 && break; sleep 0.1; done
   sleep 1
@@ -166,7 +166,7 @@ ctl session input "$main_id" --text "Make the orders endpoint use cursor paginat
 ctl session select "$main_id" >/dev/null
 [[ -n $font_size ]] && ctl appearance set --ui-font-size "$font_size" >/dev/null
 # Open the launch dialog on Codex, the agent with the most options.
-sqlite3 "$work/state/agmux-native/preview/agmux.db" \
+sqlite3 "$work/state/agtk/preview/agtk.db" \
   "insert or replace into preferences(key, data) values ('quickLaunch', '{\"kind\":\"codex\",\"cwd\":\"$project\",\"projectRoot\":\"$project\",\"worktreePath\":\"$project\"}')"
 sleep 1
 
@@ -226,6 +226,6 @@ pids+=("$ui_pid")
 
 if ((keep)); then
   echo "Instance still running. Drive it with:"
-  echo "  AGMUX_RUNTIME_ROOT=$runtime $bin/agmuxctl --instance preview state"
+  echo "  AGTK_RUNTIME_ROOT=$runtime $bin/agtkctl --instance preview state"
   echo "Stop it with: kill ${pids[*]}; kill -- -$compositor"
 fi

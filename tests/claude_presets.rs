@@ -1,4 +1,4 @@
-use agmux_native::claude_presets::{ClaudeEffort, ClaudeModelPreset, ClaudePresetPreferences};
+use agtk::claude_presets::{ClaudeEffort, ClaudeModelPreset, ClaudePresetPreferences};
 use serde_json::json;
 
 #[test]

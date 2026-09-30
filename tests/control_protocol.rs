@@ -1,14 +1,14 @@
-use agmux_native::appearance::ThemeKey;
-use agmux_native::control::{
+use agtk::appearance::ThemeKey;
+use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, PrListParams, ProjectSetParams,
     ResponseBody, SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams,
     WorktreeCreateParams, WorktreeListParams, WorktreeReapParams, control_timeout, decode_request,
     decode_response, encode_request, encode_response,
 };
-use agmux_native::providers::AgentProvider;
-use agmux_native::shortcuts::ShortcutAction;
-use agmux_native::worktrees::DeleteBranch;
+use agtk::providers::AgentProvider;
+use agtk::shortcuts::ShortcutAction;
+use agtk::worktrees::DeleteBranch;
 use serde_json::json;
 use std::time::Duration;
 
@@ -50,7 +50,7 @@ fn request_defaults_are_applied_at_the_protocol_boundary() {
 #[test]
 fn pull_request_commands_get_a_longer_control_deadline() {
     let pull_requests = ControlCommand::PrList(PrListParams {
-        project_root: "/work/agmux".into(),
+        project_root: "/work/agtk".into(),
     });
 
     assert_eq!(control_timeout(&pull_requests), Duration::from_secs(30));
@@ -119,38 +119,38 @@ fn every_core_method_decodes_to_a_typed_command() {
         ),
         (
             "project.set",
-            r#"{"root":"/work/agmux","isPinned":true}"#,
+            r#"{"root":"/work/agtk","isPinned":true}"#,
             "ProjectSet",
         ),
         (
             "worktree.list",
-            r#"{"projectRoot":"/work/agmux"}"#,
+            r#"{"projectRoot":"/work/agtk"}"#,
             "WorktreeList",
         ),
         (
             "worktree.create",
-            r#"{"projectRoot":"/work/agmux","branch":"native-ui","purpose":"Build native UI"}"#,
+            r#"{"projectRoot":"/work/agtk","branch":"native-ui","purpose":"Build native UI"}"#,
             "WorktreeCreate",
         ),
         (
             "worktree.reap",
-            r#"{"path":"/work/agmux-native-ui","expectedHead":"0123456789abcdef","expectedStatusHash":"abcdef","deleteBranch":"auto"}"#,
+            r#"{"path":"/work/agtk-ui","expectedHead":"0123456789abcdef","expectedStatusHash":"abcdef","deleteBranch":"auto"}"#,
             "WorktreeReap",
         ),
-        ("pr.list", r#"{"projectRoot":"/work/agmux"}"#, "PrList"),
+        ("pr.list", r#"{"projectRoot":"/work/agtk"}"#, "PrList"),
         (
             "pr.acknowledge",
-            r#"{"projectRoot":"/work/agmux","pullRequestId":42,"marker":"review"}"#,
+            r#"{"projectRoot":"/work/agtk","pullRequestId":42,"marker":"review"}"#,
             "PrAcknowledge",
         ),
         (
             "pr.set_auto_review",
-            r#"{"projectRoot":"/work/agmux","enabled":true}"#,
+            r#"{"projectRoot":"/work/agtk","enabled":true}"#,
             "PrSetAutoReview",
         ),
         (
             "pr.launch_review",
-            r#"{"projectRoot":"/work/agmux","pullRequestId":42}"#,
+            r#"{"projectRoot":"/work/agtk","pullRequestId":42}"#,
             "PrLaunchReview",
         ),
         (
@@ -172,7 +172,7 @@ fn every_core_method_decodes_to_a_typed_command() {
         ),
         (
             "agent.restore",
-            r#"{"provider":"claude","providerSessionId":"claude-1","cwd":"/work/agmux"}"#,
+            r#"{"provider":"claude","providerSessionId":"claude-1","cwd":"/work/agtk"}"#,
             "AgentRestore",
         ),
         (
@@ -257,13 +257,13 @@ fn provider_commands_are_bounded_and_typed() {
         })
     );
     assert_eq!(
-        decode_request(br#"{"version":1,"id":"agent","method":"agent.restore","params":{"provider":"claude","providerSessionId":"claude-1","cwd":"/work/agmux","name":"Recovered"}}"#)
+        decode_request(br#"{"version":1,"id":"agent","method":"agent.restore","params":{"provider":"claude","providerSessionId":"claude-1","cwd":"/work/agtk","name":"Recovered"}}"#)
             .unwrap()
             .command,
         ControlCommand::AgentRestore(AgentRestoreParams {
             provider: AgentProvider::Claude,
             provider_session_id: "claude-1".to_owned(),
-            cwd: Some("/work/agmux".into()),
+            cwd: Some("/work/agtk".into()),
             project_root: None,
             worktree_path: None,
             name: Some("Recovered".to_owned()),
@@ -295,33 +295,33 @@ fn provider_commands_are_bounded_and_typed() {
 
 #[test]
 fn worktree_operations_have_typed_guarded_parameters() {
-    let list = decode_request(br#"{"version":1,"id":"wt","method":"worktree.list","params":{"projectRoot":"/work/agmux"}}"#)
+    let list = decode_request(br#"{"version":1,"id":"wt","method":"worktree.list","params":{"projectRoot":"/work/agtk"}}"#)
         .expect("decode list");
     assert_eq!(
         list.command,
         ControlCommand::WorktreeList(WorktreeListParams {
-            project_root: "/work/agmux".into(),
+            project_root: "/work/agtk".into(),
         })
     );
 
-    let create = decode_request(br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agmux","branch":"native-ui","baseBranch":"main","purpose":"Build native UI"}}"#)
+    let create = decode_request(br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agtk","branch":"native-ui","baseBranch":"main","purpose":"Build native UI"}}"#)
         .expect("decode create");
     assert_eq!(
         create.command,
         ControlCommand::WorktreeCreate(WorktreeCreateParams {
-            project_root: "/work/agmux".into(),
+            project_root: "/work/agtk".into(),
             branch: "native-ui".to_owned(),
             base_branch: Some("main".to_owned()),
             purpose: "Build native UI".to_owned(),
         })
     );
 
-    let reap = decode_request(br#"{"version":1,"id":"wt","method":"worktree.reap","params":{"path":"/work/agmux-native-ui","expectedHead":"0123456789abcdef","expectedStatusHash":"abcdef","deleteBranch":"force"}}"#)
+    let reap = decode_request(br#"{"version":1,"id":"wt","method":"worktree.reap","params":{"path":"/work/agtk-ui","expectedHead":"0123456789abcdef","expectedStatusHash":"abcdef","deleteBranch":"force"}}"#)
         .expect("decode reap");
     assert_eq!(
         reap.command,
         ControlCommand::WorktreeReap(WorktreeReapParams {
-            path: "/work/agmux-native-ui".into(),
+            path: "/work/agtk-ui".into(),
             expected_head: "0123456789abcdef".to_owned(),
             expected_status_hash: "abcdef".to_owned(),
             delete_branch: DeleteBranch::Force,
@@ -330,8 +330,8 @@ fn worktree_operations_have_typed_guarded_parameters() {
 
     for invalid in [
         br#"{"version":1,"id":"wt","method":"worktree.list","params":{"projectRoot":"relative"}}"#.as_slice(),
-        br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agmux","branch":"Bad_Branch","purpose":"work"}}"#.as_slice(),
-        br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agmux","branch":"good-branch","purpose":""}}"#.as_slice(),
+        br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agtk","branch":"Bad_Branch","purpose":"work"}}"#.as_slice(),
+        br#"{"version":1,"id":"wt","method":"worktree.create","params":{"projectRoot":"/work/agtk","branch":"good-branch","purpose":""}}"#.as_slice(),
         br#"{"version":1,"id":"wt","method":"worktree.reap","params":{"path":"relative","expectedHead":"abc","expectedStatusHash":"def","deleteBranch":"auto"}}"#.as_slice(),
     ] {
         assert_eq!(
@@ -343,12 +343,12 @@ fn worktree_operations_have_typed_guarded_parameters() {
 
 #[test]
 fn project_updates_require_an_absolute_root_and_one_change() {
-    let request = decode_request(br#"{"version":1,"id":"project","method":"project.set","params":{"root":"/work/agmux","isPinned":true,"isCollapsed":false}}"#)
+    let request = decode_request(br#"{"version":1,"id":"project","method":"project.set","params":{"root":"/work/agtk","isPinned":true,"isCollapsed":false}}"#)
         .expect("decode project update");
     assert_eq!(
         request.command,
         ControlCommand::ProjectSet(ProjectSetParams {
-            root: "/work/agmux".into(),
+            root: "/work/agtk".into(),
             is_pinned: Some(true),
             is_collapsed: Some(false),
         })
@@ -356,7 +356,7 @@ fn project_updates_require_an_absolute_root_and_one_change() {
 
     for invalid in [
         br#"{"version":1,"id":"project","method":"project.set","params":{"root":"relative","isPinned":true}}"#.as_slice(),
-        br#"{"version":1,"id":"project","method":"project.set","params":{"root":"/work/agmux"}}"#.as_slice(),
+        br#"{"version":1,"id":"project","method":"project.set","params":{"root":"/work/agtk"}}"#.as_slice(),
     ] {
         assert_eq!(
             decode_request(invalid).unwrap_err().code,

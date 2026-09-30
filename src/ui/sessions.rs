@@ -448,7 +448,7 @@ impl Workspace {
         let socket = self.paths.sessions_dir().join(format!("{id}.sock"));
         let paths = self.paths.clone();
         let host_binary = self.host_binary.clone();
-        let agmuxctl = sibling_binary("agmuxctl");
+        let agtkctl = sibling_binary("agtkctl");
         self.run_io(
             move || {
                 let plan = SessionLaunchPlan::new(params)?;
@@ -474,7 +474,7 @@ impl Workspace {
                 record.state = SessionState::Reconnecting;
                 store.save_session(&record)?;
                 let hook_args: Vec<OsString> = if record.kind == SessionKind::Claude {
-                    let settings = ensure_claude_hook_settings(paths.runtime_dir(), &agmuxctl)?;
+                    let settings = ensure_claude_hook_settings(paths.runtime_dir(), &agtkctl)?;
                     vec!["--settings".into(), settings.into_os_string()]
                 } else {
                     Vec::new()
@@ -493,9 +493,9 @@ impl Workspace {
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
-                        .env("AGMUX_INSTANCE", paths.name().as_str())
-                        .env("AGMUX_SESSION_ID", &id)
-                        .env("AGMUX_CONTROL_SOCKET", paths.control_socket());
+                        .env("AGTK_INSTANCE", paths.name().as_str())
+                        .env("AGTK_SESSION_ID", &id)
+                        .env("AGTK_CONTROL_SOCKET", paths.control_socket());
                     command.env("PATH", &session_path);
                     if let Some(cwd) = &record.cwd {
                         command.current_dir(cwd);
@@ -718,7 +718,7 @@ impl Workspace {
                     tag
                 }
                 Err(error) => {
-                    eprintln!("agmux-native: invalid link pattern: {error}");
+                    eprintln!("agtk: invalid link pattern: {error}");
                     -1
                 }
             };
@@ -1240,7 +1240,7 @@ pub(super) struct Placement {
     pub(super) select: bool,
 }
 
-/// An exited agent whose conversation agmux knows can start again in its row.
+/// An exited agent whose conversation agtk knows can start again in its row.
 pub(super) fn is_resumable(record: &SessionRecord) -> bool {
     record.state == SessionState::Exited
         && matches!(record.kind, SessionKind::Claude | SessionKind::Codex)
@@ -1262,7 +1262,7 @@ fn exited_message(record: &SessionRecord) -> String {
 // Unscoped hosts share the app's cgroup, so its memory figures include the agents.
 fn warn_unscoped_session(id: &str, reason: &dyn std::fmt::Display) {
     eprintln!(
-        "agmux-native: systemd-run failed for session {id} ({reason}); launching it inside the app's cgroup"
+        "agtk: systemd-run failed for session {id} ({reason}); launching it inside the app's cgroup"
     );
 }
 

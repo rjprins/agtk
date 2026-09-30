@@ -1,4 +1,4 @@
-use agmux_native::control::{ControlCommand, GetTextParams, SessionState, WaitCondition};
+use agtk::control::{ControlCommand, GetTextParams, SessionState, WaitCondition};
 use serde_json::json;
 
 #[test]

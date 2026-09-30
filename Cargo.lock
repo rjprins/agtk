@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "agmux-native"
+name = "agtk"
 version = "0.1.0"
 dependencies = [
  "base64",

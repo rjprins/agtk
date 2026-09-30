@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use agmux_native::worktrees::{
+use agtk::worktrees::{
     DeleteBranch, ReapClass, ReapRequest, WorktreeManager, WorktreeState, parse_worktree_porcelain,
 };
 
@@ -546,8 +546,8 @@ impl Repository {
         let root = directory.path().join("demo");
         fs::create_dir(&root).unwrap();
         git(&root, &["init", "-b", "main"]);
-        git(&root, &["config", "user.name", "Agmux Test"]);
-        git(&root, &["config", "user.email", "agmux@example.invalid"]);
+        git(&root, &["config", "user.name", "Agtk Test"]);
+        git(&root, &["config", "user.email", "agtk@example.invalid"]);
         fs::write(root.join("README.md"), "fixture\n").unwrap();
         git(&root, &["add", "README.md"]);
         git(&root, &["commit", "-m", "fixture"]);

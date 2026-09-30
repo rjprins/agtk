@@ -1,5 +1,5 @@
 //! Run against a private compositor, never the user's display:
-//! AGMUX_TEST_DISPLAY=/absolute/path/to/wayland-socket cargo test --test native_ui -- --ignored
+//! AGTK_TEST_DISPLAY=/absolute/path/to/wayland-socket cargo test --test native_ui -- --ignored
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
@@ -9,9 +9,9 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agmux_native::control::{ControlClient, ErrorCode, ResponseBody, decode_request};
-use agmux_native::instance::{InstanceName, InstancePaths};
-use agmux_native::persist::Store;
+use agtk::control::{ControlClient, ErrorCode, ResponseBody, decode_request};
+use agtk::instance::{InstanceName, InstancePaths};
+use agtk::persist::Store;
 use serde_json::{Value, json};
 
 struct App {
@@ -40,14 +40,14 @@ impl App {
         let fake_emacs = directory.path().join("fake-emacsclient");
         std::fs::write(
             &fake_emacs,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AGMUX_EMACS_ARGS_FILE\"\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AGTK_EMACS_ARGS_FILE\"\n",
         )
         .unwrap();
         std::fs::set_permissions(&fake_emacs, std::fs::Permissions::from_mode(0o700)).unwrap();
         let fake_az = directory.path().join("fake-az");
         std::fs::write(
             &fake_az,
-            "#!/bin/sh\n[ -e \"$AGMUX_AZURE_PRS_FILE.slow\" ] && sleep 10\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGMUX_AZURE_PRS_FILE\" ;;\n  'repos pr work-item') cat \"$AGMUX_AZURE_PBIS_FILE\" ;;\n  'devops invoke --org') cat \"$AGMUX_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\n[ -e \"$AGTK_AZURE_PRS_FILE.slow\" ] && sleep 10\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGTK_AZURE_PRS_FILE\" ;;\n  'repos pr work-item') cat \"$AGTK_AZURE_PBIS_FILE\" ;;\n  'devops invoke --org') cat \"$AGTK_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         std::fs::set_permissions(&fake_az, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -73,7 +73,7 @@ impl App {
     }
 
     fn start(&mut self) {
-        let display = std::env::var("AGMUX_TEST_DISPLAY").expect("private display required");
+        let display = std::env::var("AGTK_TEST_DISPLAY").expect("private display required");
         assert!(std::path::Path::new(&display).is_absolute());
         self.child = Some(self.command().spawn().unwrap());
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -98,39 +98,39 @@ impl App {
     }
 
     fn command(&self) -> Command {
-        let display = std::env::var("AGMUX_TEST_DISPLAY").expect("private display required");
+        let display = std::env::var("AGTK_TEST_DISPLAY").expect("private display required");
         assert!(std::path::Path::new(&display).is_absolute());
-        let mut command = Command::new(env!("CARGO_BIN_EXE_agmux-native"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_agtk"));
         command
             .env("WAYLAND_DISPLAY", display)
             .env("GDK_BACKEND", "wayland")
             .env("GSK_RENDERER", "cairo")
-            .env("AGMUX_INSTANCE", self.paths.name().as_str())
-            .env("AGMUX_RUNTIME_ROOT", self.directory.path())
-            .env("AGMUX_STATE_ROOT", self.directory.path())
+            .env("AGTK_INSTANCE", self.paths.name().as_str())
+            .env("AGTK_RUNTIME_ROOT", self.directory.path())
+            .env("AGTK_STATE_ROOT", self.directory.path())
             .env("CLAUDE_CONFIG_DIR", self.directory.path().join("claude"))
             .env("CODEX_HOME", self.directory.path().join("codex"))
-            .env("AGMUX_CODEX_BIN", self.directory.path().join("fake-agent"))
-            .env("AGMUX_CLAUDE_BIN", self.directory.path().join("fake-agent"))
+            .env("AGTK_CODEX_BIN", self.directory.path().join("fake-agent"))
+            .env("AGTK_CLAUDE_BIN", self.directory.path().join("fake-agent"))
             .env(
-                "AGMUX_EMACSCLIENT",
+                "AGTK_EMACSCLIENT",
                 self.directory.path().join("fake-emacsclient"),
             )
             .env(
-                "AGMUX_EMACS_ARGS_FILE",
+                "AGTK_EMACS_ARGS_FILE",
                 self.directory.path().join("emacs-args"),
             )
-            .env("AGMUX_AZURE_BIN", self.directory.path().join("fake-az"))
+            .env("AGTK_AZURE_BIN", self.directory.path().join("fake-az"))
             .env(
-                "AGMUX_AZURE_PRS_FILE",
+                "AGTK_AZURE_PRS_FILE",
                 self.directory.path().join("azure-prs.json"),
             )
             .env(
-                "AGMUX_AZURE_THREADS_FILE",
+                "AGTK_AZURE_THREADS_FILE",
                 self.directory.path().join("azure-threads.json"),
             )
             .env(
-                "AGMUX_AZURE_PBIS_FILE",
+                "AGTK_AZURE_PBIS_FILE",
                 self.directory.path().join("azure-pbis.json"),
             )
             .stdin(Stdio::null())
@@ -199,7 +199,7 @@ impl Drop for App {
             for entry in entries.flatten() {
                 if let Ok(mut socket) = UnixStream::connect(entry.path()) {
                     let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
-                    let _ = agmux_native::session::receive_attachment(&socket);
+                    let _ = agtk::session::receive_attachment(&socket);
                     let _ = socket.write_all(b"K");
                 }
             }
@@ -208,21 +208,21 @@ impl Drop for App {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn metadata_and_child_survive_ui_restart() {
     let mut app = App::new();
-    let session = app.request("session.create", json!({"kind":"custom","command":"/bin/sh","args":["-c","stty -echo; printf '__AGMUX_PID_%s__\\n' \"$$\"; exec /bin/sh -i"],"name":"before rename","cwd":app.directory.path(),"projectRoot":app.directory.path()}));
+    let session = app.request("session.create", json!({"kind":"custom","command":"/bin/sh","args":["-c","stty -echo; printf '__AGTK_PID_%s__\\n' \"$$\"; exec /bin/sh -i"],"name":"before rename","cwd":app.directory.path(),"projectRoot":app.directory.path()}));
     let id = session["id"].as_str().unwrap();
     app.request(
         "session.rename",
         json!({"sessionId":id,"name":"durable name"}),
     );
-    let text = app.wait_text(id, "__AGMUX_PID_");
+    let text = app.wait_text(id, "__AGTK_PID_");
     let pid = text
         .lines()
         .find_map(|line| {
             line.trim()
-                .strip_prefix("__AGMUX_PID_")?
+                .strip_prefix("__AGTK_PID_")?
                 .strip_suffix("__")?
                 .parse::<u32>()
                 .ok()
@@ -243,9 +243,9 @@ fn metadata_and_child_survive_ui_restart() {
     assert_eq!(state["selectedSessionId"], id);
     app.request(
         "session.send_input",
-        json!({"sessionId":id,"text":"printf '__AGMUX_PID_%s__\\n' \"$$\"","appendEnter":true}),
+        json!({"sessionId":id,"text":"printf '__AGTK_PID_%s__\\n' \"$$\"","appendEnter":true}),
     );
-    app.wait_text(id, &format!("__AGMUX_PID_{pid}__"));
+    app.wait_text(id, &format!("__AGTK_PID_{pid}__"));
     app.request("session.close", json!({"sessionId":id}));
     assert!(
         app.request("app.get_state", json!({}))["sessions"]
@@ -256,7 +256,7 @@ fn metadata_and_child_survive_ui_restart() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn workspace_inspection_preserves_two_pane_tui_structure() {
     let app = App::new();
     let inspection = app.request("ui.inspect", json!({}));
@@ -382,7 +382,7 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn reactivating_an_existing_app_presents_the_main_window_not_a_modal() {
     let app = App::new();
     let project = app.directory.path().join("reactivation-project");
@@ -429,7 +429,7 @@ fn reactivating_an_existing_app_presents_the_main_window_not_a_modal() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn sidebar_width_is_restored_on_ui_restart() {
     let mut app = App::new();
     app.stop();
@@ -450,7 +450,7 @@ fn sidebar_width_is_restored_on_ui_restart() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn changes_sidebar_width_is_restored_on_ui_restart() {
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
         if node["id"] == id {
@@ -490,7 +490,7 @@ fn changes_sidebar_width_is_restored_on_ui_restart() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn launch_surface_populates_project_and_git_worktree_choices() {
     let app = App::new();
     let project = app.directory.path().join("launch-project");
@@ -504,8 +504,8 @@ fn launch_surface_populates_project_and_git_worktree_choices() {
         assert!(status.success(), "git command failed: {args:?}");
     };
     git(&["init", "-q"]);
-    git(&["config", "user.name", "agmux test"]);
-    git(&["config", "user.email", "agmux@example.test"]);
+    git(&["config", "user.name", "agtk test"]);
+    git(&["config", "user.email", "agtk@example.test"]);
     std::fs::write(project.join("README"), "launch probe\n").unwrap();
     git(&["add", "README"]);
     git(&["commit", "-qm", "initial"]);
@@ -566,7 +566,7 @@ fn launch_surface_populates_project_and_git_worktree_choices() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn terminal_appearance_updates_live_and_survives_ui_restart() {
     let mut app = App::new();
     let session = app.request(
@@ -606,7 +606,7 @@ fn terminal_appearance_updates_live_and_survives_ui_restart() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn emacs_actions_use_the_selected_sessions_repository_context() {
     let app = App::new();
     let project = app.directory.path().join("emacs-project");
@@ -666,7 +666,7 @@ fn emacs_actions_use_the_selected_sessions_repository_context() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn claude_model_presets_are_exact_provider_only_and_durable() {
     let mut app = App::new();
     let session = app.request(
@@ -678,7 +678,7 @@ fn claude_model_presets_are_exact_provider_only_and_durable() {
         }),
     );
     let id = session["id"].as_str().unwrap().to_owned();
-    // A fresh Claude session only gets the agmux hook settings.
+    // A fresh Claude session only gets the agtk hook settings.
     app.wait_text(&id, "__RESTORE_ARGS_--settings_");
 
     let inspection = app.request("ui.inspect", json!({}));
@@ -746,7 +746,7 @@ fn claude_model_presets_are_exact_provider_only_and_durable() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn azure_pr_attention_and_review_launch_use_the_project_context() {
     let app = App::new();
     let project = app.directory.path().join("azure-project");
@@ -941,7 +941,7 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
     let mut app = App::new();
     let project = app.directory.path().join("azure-project");
@@ -1111,7 +1111,7 @@ fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn closing_a_session_does_not_wait_for_a_slow_pr_lookup() {
     let app = App::new();
     let project = app.directory.path().join("azure-project");
@@ -1154,7 +1154,7 @@ fn closing_a_session_does_not_wait_for_a_slow_pr_lookup() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn renaming_an_agent_session_renames_it_in_the_agent_once_idle() {
     let app = App::new();
     let session = app.request(
@@ -1188,7 +1188,7 @@ fn renaming_an_agent_session_renames_it_in_the_agent_once_idle() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn shortcut_overrides_are_validated_and_survive_ui_restart() {
     let mut app = App::new();
     assert_eq!(
@@ -1221,7 +1221,7 @@ fn shortcut_overrides_are_validated_and_survive_ui_restart() {
     );
     assert!(matches!(
         duplicate,
-        ResponseBody::Failure(ref error) if error.code == agmux_native::control::ErrorCode::InvalidParams
+        ResponseBody::Failure(ref error) if error.code == agtk::control::ErrorCode::InvalidParams
     ));
     let unmodified = app.request_body(
         "shortcut.set",
@@ -1229,7 +1229,7 @@ fn shortcut_overrides_are_validated_and_survive_ui_restart() {
     );
     assert!(matches!(
         unmodified,
-        ResponseBody::Failure(ref error) if error.code == agmux_native::control::ErrorCode::InvalidParams
+        ResponseBody::Failure(ref error) if error.code == agtk::control::ErrorCode::InvalidParams
     ));
 
     app.stop();
@@ -1249,7 +1249,7 @@ fn shortcut_overrides_are_validated_and_survive_ui_restart() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn sessions_group_by_project_and_worktree_with_durable_project_state() {
     let mut app = App::new();
     let worktree = app.directory.path().join("feature-worktree");
@@ -1307,15 +1307,15 @@ fn sessions_group_by_project_and_worktree_with_durable_project_state() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn control_api_completes_disposable_worktree_lifecycle() {
     let app = App::new();
     let repo = app.directory.path().join("repo");
     std::fs::create_dir(&repo).unwrap();
     for arguments in [
         vec!["init", "-b", "main"],
-        vec!["config", "user.name", "Agmux Test"],
-        vec!["config", "user.email", "agmux@example.invalid"],
+        vec!["config", "user.name", "Agtk Test"],
+        vec!["config", "user.email", "agtk@example.invalid"],
     ] {
         let output = Command::new("git")
             .args(arguments)
@@ -1394,7 +1394,7 @@ fn control_api_completes_disposable_worktree_lifecycle() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn recent_agent_surface_uses_isolated_logs_and_readiness_survives_restart() {
     let mut app = App::new();
     let codex_logs = app.directory.path().join("codex/sessions/2026/09/15");
@@ -1586,7 +1586,7 @@ fn a_restarted_agent_resumes_its_conversation_in_the_same_place() {
 }
 
 #[test]
-#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn files_page_lists_the_worktree_and_opens_files_read_only() {
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
         if node["id"] == id {

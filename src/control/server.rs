@@ -113,7 +113,7 @@ fn serve(listener: UnixListener, requests: Sender<PendingRequest>, shutdown: Arc
                 let slot = ActiveClient::claim(&active);
                 // A slow request, such as a PR lookup, must not hold up agent state hooks.
                 let _ = thread::Builder::new()
-                    .name("agmux-control".to_owned())
+                    .name("agtk-control".to_owned())
                     .spawn(move || {
                         let _slot = slot;
                         let _ = handle_client(stream, &requests);

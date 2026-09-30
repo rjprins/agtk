@@ -2,7 +2,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use agmux_native::azure::{
+use agtk::azure::{
     AzureClient, AzurePr, AzureRepoRef, PrAttention, acknowledge_attention, normalize_active_prs,
     parse_azure_remote, reconcile_attention,
 };

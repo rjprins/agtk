@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::Command;
 
-use agmux_native::emacs::{
+use agtk::emacs::{
     EmacsAction, EmacsIntegration, build_branch_review_eval, build_magit_eval,
     resolve_branch_review_base, resolve_worktree_root,
 };
@@ -74,7 +74,7 @@ fn run_git(cwd: &std::path::Path, args: &[&str]) {
 
 #[test]
 fn open_file_form_visits_the_file_at_its_line_and_column() {
-    let form = agmux_native::emacs::build_open_file_eval(
+    let form = agtk::emacs::build_open_file_eval(
         std::path::Path::new("/work/src/main.rs"),
         Some(42),
         Some(7),
@@ -85,7 +85,7 @@ fn open_file_form_visits_the_file_at_its_line_and_column() {
     assert!(form.contains("(raise-frame frame)"));
     assert!(!form.contains("(require '"));
 
-    let plain = agmux_native::emacs::build_open_file_eval(
+    let plain = agtk::emacs::build_open_file_eval(
         std::path::Path::new("/work/a.rs"),
         None,
         Some(3),

@@ -93,7 +93,7 @@ pub(super) fn brand_icon() -> gtk::Image {
     let image = gtk::Image::from_paintable(Some(&texture));
     image.set_pixel_size(22);
     image.set_valign(gtk::Align::Center);
-    image.set_tooltip_text(Some("agmux"));
+    image.set_tooltip_text(Some("agtk"));
     image
 }
 

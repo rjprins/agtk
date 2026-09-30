@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use agmux_native::changes::{DiffDocumentResult, read_changes_snapshot, read_diff_document};
+use agtk::changes::{DiffDocumentResult, read_changes_snapshot, read_diff_document};
 
 fn git(root: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -111,7 +111,7 @@ fn worktree_files_list_tracked_and_untracked_but_not_ignored_paths() {
     fs::write(root.join(".gitignore"), "target/\n").unwrap();
     fs::create_dir_all(root.join("target")).unwrap();
     fs::write(root.join("target/ignored.txt"), "ignored\n").unwrap();
-    let mut files = agmux_native::changes::list_worktree_files(root).unwrap();
+    let mut files = agtk::changes::list_worktree_files(root).unwrap();
     files.sort();
     assert_eq!(
         files,
@@ -125,7 +125,7 @@ fn worktree_files_list_tracked_and_untracked_but_not_ignored_paths() {
 
 #[test]
 fn file_documents_report_text_binary_and_missing_files() {
-    use agmux_native::changes::{FileDocumentResult, read_file_document};
+    use agtk::changes::{FileDocumentResult, read_file_document};
 
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
