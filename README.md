@@ -216,3 +216,7 @@ The UI tests use the same kind of compositor. Start one, then run:
 ```sh
 AGTK_TEST_DISPLAY=$XDG_RUNTIME_DIR/DISPLAY_NAME cargo test --test native_ui -- --ignored --test-threads=1
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
