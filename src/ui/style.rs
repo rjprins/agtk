@@ -55,4 +55,11 @@ vte-terminal { padding: 6px 10px; }
 .session-state.state-waiting { color: var(--warning-color); }
 .session-state.state-exited { color: var(--error-color); }
 .session-state.state-running { color: var(--accent-color); }
+.attention-dot {
+  min-width: 6px;
+  min-height: 6px;
+  margin: -3px -5px 0 0;
+  border-radius: 50%;
+  background: var(--accent-bg-color);
+}
 "#;

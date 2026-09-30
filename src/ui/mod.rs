@@ -156,6 +156,12 @@ struct Workspace {
     io: IoWorker,
     // Git, Azure and log scans take seconds; kept off `io` so closes and hooks stay prompt.
     slow_io: IoWorker,
+    // Background PR polls get their own queue so they never delay the selected session.
+    pr_poll_io: IoWorker,
+    /// Poll steps still running; a new poll waits until this is zero.
+    pr_polls: Rc<Cell<usize>>,
+    /// Sidebar project roots that were checked, with the PR state key of the Azure DevOps ones.
+    azure_projects: Rc<RefCell<HashMap<String, Option<String>>>>,
     // Bumped on each session selection so queued PR lookups for older selections skip.
     pr_context_generation: Arc<AtomicU64>,
     store: Rc<RefCell<Option<Store>>>,
@@ -601,6 +607,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         control_server: Rc::new(RefCell::new(None)),
         io: IoWorker::default(),
         slow_io: IoWorker::default(),
+        pr_poll_io: IoWorker::default(),
+        pr_polls: Rc::new(Cell::new(0)),
+        azure_projects: Rc::new(RefCell::new(HashMap::new())),
         pr_context_generation: Arc::new(AtomicU64::new(0)),
         store: Rc::new(RefCell::new(None)),
         appearance: Rc::new(RefCell::new(AppearancePreferences::default())),
@@ -934,7 +943,16 @@ impl Workspace {
         work: impl FnOnce() -> PersistResult<T> + Send + 'static,
         done: impl FnOnce(&Self, PersistResult<T>) + 'static,
     ) {
-        let result = self.slow_io.submit(work);
+        self.run_on(&self.slow_io, work, done);
+    }
+
+    fn run_on<T: Send + 'static>(
+        &self,
+        worker: &IoWorker,
+        work: impl FnOnce() -> PersistResult<T> + Send + 'static,
+        done: impl FnOnce(&Self, PersistResult<T>) + 'static,
+    ) {
+        let result = worker.submit(work);
         let workspace = self.clone();
         glib::spawn_future_local(async move {
             let result = result

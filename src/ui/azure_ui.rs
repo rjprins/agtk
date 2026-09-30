@@ -1,6 +1,6 @@
 use super::*;
 use crate::azure::{
-    AzureClient, AzurePrList, PrAttention, PrContext, PrItem, PrPreferences, PrProjectState,
+    AzureClient, AzurePrList, PrAttention, PrContext, PrItem, PrProjectState,
     acknowledge_attention, reconcile_attention,
 };
 use crate::control::{
@@ -13,7 +13,8 @@ use std::collections::BTreeSet;
 
 #[derive(Debug)]
 struct LoadedPrContext {
-    preferences: PrPreferences,
+    root_key: String,
+    state: PrProjectState,
     context: PrContext,
     changed: Vec<u64>,
 }
@@ -23,6 +24,9 @@ struct PreloadedPrContext {
     selected: Option<SelectedPrContext>,
     context: PrContext,
 }
+
+/// How often the sidebar's PR buttons look for new activity.
+const PR_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Widest the PR list grows inside the dialog.
 const PR_CONTENT_WIDTH: i32 = 1400;
@@ -105,6 +109,11 @@ impl PrDialog {
 
 impl Workspace {
     pub(super) fn connect_prs(&self) {
+        let workspace = self.clone();
+        glib::timeout_add_local(PR_POLL_INTERVAL, move || {
+            workspace.poll_pull_requests();
+            glib::ControlFlow::Continue
+        });
         let workspace = self.clone();
         self.prs
             .refresh
@@ -366,7 +375,7 @@ impl Workspace {
 
     pub(super) fn handle_pr_control(&self, pending: PendingRequest) {
         match pending.request.command.clone() {
-            ControlCommand::PrList(params) => self.list_prs(params, Some(pending)),
+            ControlCommand::PrList(params) => self.list_prs(params, Some(pending), false),
             ControlCommand::PrAcknowledge(params) => self.acknowledge_pr(params, Some(pending)),
             ControlCommand::PrSetAutoReview(params) => {
                 self.set_auto_review(params, Some(pending));
@@ -395,10 +404,12 @@ impl Workspace {
                 project_root: PathBuf::from(root),
             },
             pending,
+            false,
         );
     }
 
-    fn list_prs(&self, params: PrListParams, pending: Option<PendingRequest>) {
+    /// A poll runs in the background: it stays silent and leaves the dialog's spinner alone.
+    fn list_prs(&self, params: PrListParams, pending: Option<PendingRequest>, poll: bool) {
         let Some(store) = self.store.borrow().clone() else {
             self.report_failure(
                 pending,
@@ -412,22 +423,25 @@ impl Workspace {
         let attic = self.paths.attic_dir();
         let requested_key = pr_cache_key(&params.project_root);
         let had_cached = self.pr_context_cache.borrow().contains_key(&requested_key);
-        self.prs.loading.set_visible(!had_cached);
+        if !poll {
+            self.prs.loading.set_visible(!had_cached);
+        }
         let finish = move |workspace: &Self, result: PersistResult<LoadedPrContext>| match result {
             Ok(loaded) => {
-                workspace.prs.loading.set_visible(false);
-                *workspace.pr_preferences.borrow_mut() = loaded.preferences;
+                if !poll {
+                    workspace.prs.loading.set_visible(false);
+                }
                 workspace.update_pr_indicator();
-                workspace.prs.updating_toggle.set(true);
-                workspace
-                    .prs
-                    .auto_review
-                    .set_active(loaded.context.auto_review);
-                workspace.prs.updating_toggle.set(false);
                 workspace.cache_pr_context(&loaded.context);
                 if pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                     == pr_cache_key(&loaded.context.project_root)
                 {
+                    workspace.prs.updating_toggle.set(true);
+                    workspace
+                        .prs
+                        .auto_review
+                        .set_active(loaded.context.auto_review);
+                    workspace.prs.updating_toggle.set(false);
                     workspace.render_pr_context(&loaded.context);
                 }
 
@@ -455,6 +469,7 @@ impl Workspace {
                     }
                 }
             }
+            Err(_) if poll => {}
             Err(error) => {
                 workspace.prs.loading.set_visible(false);
                 if !had_cached
@@ -470,7 +485,21 @@ impl Workspace {
                 );
             }
         };
-        self.run_slow(
+        let finish = move |workspace: &Self, result: PersistResult<LoadedPrContext>| {
+            finish(workspace, result);
+            if poll {
+                workspace
+                    .pr_polls
+                    .set(workspace.pr_polls.get().saturating_sub(1));
+            }
+        };
+        let worker = if poll {
+            &self.pr_poll_io
+        } else {
+            &self.slow_io
+        };
+        self.run_on(
+            worker,
             move || {
                 let project_root = params.project_root.canonicalize()?;
                 let root_key = project_root.to_string_lossy().to_string();
@@ -480,9 +509,6 @@ impl Workspace {
                 let previous = preferences.projects.get(&root_key);
                 let reconciliation = reconcile_attention(previous, &list.pull_requests);
                 let changed = reconciliation.changed.iter().copied().collect::<Vec<_>>();
-                let mut preferences = preferences;
-                preferences.set_project(root_key, reconciliation.state.clone());
-                let value = serde_json::to_value(&preferences)?;
 
                 let worktrees = WorktreeManager::new(attic)
                     .linked_worktrees(&project_root)
@@ -505,8 +531,8 @@ impl Workspace {
                         }
                     })
                     .collect();
-                let loaded = LoadedPrContext {
-                    preferences,
+                Ok(LoadedPrContext {
+                    root_key,
                     context: PrContext {
                         project_root,
                         repository: list.repository,
@@ -515,20 +541,34 @@ impl Workspace {
                         pull_requests,
                     },
                     changed,
-                };
-                Ok((loaded, value))
+                    state: reconciliation.state,
+                })
             },
-            move |workspace, result| match result {
+            move |workspace, result| {
+                let mut loaded = match result {
+                    Ok(loaded) => loaded,
+                    Err(error) => return finish(workspace, Err(error)),
+                };
+                // Merge into the current state: other projects, or the toggle, may have
+                // changed while Azure was answering.
+                let mut preferences = workspace.pr_preferences.borrow().clone();
+                loaded.state.auto_review = preferences.project(&loaded.root_key).auto_review;
+                loaded.context.auto_review = loaded.state.auto_review;
+                preferences.set_project(loaded.root_key.clone(), loaded.state.clone());
+                let value = match serde_json::to_value(&preferences) {
+                    Ok(value) => value,
+                    Err(error) => return finish(workspace, Err(error.into())),
+                };
+                *workspace.pr_preferences.borrow_mut() = preferences;
                 // The preference write stays on the durable queue with the other writes.
-                Ok((loaded, value)) => workspace.run_io(
+                workspace.run_io(
                     move || {
                         store
                             .set_preference("pullRequests", &value)
                             .map(|()| loaded)
                     },
                     finish,
-                ),
-                Err(error) => finish(workspace, Err(error)),
+                );
             },
         );
     }
@@ -838,6 +878,81 @@ impl Workspace {
     pub(super) fn update_pr_indicator(&self) {
         let count = self.pr_attention_count();
         self.menus.set_pull_request_attention(count);
+        // The project headers carry the attention dot.
+        self.rebuild_sidebar();
+    }
+
+    /// `None` for a project without Azure DevOps, else how many PRs have unseen activity.
+    pub(super) fn project_pr_attention(&self, root: &str) -> Option<usize> {
+        let projects = self.azure_projects.borrow();
+        let key = projects.get(root)?.as_ref()?;
+        Some(
+            self.pr_preferences
+                .borrow()
+                .projects
+                .get(key)
+                .map_or(0, |state| state.attention.len()),
+        )
+    }
+
+    pub(super) fn has_unchecked_projects(&self, roots: &[String]) -> bool {
+        let projects = self.azure_projects.borrow();
+        roots.iter().any(|root| !projects.contains_key(root))
+    }
+
+    /// Finds the Azure DevOps projects in the sidebar and refreshes their PR attention.
+    pub(super) fn poll_pull_requests(&self) {
+        if self.store.borrow().is_none() || self.pr_polls.get() > 0 {
+            return;
+        }
+        let roots = self
+            .project_summaries()
+            .into_iter()
+            .map(|project| project.root)
+            .collect::<Vec<_>>();
+        if roots.is_empty() {
+            return;
+        }
+        {
+            let mut projects = self.azure_projects.borrow_mut();
+            for root in &roots {
+                projects.entry(root.clone()).or_insert(None);
+            }
+        }
+        self.pr_polls.set(1);
+        self.run_on(
+            &self.pr_poll_io,
+            move || {
+                let client = AzureClient::from_environment();
+                Ok(roots
+                    .into_iter()
+                    .map(|root| {
+                        let path = Path::new(&root);
+                        let key = client
+                            .repository(path)
+                            .ok()
+                            .flatten()
+                            .and_then(|_| path.canonicalize().ok())
+                            .map(|path| path.to_string_lossy().to_string());
+                        (root, key)
+                    })
+                    .collect::<Vec<_>>())
+            },
+            |workspace, result| {
+                let checked = result.unwrap_or_default();
+                let azure = checked
+                    .iter()
+                    .filter(|(_, key)| key.is_some())
+                    .map(|(root, _)| PathBuf::from(root))
+                    .collect::<Vec<_>>();
+                workspace.azure_projects.borrow_mut().extend(checked);
+                workspace.pr_polls.set(azure.len());
+                workspace.rebuild_sidebar();
+                for project_root in azure {
+                    workspace.list_prs(PrListParams { project_root }, None, true);
+                }
+            },
+        );
     }
 }
 

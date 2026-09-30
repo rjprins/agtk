@@ -161,7 +161,8 @@ impl Workspace {
                 root,
                 name,
                 settings,
-            }) => self.project_header(root, name, settings),
+                pr_attention,
+            }) => self.project_header(root, name, settings, pr_attention),
             Some(SidebarKey::Other) | None => group_label("Other"),
         }
     }
@@ -169,6 +170,10 @@ impl Workspace {
     pub(super) fn rebuild_sidebar(&self) {
         let projects = self.project_summaries();
         self.menus.worktrees.set_enabled(!projects.is_empty());
+        let roots = projects
+            .iter()
+            .map(|project| project.root.clone())
+            .collect::<Vec<_>>();
         let mut keys = Vec::new();
         {
             let sessions = self.sessions.borrow();
@@ -181,6 +186,7 @@ impl Workspace {
                     &project.root,
                     &project.name,
                     settings,
+                    self.project_pr_attention(&project.root),
                 ));
                 let mut project_sessions = sessions
                     .values()
@@ -223,6 +229,9 @@ impl Workspace {
             self.list.select_row(Some(&row));
         }
         self.refresh_launch_project_choices();
+        if self.has_unchecked_projects(&roots) {
+            self.poll_pull_requests();
+        }
     }
 
     /// Replaces only the changed middle of the key list, so untouched rows keep focus.
@@ -243,7 +252,13 @@ impl Workspace {
         model.splice(position as u32, removed as u32, &added);
     }
 
-    fn project_header(&self, root: &str, name: &str, settings: ProjectSettings) -> gtk::ListBoxRow {
+    fn project_header(
+        &self,
+        root: &str,
+        name: &str,
+        settings: ProjectSettings,
+        pr_attention: Option<usize>,
+    ) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
         row.set_selectable(false);
         row.set_activatable(false);
@@ -334,11 +349,44 @@ impl Workspace {
             .build();
         more.add_css_class("flat");
         launch.set_valign(gtk::Align::Center);
+        if let Some(attention) = pr_attention {
+            content.append(&self.project_pr_button(root, attention));
+        }
         content.append(&launch);
         content.append(&more);
         menus::open_menu_on_right_click(&collapse, &more);
         row.set_child(Some(&content));
         row
+    }
+}
+
+impl Workspace {
+    /// Only Azure DevOps projects get this; the dot marks activity not yet viewed.
+    fn project_pr_button(&self, root: &str, attention: usize) -> gtk::Button {
+        let label = gtk::Label::new(Some("PR"));
+        label.add_css_class("caption-heading");
+        let contents = gtk::Overlay::new();
+        contents.set_child(Some(&label));
+        if attention > 0 {
+            let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            dot.add_css_class("attention-dot");
+            dot.set_halign(gtk::Align::End);
+            dot.set_valign(gtk::Align::Start);
+            contents.add_overlay(&dot);
+        }
+        let button = gtk::Button::builder()
+            .child(&contents)
+            .valign(gtk::Align::Center)
+            .tooltip_text(match attention {
+                0 => "Pull requests".to_owned(),
+                count => format!("Pull requests, {count} with new activity"),
+            })
+            .build();
+        button.add_css_class("flat");
+        let workspace = self.clone();
+        let root = root.to_owned();
+        button.connect_clicked(move |_| workspace.open_pr_for_project(&root));
+        button
     }
 }
 
@@ -369,6 +417,8 @@ enum SidebarKey<'a> {
         root: &'a str,
         name: &'a str,
         settings: ProjectSettings,
+        /// `None` hides the PR button.
+        pr_attention: Option<usize>,
     },
     Session(&'a str),
     Other,
@@ -379,12 +429,18 @@ const KEY_SEPARATOR: char = '\u{1f}';
 impl<'a> SidebarKey<'a> {
     const OTHER: &'static str = "other";
 
-    /// Pin and collapse state are part of the key, so changing them rebuilds the header.
-    fn project_key(root: &str, name: &str, settings: ProjectSettings) -> String {
+    /// Pin, collapse and PR state are part of the key, so changing them rebuilds the header.
+    fn project_key(
+        root: &str,
+        name: &str,
+        settings: ProjectSettings,
+        pr_attention: Option<usize>,
+    ) -> String {
         format!(
-            "project{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{root}{KEY_SEPARATOR}{name}",
+            "project{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{root}{KEY_SEPARATOR}{name}",
             u8::from(settings.is_pinned),
             u8::from(settings.is_collapsed),
+            pr_attention.map_or_else(|| "-".to_owned(), |count| count.to_string()),
         )
     }
 
@@ -396,12 +452,13 @@ impl<'a> SidebarKey<'a> {
         if key == Self::OTHER {
             return Some(Self::Other);
         }
-        let mut parts = key.splitn(5, KEY_SEPARATOR);
+        let mut parts = key.splitn(6, KEY_SEPARATOR);
         match parts.next()? {
             "session" => Some(Self::Session(parts.next()?)),
             "project" => {
                 let is_pinned = parts.next()? == "1";
                 let is_collapsed = parts.next()? == "1";
+                let pr_attention = parts.next()?.parse().ok();
                 Some(Self::Project {
                     root: parts.next()?,
                     name: parts.next()?,
@@ -409,6 +466,7 @@ impl<'a> SidebarKey<'a> {
                         is_pinned,
                         is_collapsed,
                     },
+                    pr_attention,
                 })
             }
             _ => None,
@@ -473,16 +531,19 @@ mod sidebar_tests {
                 is_pinned: true,
                 is_collapsed: false,
             },
+            Some(2),
         );
         let Some(SidebarKey::Project {
             root,
             name,
             settings,
+            pr_attention,
         }) = SidebarKey::parse(&key)
         else {
             panic!("project key did not parse");
         };
         assert_eq!((root, name), ("/work/agtk", "agtk"));
         assert!(settings.is_pinned && !settings.is_collapsed);
+        assert_eq!(pr_attention, Some(2));
     }
 }
