@@ -1290,8 +1290,10 @@ fn install_choice_completion(
         .minimum_key_length(0)
         .popup_completion(true)
         .inline_completion(false)
-        .text_column(0)
         .build();
+    // Only the setter adds the text renderer; the builder property alone
+    // leaves every row blank.
+    completion.set_text_column(0);
     completion.set_match_func(|completion, key, iter| {
         let Some(model) = completion.model() else {
             return false;
@@ -1309,6 +1311,16 @@ fn install_choice_completion(
         glib::Propagation::Stop
     });
     entry.set_completion(Some(&completion));
+    // GTK leaves the suggestion popup open when focus moves to another
+    // field, so the lists pile up over the rows below.
+    let leave = gtk::EventControllerFocus::new();
+    let leave_entry = entry.clone();
+    leave.connect_leave(move |_| {
+        if let Some(popover) = completion_popover(&leave_entry) {
+            popover.popdown();
+        }
+    });
+    entry.add_controller(leave);
     let focus_completion = completion.clone();
     entry.connect_has_focus_notify(move |entry| {
         if entry.has_focus() {
@@ -1335,6 +1347,20 @@ fn install_choice_completion(
             changed_completion.complete();
         }
     });
+}
+
+/// The completion's popup, which GTK parents to the entry without exposing it.
+fn completion_popover(entry: &gtk::Entry) -> Option<gtk::Popover> {
+    let mut child = entry.first_child();
+    while let Some(widget) = child {
+        if let Ok(popover) = widget.clone().downcast::<gtk::Popover>()
+            && popover.has_css_class("entry-completion")
+        {
+            return Some(popover);
+        }
+        child = widget.next_sibling();
+    }
+    None
 }
 
 fn claude_launch_options() -> (adw::ComboRow, adw::SwitchRow) {
