@@ -109,6 +109,8 @@ fn modern_discovery_and_tool_results_include_required_result_shape() {
 
     let listed = server.handle(request(2, "tools/list", meta)).unwrap();
     assert_eq!(listed["result"]["resultType"], "complete");
+    assert_eq!(listed["result"]["ttlMs"], 300_000);
+    assert_eq!(listed["result"]["cacheScope"], "public");
 }
 
 #[test]

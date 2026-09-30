@@ -117,6 +117,11 @@ impl<B: ControlBackend> McpServer<B> {
                 } else {
                     let mut result = json!({"tools":tool_definitions()});
                     add_modern_result_fields(&mut result, modern);
+                    // Modern clients reject a tool list without cache hints.
+                    if modern && let Some(object) = result.as_object_mut() {
+                        object.insert("ttlMs".to_owned(), json!(300_000));
+                        object.insert("cacheScope".to_owned(), json!("public"));
+                    }
                     rpc_success(id, result)
                 }
             }
