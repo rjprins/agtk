@@ -474,9 +474,9 @@ fn normalize_thread_summary(value: &Value) -> ThreadSummary {
         let status = thread
             .get("status")
             .and_then(nonempty)
-            .unwrap_or("active")
+            .unwrap_or("unknown")
             .to_ascii_lowercase();
-        let resolved = matches!(status.as_str(), "fixed" | "closed" | "wontfix" | "bydesign");
+        let unresolved = matches!(status.as_str(), "active" | "pending");
         let comments = thread
             .get("comments")
             .and_then(Value::as_array)
@@ -484,9 +484,15 @@ fn normalize_thread_summary(value: &Value) -> ThreadSummary {
             .flatten()
             .filter_map(Value::as_object)
             .filter(|comment| comment.get("isDeleted").and_then(Value::as_bool) != Some(true))
+            .filter(|comment| {
+                comment
+                    .get("commentType")
+                    .and_then(nonempty)
+                    .is_some_and(|kind| kind.eq_ignore_ascii_case("text"))
+            })
             .filter(|comment| comment.get("content").and_then(nonempty).is_some())
             .collect::<Vec<_>>();
-        if !resolved && !comments.is_empty() {
+        if unresolved && !comments.is_empty() {
             summary.unresolved_threads += 1;
         }
         for comment in comments {
@@ -648,4 +654,60 @@ fn days_from_civil(mut year: i64, month: i64, day: i64) -> i64 {
     let day_of_year = (153 * adjusted_month + 2) / 5 + day - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     era * 146_097 + day_of_era - 719_468
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_thread_summary;
+    use serde_json::json;
+
+    #[test]
+    fn system_events_do_not_count_as_unresolved_or_update_review_time() {
+        let summary = normalize_thread_summary(&json!({"value": [
+            {"status": null, "comments": [{"commentType": "system", "content": "Branch updated", "publishedDate": "2026-09-30T10:00:00Z"}]},
+            {"comments": [{"commentType": "system", "content": "Reviewer added", "publishedDate": "2026-09-30T11:00:00Z"}]},
+            {"status": "active", "comments": [{"commentType": "system", "content": "Policy updated", "publishedDate": "2026-09-30T12:00:00Z"}]}
+        ]}));
+
+        assert_eq!(summary.unresolved_threads, 0);
+        assert_eq!(summary.latest_review_at, 0);
+    }
+
+    #[test]
+    fn only_active_and_pending_review_threads_are_unresolved() {
+        for status in [
+            json!("active"),
+            json!("pending"),
+            json!("fixed"),
+            json!("closed"),
+            json!("wontFix"),
+            json!("byDesign"),
+            json!("unknown"),
+            json!(null),
+        ] {
+            let summary = normalize_thread_summary(&json!([
+                {"status": status, "comments": [{"commentType": "text", "content": "Please fix this"}]}
+            ]));
+            let expected = u32::from(status == "active" || status == "pending");
+            assert_eq!(summary.unresolved_threads, expected, "status: {status}");
+        }
+    }
+
+    #[test]
+    fn review_summary_ignores_deleted_comments_and_system_replies() {
+        let summary = normalize_thread_summary(&json!({"value": [
+            {"status": "active", "comments": [
+                {"commentType": "text", "content": "Please fix this", "publishedDate": "2026-09-15T09:00:00Z"},
+                {"commentType": "text", "content": "More detail", "lastUpdatedDate": "2026-09-15T10:00:00Z"},
+                {"commentType": "system", "content": "Branch updated", "publishedDate": "2026-09-30T10:00:00Z"},
+                {"commentType": "text", "content": "Deleted", "isDeleted": true, "publishedDate": "2026-09-30T11:00:00Z"}
+            ]},
+            {"status": "active", "isDeleted": true, "comments": [{"commentType": "text", "content": "Deleted thread"}]},
+            {"status": "active", "comments": [{"commentType": "text", "content": "Deleted comment", "isDeleted": true}]},
+            {"status": "active", "comments": [{"commentType": "text", "content": "   "}]}
+        ]}));
+
+        assert_eq!(summary.unresolved_threads, 1);
+        assert_eq!(summary.latest_review_at, 1_789_466_400_000);
+    }
 }

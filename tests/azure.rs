@@ -102,7 +102,7 @@ fn azure_client_uses_bounded_cli_calls_and_collects_unresolved_threads() {
 case "$*" in
   "account show"*) printf 'rutger@example.com\n' ;;
   "repos pr list"*) printf '%s\n' '[{"pullRequestId":7,"title":"Review me","sourceRefName":"refs/heads/review-me","targetRefName":"refs/heads/main","creationDate":"2026-09-15T08:00:00Z","isDraft":false,"createdBy":{"displayName":"Other","uniqueName":"other@example.com"},"reviewers":[]}]' ;;
-  "devops invoke"*) printf '%s\n' '{"value":[{"id":3,"status":"active","comments":[{"id":1,"content":"Please fix this","isDeleted":false,"publishedDate":"2026-09-15T09:00:00Z"}]}]}' ;;
+  "devops invoke"*) printf '%s\n' '{"value":[{"id":3,"status":"active","comments":[{"id":1,"commentType":"text","content":"Please fix this","isDeleted":false,"publishedDate":"2026-09-15T09:00:00Z"}]}]}' ;;
   *) printf 'unexpected arguments: %s\n' "$*" >&2; exit 7 ;;
 esac
 "##,
