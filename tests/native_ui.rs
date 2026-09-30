@@ -937,6 +937,139 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
 
 #[test]
 #[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
+fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
+    let mut app = App::new();
+    let project = app.directory.path().join("azure-project");
+    std::fs::create_dir(&project).unwrap();
+    for args in [
+        &["init", "-q", "-b", "feature"][..],
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://dev.azure.com/org/project/_git/repo",
+        ][..],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let pr_file = app.directory.path().join("azure-prs.json");
+    let mut pr = json!({
+        "pullRequestId":42, "title":"Cached review",
+        "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main",
+        "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
+        "createdBy":{"displayName":"Colleague"}, "reviewers":[]
+    });
+    std::fs::write(&pr_file, serde_json::to_vec(&json!([pr])).unwrap()).unwrap();
+    let other = app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":app.directory.path()}),
+    );
+    let other_id = other["id"].as_str().unwrap();
+    let session = app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":project,"projectRoot":project}),
+    );
+    let id = session["id"].as_str().unwrap();
+    let context = |app: &App| {
+        let inspection = app.request("ui.inspect", json!({}));
+        inspection["root"]["children"][1]["children"][0]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == "pr-context")
+            .unwrap()
+            .clone()
+    };
+    let wait_label = |app: &App, label: &str, timeout: Duration| {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let node = context(app);
+            if node["isVisible"] == true && node["label"] == label {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "PR bar did not show {label}: {node}"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
+    };
+    wait_label(&app, "PR #42: Cached review", Duration::from_secs(5));
+
+    let slow = app.directory.path().join("azure-prs.json.slow");
+    std::fs::write(&slow, "").unwrap();
+    app.request("session.select", json!({"sessionId":other_id}));
+    assert_eq!(context(&app)["isVisible"], false);
+    app.request("session.select", json!({"sessionId":id}));
+    let node = context(&app);
+    assert_eq!(
+        node["isVisible"], true,
+        "cached PR should appear before the slow Azure lookup"
+    );
+    assert_eq!(node["label"], "PR #42: Cached review");
+
+    app.stop();
+    app.start();
+    let node = context(&app);
+    assert_eq!(
+        node["isVisible"], true,
+        "saved PR should appear immediately after restarting"
+    );
+    assert_eq!(node["label"], "PR #42: Cached review");
+
+    pr["title"] = json!("Refreshed review");
+    std::fs::write(&pr_file, serde_json::to_vec(&json!([pr])).unwrap()).unwrap();
+    std::fs::remove_file(&slow).unwrap();
+    wait_label(&app, "PR #42: Refreshed review", Duration::from_secs(15));
+
+    std::fs::write(&pr_file, "invalid JSON").unwrap();
+    app.request("session.select", json!({"sessionId":other_id}));
+    app.request("session.select", json!({"sessionId":id}));
+    // This lookup queues behind the session refresh, so its failure is a completion barrier.
+    assert!(matches!(
+        app.request_body("pr.list", json!({"projectRoot":project})),
+        ResponseBody::Failure(_)
+    ));
+    let node = context(&app);
+    assert_eq!(
+        node["isVisible"], true,
+        "failed refresh should retain the cached PR"
+    );
+    assert_eq!(node["label"], "PR #42: Refreshed review");
+
+    std::fs::write(&pr_file, "[]").unwrap();
+    app.request("session.select", json!({"sessionId":other_id}));
+    app.request("session.select", json!({"sessionId":id}));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while context(&app)["isVisible"] == true {
+        assert!(
+            Instant::now() < deadline,
+            "PR bar should disappear when the PR is no longer active"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+    std::fs::write(&slow, "").unwrap();
+    app.request("session.select", json!({"sessionId":other_id}));
+    app.request("session.select", json!({"sessionId":id}));
+    assert_eq!(
+        context(&app)["isVisible"],
+        false,
+        "removed PR should also be evicted from the cache"
+    );
+    std::fs::remove_file(slow).unwrap();
+    app.request("session.close", json!({"sessionId":id}));
+    app.request("session.close", json!({"sessionId":other_id}));
+}
+
+#[test]
+#[ignore = "requires AGMUX_TEST_DISPLAY private Wayland compositor"]
 fn closing_a_session_does_not_wait_for_a_slow_pr_lookup() {
     let app = App::new();
     let project = app.directory.path().join("azure-project");

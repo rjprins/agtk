@@ -19,6 +19,7 @@ struct LoadedPrContext {
 }
 
 struct PreloadedPrContext {
+    session_id: String,
     selected: Option<SelectedPrContext>,
     context: PrContext,
 }
@@ -140,11 +141,18 @@ impl Workspace {
         else {
             return;
         };
+        let cached = self.session_pr_cache.borrow().get(session_id).cloned();
+        if let Some(pull_request) = cached {
+            self.render_selected_pr_context(SelectedPrContext {
+                session_id: session_id.to_owned(),
+                pull_request,
+            });
+        }
         let session_id = session_id.to_owned();
         let attic = self.paths.attic_dir();
         let preferences = self.pr_preferences.borrow().clone();
         let generation = self.pr_context_generation.clone();
-        let requested = generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let requested = generation.load(Ordering::Relaxed);
         self.run_slow(
             move || {
                 if generation.load(Ordering::Relaxed) != requested {
@@ -214,12 +222,22 @@ impl Workspace {
                         }
                     }
                 }
-                Ok(PreloadedPrContext { selected, context })
+                Ok(PreloadedPrContext {
+                    session_id,
+                    selected,
+                    context,
+                })
             },
-            |workspace, result| {
+            move |workspace, result| {
+                if workspace.pr_context_generation.load(Ordering::Relaxed) != requested {
+                    return;
+                }
                 let Ok(loaded) = result else {
                     return;
                 };
+                if workspace.selected_session_id().as_deref() != Some(loaded.session_id.as_str()) {
+                    return;
+                }
                 workspace.cache_pr_context(&loaded.context);
                 if workspace.prs.modal.is_visible()
                     && pr_cache_key(Path::new(workspace.prs.root.text().trim()))
@@ -227,19 +245,34 @@ impl Workspace {
                 {
                     workspace.render_pr_context(&loaded.context);
                 }
-                if let Some(selected) = loaded.selected
-                    && workspace.selected_session_id().as_deref()
-                        == Some(selected.session_id.as_str())
-                {
+                if let Some(selected) = loaded.selected {
+                    workspace
+                        .session_pr_cache
+                        .borrow_mut()
+                        .insert(selected.session_id.clone(), selected.pull_request.clone());
                     workspace.render_selected_pr_context(selected);
+                } else {
+                    workspace
+                        .session_pr_cache
+                        .borrow_mut()
+                        .remove(&loaded.session_id);
+                    workspace.clear_selected_pr_context();
                 }
+                workspace.save_session_pr_cache();
             },
         );
     }
 
     pub(super) fn clear_selected_pr_context(&self) {
+        self.pr_context_generation.fetch_add(1, Ordering::Relaxed);
         self.selected_pr.borrow_mut().take();
         self.context_pr.set_visible(false);
+    }
+
+    pub(super) fn save_session_pr_cache(&self) {
+        if let Ok(value) = serde_json::to_value(&*self.session_pr_cache.borrow()) {
+            self.save_preference("sessionPullRequests", value);
+        }
     }
 
     fn render_selected_pr_context(&self, context: SelectedPrContext) {

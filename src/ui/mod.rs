@@ -166,6 +166,7 @@ struct Workspace {
     quick_launch: Rc<RefCell<QuickLaunchPreferences>>,
     pr_preferences: Rc<RefCell<PrPreferences>>,
     pr_context_cache: Rc<RefCell<HashMap<String, PrContext>>>,
+    session_pr_cache: Rc<RefCell<HashMap<String, AzurePr>>>,
     claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
     selected_pr: Rc<RefCell<Option<SelectedPrContext>>>,
 }
@@ -585,6 +586,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         quick_launch: Rc::new(RefCell::new(QuickLaunchPreferences::default())),
         pr_preferences: Rc::new(RefCell::new(PrPreferences::default())),
         pr_context_cache: Rc::new(RefCell::new(HashMap::new())),
+        session_pr_cache: Rc::new(RefCell::new(HashMap::new())),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         selected_pr: Rc::new(RefCell::new(None)),
     };
@@ -787,6 +789,9 @@ impl Workspace {
         let Some(session) = self.sessions.borrow_mut().remove(id) else {
             return;
         };
+        if self.session_pr_cache.borrow_mut().remove(id).is_some() {
+            self.save_session_pr_cache();
+        }
         let fallback = self.workspace_tabs.borrow_mut().remove_session(id);
         self.stack.remove(&session.page);
         if self

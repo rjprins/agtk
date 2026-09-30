@@ -25,7 +25,7 @@ pub struct AzureRepoRef {
     pub repository: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AzurePr {
     pub id: u64,

@@ -195,6 +195,12 @@ impl Workspace {
                     .map(serde_json::from_value::<crate::azure::PrPreferences>)
                     .transpose()?
                     .unwrap_or_default();
+                let mut session_pr_cache = store
+                    .preference("sessionPullRequests")?
+                    .and_then(|value| {
+                        serde_json::from_value::<HashMap<String, crate::azure::AzurePr>>(value).ok()
+                    })
+                    .unwrap_or_default();
                 let claude_presets = store
                     .preference("claudeModelPresets")?
                     .map(crate::claude_presets::ClaudePresetPreferences::from_value_lossy)
@@ -216,6 +222,7 @@ impl Workspace {
                     .filter(|count| (1..=i64::from(i32::MAX)).contains(count))
                     .unwrap_or(1);
                 let mut records = store.sessions()?;
+                session_pr_cache.retain(|id, _| records.iter().any(|record| &record.id == id));
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
                     && let Some(legacy) = paths.runtime_dir().parent()
@@ -273,6 +280,7 @@ impl Workspace {
                     projects,
                     quick_launch,
                     pr_preferences,
+                    session_pr_cache,
                     claude_presets,
                     changes_sidebar_open,
                     changes_sidebar_page,
@@ -292,6 +300,7 @@ impl Workspace {
                     projects,
                     quick_launch,
                     pr_preferences,
+                    session_pr_cache,
                     claude_presets,
                     changes_sidebar_open,
                     changes_sidebar_page,
@@ -311,6 +320,7 @@ impl Workspace {
                     workspace.load_projects(projects);
                     workspace.load_quick_launch(quick_launch);
                     *workspace.pr_preferences.borrow_mut() = pr_preferences;
+                    *workspace.session_pr_cache.borrow_mut() = session_pr_cache;
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
                     workspace.changes.state.borrow_mut().base_ref_by_context = changes_base_refs;
