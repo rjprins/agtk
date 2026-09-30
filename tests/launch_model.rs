@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use agmux_native::control::SessionKind;
 use agmux_native::launch_model::{
-    DEFAULT_BASE_BRANCH, choice_matches, directory_choices, path_completions, provider_args,
-    worktree_choices,
+    DEFAULT_BASE_BRANCH, carried_agent_args, choice_matches, directory_choices, path_completions,
+    provider_args, worktree_choices,
 };
 use serde_json::json;
 
@@ -194,4 +194,43 @@ fn provider_args_migrate_legacy_codex_approval_values() {
         provider_args(SessionKind::Codex, &flags),
         ["--ask-for-approval", "on-request", "--sandbox", "read-only"]
     );
+}
+
+#[test]
+fn a_restarted_agent_keeps_its_launch_flags_but_not_its_resume_or_prompt() {
+    let args = |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        carried_agent_args(
+            SessionKind::Claude,
+            &args(&[
+                "--resume",
+                "old-id",
+                "--permission-mode",
+                "plan",
+                "--dangerously-skip-permissions",
+                "--model=opus",
+                "fix the bug",
+            ])
+        ),
+        args(&[
+            "--permission-mode",
+            "plan",
+            "--dangerously-skip-permissions",
+            "--model=opus"
+        ])
+    );
+    assert_eq!(
+        carried_agent_args(
+            SessionKind::Codex,
+            &args(&[
+                "resume",
+                "old-id",
+                "-s",
+                "workspace-write",
+                "--approve-for-me"
+            ])
+        ),
+        args(&["-s", "workspace-write", "--approve-for-me"])
+    );
+    assert!(carried_agent_args(SessionKind::Shell, &args(&["--model", "x"])).is_empty());
 }

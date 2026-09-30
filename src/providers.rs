@@ -284,6 +284,25 @@ impl ProviderDiscovery {
         Ok(sessions)
     }
 
+    /// Whether a conversation has a log to resume. Both providers name the file
+    /// after it, so reading the logs is only the fallback.
+    pub fn has_log(
+        &self,
+        provider: AgentProvider,
+        provider_session_id: &str,
+    ) -> PersistResult<bool> {
+        validate_provider_session_id(provider_session_id)?;
+        let named = self.candidates()?.iter().any(|candidate| {
+            candidate.provider == provider
+                && candidate
+                    .path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|stem| stem.ends_with(provider_session_id))
+        });
+        Ok(named || self.preview(provider, provider_session_id, 1).is_ok())
+    }
+
     pub fn preview(
         &self,
         provider: AgentProvider,

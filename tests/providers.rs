@@ -65,6 +65,19 @@ fn discovery_deduplicates_recent_logs_and_excludes_live_conversations() {
     live.insert((AgentProvider::Claude, "claude-1".to_owned()));
     let sessions = discovery.discover(now, &live).unwrap();
 
+    assert!(
+        discovery
+            .has_log(AgentProvider::Claude, "claude-1")
+            .unwrap()
+    );
+    assert!(discovery.has_log(AgentProvider::Codex, "codex-1").unwrap());
+    assert!(!discovery.has_log(AgentProvider::Codex, "claude-1").unwrap());
+    assert!(
+        !discovery
+            .has_log(AgentProvider::Claude, "never-started")
+            .unwrap()
+    );
+
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].provider, AgentProvider::Codex);
     assert_eq!(sessions[0].provider_session_id, "codex-1");

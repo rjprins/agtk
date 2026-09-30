@@ -190,6 +190,53 @@ pub fn provider_args(
     args
 }
 
+/// The launch flags an agent keeps when it starts again. Anything else in its
+/// arguments, such as an old resume or a first prompt, belongs to that launch only.
+pub fn carried_agent_args(kind: SessionKind, args: &[String]) -> Vec<String> {
+    // (flag, takes a value)
+    let known: &[(&str, bool)] = match kind {
+        SessionKind::Claude => &[
+            ("--permission-mode", true),
+            ("--dangerously-skip-permissions", false),
+            ("--model", true),
+            ("--add-dir", true),
+        ],
+        SessionKind::Codex => &[
+            ("--dangerously-bypass-approvals-and-sandbox", false),
+            ("--approve-for-me", false),
+            ("--ask-for-approval", true),
+            ("-a", true),
+            ("--sandbox", true),
+            ("-s", true),
+            ("--model", true),
+            ("-m", true),
+            ("--profile", true),
+            ("-p", true),
+            ("--add-dir", true),
+        ],
+        _ => &[],
+    };
+    let mut carried = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let (flag, inline_value) = match arg.split_once('=') {
+            Some((flag, _)) if flag.starts_with("--") => (flag, true),
+            _ => (arg.as_str(), false),
+        };
+        let Some((_, takes_value)) = known.iter().find(|(known, _)| *known == flag) else {
+            continue;
+        };
+        carried.push(arg.clone());
+        if *takes_value
+            && !inline_value
+            && let Some(value) = args.next()
+        {
+            carried.push(value.clone());
+        }
+    }
+    carried
+}
+
 fn project_name(path: &str) -> String {
     Path::new(path)
         .file_name()

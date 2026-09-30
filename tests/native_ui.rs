@@ -1349,3 +1349,63 @@ fn an_exited_agent_offers_to_resume_its_reported_conversation() {
     app.start();
     app.wait_text(id, "Press Enter to resume the conversation");
 }
+
+#[test]
+#[ignore = "requires a private display"]
+fn a_restarted_agent_resumes_its_conversation_in_the_same_place() {
+    let app = App::new();
+    let agent = |name: &str| {
+        let session = app.request(
+            "session.create",
+            json!({
+                "kind":"codex",
+                "command":"/bin/sh",
+                "args":["-c","printf '__READY__\\n'; read line"],
+                "cwd":app.directory.path(),
+                "name":name
+            }),
+        );
+        let id = session["id"].as_str().unwrap().to_owned();
+        app.wait_text(&id, "__READY__");
+        id
+    };
+    let first = agent("first");
+    let second = agent("second");
+    for (id, conversation) in [(&first, "codex-conv-1"), (&second, "codex-conv-2")] {
+        app.request(
+            "session.set_state",
+            json!({"sessionId":id,"state":"idle","conversationId":conversation}),
+        );
+    }
+    // Only the first conversation has a log, so only it can be resumed.
+    let logs = app.directory.path().join("codex/sessions/2026/09/30");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(
+        logs.join("rollout-2026-09-30T10-00-00-codex-conv-1.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-conv-1\"}}\n",
+    )
+    .unwrap();
+
+    let restarted = app.request("session.restart", json!({"sessionId":first}));
+    let restarted = restarted["id"].as_str().unwrap();
+    assert_ne!(restarted, first);
+    app.wait_text(restarted, "__RESTORE_ARGS_resume_codex-conv-1__");
+    let fresh = app.request("session.restart", json!({"sessionId":second}));
+    app.wait_text(fresh["id"].as_str().unwrap(), "__RESTORE_ARGS___");
+
+    let state = app.request("app.get_state", json!({}));
+    let names = state["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|session| session["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["first", "second"]);
+    assert!(
+        state["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|session| session["id"] != first.as_str() && session["id"] != second.as_str())
+    );
+}

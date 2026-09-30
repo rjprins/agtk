@@ -10,6 +10,7 @@ pub(super) struct Menus {
     pub(super) shortcuts: gio::SimpleAction,
     pub(super) magit: gio::SimpleAction,
     pub(super) branch_review: gio::SimpleAction,
+    pub(super) restart_agents: gio::SimpleAction,
     /// The section whose Pull Requests label carries the attention count.
     surfaces: gio::Menu,
     pub(super) main_button: gtk::MenuButton,
@@ -27,11 +28,14 @@ impl Menus {
         surfaces.append(Some("Recent Sessions"), Some("win.show-agents"));
         surfaces.append(Some("Worktrees"), Some("win.show-worktrees"));
         surfaces.append(Some("Pull Requests"), Some("win.show-pull-requests"));
+        let agents = gio::Menu::new();
+        agents.append(Some("Restart Idle Agents"), Some("win.restart-idle-agents"));
         let settings = gio::Menu::new();
         settings.append(Some("Preferences"), Some("win.preferences"));
         settings.append(Some("Keyboard Shortcuts"), Some("win.show-shortcuts"));
         let main = gio::Menu::new();
         main.append_section(None, &surfaces);
+        main.append_section(None, &agents);
         main.append_section(None, &settings);
         let main_button = gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
@@ -58,6 +62,7 @@ impl Menus {
             shortcuts: action("show-shortcuts"),
             magit: action("magit"),
             branch_review: action("branch-review"),
+            restart_agents: action("restart-idle-agents"),
             surfaces,
             main_button,
             git_button,
@@ -81,6 +86,7 @@ impl Menus {
             &self.pull_requests,
             &self.preferences,
             &self.shortcuts,
+            &self.restart_agents,
         ] {
             action.set_enabled(true);
         }
@@ -136,6 +142,10 @@ impl Workspace {
             workspace.preferences.open(preferences_ui::SHORTCUTS_PAGE);
         });
         let workspace = self.clone();
+        menus.restart_agents.connect_activate(move |_, _| {
+            workspace.restart_idle_agents();
+        });
+        let workspace = self.clone();
         menus.magit.connect_activate(move |_, _| {
             if let Some(id) = workspace.selected_session_id() {
                 workspace.open_session_in_emacs(&id, crate::emacs::EmacsAction::Magit, None);
@@ -155,6 +165,7 @@ impl Workspace {
             &menus.shortcuts,
             &menus.magit,
             &menus.branch_review,
+            &menus.restart_agents,
         ] {
             self.window.add_action(action);
         }
@@ -171,6 +182,9 @@ impl Workspace {
         });
         self.add_target_action("session-resume", |workspace, id| {
             workspace.resume_exited_session(id)
+        });
+        self.add_target_action("session-restart", |workspace, id| {
+            workspace.restart_agent(id, None)
         });
         self.add_target_action("session-close", |workspace, id| {
             workspace.stop_session(id, None)

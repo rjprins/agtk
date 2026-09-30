@@ -114,6 +114,12 @@ impl Workspace {
             self.stop_session(&params.session_id.clone(), Some(pending));
             return;
         }
+        if let ControlCommand::SessionRestart(params) = &pending.request.command
+            && self.sessions.borrow().contains_key(&params.session_id)
+        {
+            self.restart_agent(&params.session_id.clone(), Some(pending));
+            return;
+        }
         let rename = match &pending.request.command {
             ControlCommand::SessionRename(params) => {
                 Some((params.session_id.clone(), params.name.clone()))
@@ -293,6 +299,7 @@ impl Workspace {
                 }
             }
             ControlCommand::SessionRename(params) => session_not_found(id, &params.session_id),
+            ControlCommand::SessionRestart(params) => session_not_found(id, &params.session_id),
             ControlCommand::SessionClose(params) => {
                 if params.allow_missing {
                     ControlResponse::success(

@@ -394,6 +394,17 @@ impl Workspace {
         conversation_id: Option<String>,
         pending: Option<PendingRequest>,
     ) {
+        self.launch_session(params, conversation_id, None, pending);
+    }
+
+    /// Launches a session, in the place of a row it replaces when `placement` is given.
+    pub(super) fn launch_session(
+        &self,
+        params: CreateSessionParams,
+        conversation_id: Option<String>,
+        placement: Option<Placement>,
+        pending: Option<PendingRequest>,
+    ) {
         let Some(store) = self.store.borrow().clone() else {
             self.report_launch_failure(
                 pending,
@@ -403,14 +414,16 @@ impl Workspace {
             return;
         };
         let id = self.next_session_id(params.kind);
-        let position = self
-            .sessions
-            .borrow()
-            .values()
-            .map(|s| s.record.position)
-            .max()
-            .unwrap_or(-1)
-            + 1;
+        let position = placement.map(|p| p.position).unwrap_or_else(|| {
+            self.sessions
+                .borrow()
+                .values()
+                .map(|s| s.record.position)
+                .max()
+                .unwrap_or(-1)
+                + 1
+        });
+        let select = placement.is_none_or(|p| p.select);
         let socket = self.paths.sessions_dir().join(format!("{id}.sock"));
         let paths = self.paths.clone();
         let host_binary = self.host_binary.clone();
@@ -532,7 +545,7 @@ impl Workspace {
             move |workspace, result| match result {
                 Ok((record, control, attachment, initial_input)) => {
                     let id = record.id.clone();
-                    match workspace.attach(record, Some(control), Some(attachment), true) {
+                    match workspace.attach(record, Some(control), Some(attachment), select) {
                         Ok(()) => {
                             let terminal = workspace
                                 .sessions
@@ -597,6 +610,25 @@ impl Workspace {
     }
 
     pub(super) fn stop_session(&self, id: &str, pending: Option<PendingRequest>) {
+        let closed_id = id.to_owned();
+        self.stop_session_then(id, pending, move |_, pending| {
+            if let Some(pending) = pending {
+                let request_id = pending.request.id.clone();
+                let _ = pending.respond(ControlResponse::success(
+                    request_id,
+                    serde_json::json!({"closedSessionId":closed_id}),
+                ));
+            }
+        });
+    }
+
+    /// Stops a session, then hands the request on. A failed stop answers it and keeps the row.
+    pub(super) fn stop_session_then(
+        &self,
+        id: &str,
+        pending: Option<PendingRequest>,
+        stopped: impl FnOnce(&Self, Option<PendingRequest>) + 'static,
+    ) {
         let record_and_control = self.sessions.borrow().get(id).map(|s| {
             (
                 s.record.clone(),
@@ -641,13 +673,7 @@ impl Workspace {
                     workspace.remember_agent_name(&closed);
                     workspace.remove_session_view(&id);
                     workspace.closing_sessions.borrow_mut().remove(&id);
-                    if let Some(pending) = pending {
-                        let request_id = pending.request.id.clone();
-                        let _ = pending.respond(ControlResponse::success(
-                            request_id,
-                            serde_json::json!({"closedSessionId":id}),
-                        ));
-                    }
+                    stopped(workspace, pending);
                 }
                 Err(error) => {
                     workspace.closing_sessions.borrow_mut().remove(&id);
@@ -1032,6 +1058,11 @@ impl Workspace {
                 "win.session-resume",
                 &id,
             ));
+            edit_section.append_item(&menus::targeted_item(
+                "Restart Agent",
+                "win.session-restart",
+                &id,
+            ));
         }
         if record.project_root.is_some() {
             edit_section.append_item(&menus::targeted_item(
@@ -1164,6 +1195,13 @@ fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
         glib::Propagation::Stop
     });
     terminal.add_controller(scroll);
+}
+
+/// Where a relaunched session goes, so it takes the place of the row it replaces.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Placement {
+    pub(super) position: i64,
+    pub(super) select: bool,
 }
 
 /// An exited agent whose conversation agmux knows can start again in its row.

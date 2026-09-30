@@ -945,30 +945,251 @@ impl Workspace {
             self.show_error("This session is still running");
             return;
         }
-        let provider = match record.kind {
-            SessionKind::Claude => AgentProvider::Claude,
-            SessionKind::Codex => AgentProvider::Codex,
-            _ => return,
-        };
+        if agent_provider(record.kind).is_none() {
+            return;
+        }
         let Some(conversation_id) = record.conversation_id.clone() else {
             self.show_error(
                 "agmux does not know this session's conversation. Find it with Resume Session.",
             );
             return;
         };
+        self.relaunch_agent(id, Some(conversation_id), None);
+    }
+
+    /// Restarts an agent in its row, so an updated CLI takes over. A working
+    /// agent loses its current turn, so the menu asks first.
+    pub(super) fn restart_agent(&self, id: &str, pending: Option<PendingRequest>) {
+        let Some(record) = self.sessions.borrow().get(id).map(|s| s.record.clone()) else {
+            return;
+        };
+        if agent_provider(record.kind).is_none() {
+            self.report_failure(
+                pending,
+                ErrorCode::OperationRefused,
+                "Could not restart session",
+                "only Claude and Codex agents can restart".into(),
+            );
+            return;
+        }
+        if pending.is_none()
+            && !is_between_turns(record.state)
+            && record.state != SessionState::Exited
+        {
+            let dialog = adw::AlertDialog::new(
+                Some("Restart Working Agent?"),
+                Some(
+                    "It is in the middle of a turn. Restarting stops that turn but keeps the conversation so far.",
+                ),
+            );
+            dialog.add_responses(&[("cancel", "_Cancel"), ("restart", "_Restart")]);
+            dialog.set_response_appearance("restart", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+            let workspace = self.clone();
+            let id = id.to_owned();
+            dialog.connect_response(Some("restart"), move |_, _| {
+                workspace.restart_agents(vec![id.clone()], false, None);
+            });
+            dialog.present(Some(&self.window));
+            return;
+        }
+        self.restart_agents(vec![id.to_owned()], false, pending);
+    }
+
+    /// Restarts every agent between turns, the usual step after a Claude or Codex update.
+    pub(super) fn restart_idle_agents(&self) {
+        let (idle, working): (Vec<_>, Vec<_>) = self
+            .sessions
+            .borrow()
+            .values()
+            .filter(|s| {
+                agent_provider(s.record.kind).is_some() && s.record.state != SessionState::Exited
+            })
+            .map(|s| (s.record.id.clone(), s.record.state))
+            .partition(|(_, state)| is_between_turns(*state));
+        let idle = idle.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        let agents = |count: usize| match count {
+            1 => "1 agent".to_owned(),
+            count => format!("{count} agents"),
+        };
+        let message = match (idle.len(), working.len()) {
+            (0, _) => "No idle agents to restart".to_owned(),
+            (restarting, 0) => format!("Restarting {}", agents(restarting)),
+            (restarting, working) => format!(
+                "Restarting {}. {} still working keep running",
+                agents(restarting),
+                working
+            ),
+        };
+        self.overlay.add_toast(adw::Toast::new(&message));
+        if !idle.is_empty() {
+            self.restart_agents(idle, true, None);
+        }
+    }
+
+    /// Restarts agents in their rows. Codex rows first claim their log, since
+    /// Codex never reports which conversation it holds.
+    fn restart_agents(&self, ids: Vec<String>, only_idle: bool, pending: Option<PendingRequest>) {
+        let unclaimed = {
+            let sessions = self.sessions.borrow();
+            ids.iter().any(|id| {
+                sessions
+                    .get(id)
+                    .is_some_and(|s| s.record.conversation_id.is_none())
+            })
+        };
+        let discovery = self.provider_discovery();
+        let live = self.live_provider_sessions();
+        let known_project_roots = self
+            .project_summaries()
+            .into_iter()
+            .map(|project| PathBuf::from(project.root))
+            .collect::<Vec<_>>();
+        let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
+        self.run_slow(
+            move || {
+                if !unclaimed {
+                    return Ok(None);
+                }
+                discovery.discover(now_millis(), &live).map(|sessions| {
+                    Some(classify_agent_sessions(
+                        sessions,
+                        &known_project_roots,
+                        &manager,
+                    ))
+                })
+            },
+            move |workspace, result| match result {
+                Ok(items) => {
+                    if let Some(mut items) = items {
+                        workspace.claim_live_conversations(&mut items);
+                    }
+                    workspace.restart_claimed_agents(ids, only_idle, pending);
+                }
+                Err(error) => workspace.report_failure(
+                    pending,
+                    ErrorCode::InternalError,
+                    "Could not restart agent",
+                    format!("could not read the agent logs: {error}"),
+                ),
+            },
+        );
+    }
+
+    /// Each agent resumes its conversation when a log holds it. One without a
+    /// log has not taken a turn yet, so it starts fresh.
+    fn restart_claimed_agents(
+        &self,
+        ids: Vec<String>,
+        only_idle: bool,
+        pending: Option<PendingRequest>,
+    ) {
+        let targets = {
+            let sessions = self.sessions.borrow();
+            ids.iter()
+                .filter_map(|id| {
+                    let record = &sessions.get(id)?.record;
+                    Some((
+                        id.clone(),
+                        agent_provider(record.kind)?,
+                        record.conversation_id.clone(),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        };
+        let discovery = self.provider_discovery();
+        self.run_slow(
+            move || {
+                targets
+                    .into_iter()
+                    .map(|(id, provider, conversation_id)| {
+                        let resumable = match conversation_id {
+                            Some(conversation_id)
+                                if discovery.has_log(provider, &conversation_id)? =>
+                            {
+                                Some(conversation_id)
+                            }
+                            _ => None,
+                        };
+                        Ok((id, resumable))
+                    })
+                    .collect::<PersistResult<Vec<_>>>()
+            },
+            move |workspace, result| match result {
+                Ok(plans) => {
+                    let mut pending = pending;
+                    for (id, conversation_id) in plans {
+                        // A turn may have started while the logs were read.
+                        let idle = workspace
+                            .sessions
+                            .borrow()
+                            .get(&id)
+                            .is_some_and(|s| is_between_turns(s.record.state));
+                        if only_idle && !idle {
+                            continue;
+                        }
+                        workspace.relaunch_agent(&id, conversation_id, pending.take());
+                    }
+                    if let Some(pending) = pending {
+                        respond_failure(
+                            pending,
+                            ErrorCode::SessionNotFound,
+                            "Session closed before it could restart",
+                            None,
+                        );
+                    }
+                }
+                Err(error) => workspace.report_failure(
+                    pending,
+                    ErrorCode::InternalError,
+                    "Could not restart agent",
+                    error.to_string(),
+                ),
+            },
+        );
+    }
+
+    /// Stops an agent and starts it again in its row with the same name, place
+    /// and launch flags, resuming `conversation_id` when there is one.
+    fn relaunch_agent(
+        &self,
+        id: &str,
+        conversation_id: Option<String>,
+        pending: Option<PendingRequest>,
+    ) {
+        let Some(record) = self.sessions.borrow().get(id).map(|s| s.record.clone()) else {
+            return;
+        };
+        let Some(provider) = agent_provider(record.kind) else {
+            return;
+        };
+        let mut args = conversation_id
+            .as_deref()
+            .map(|id| provider.resume_args(id))
+            .unwrap_or_default();
+        args.extend(crate::launch_model::carried_agent_args(
+            record.kind,
+            &record.args,
+        ));
         let existing = |path: Option<PathBuf>| path.filter(|path| path.exists());
         let params = crate::control::CreateSessionParams {
             kind: provider.kind(),
             command: None,
-            args: provider.resume_args(&conversation_id),
+            args,
             cwd: existing(record.cwd.clone()).or(existing(record.project_root.clone())),
             name: Some(record.name.clone()),
             project_root: record.project_root.clone(),
             worktree_path: existing(record.worktree_path.clone()),
             initial_input: None,
         };
-        self.stop_session(id, None);
-        self.launch_controlled_with_conversation(params, Some(conversation_id), None);
+        let placement = super::sessions::Placement {
+            position: record.position,
+            select: self.selected_session_id().as_deref() == Some(id),
+        };
+        self.stop_session_then(id, pending, move |workspace, pending| {
+            workspace.launch_session(params, conversation_id, Some(placement), pending);
+        });
     }
 
     /// Records the conversation of running agents that never reported one, and
@@ -1783,6 +2004,19 @@ fn compact_agent_path(path: &Path) -> String {
         .rev()
         .collect::<String>();
     format!("…{suffix}")
+}
+
+fn agent_provider(kind: SessionKind) -> Option<AgentProvider> {
+    match kind {
+        SessionKind::Claude => Some(AgentProvider::Claude),
+        SessionKind::Codex => Some(AgentProvider::Codex),
+        _ => None,
+    }
+}
+
+/// An agent in these states has no turn in flight, so a restart loses nothing.
+fn is_between_turns(state: SessionState) -> bool {
+    matches!(state, SessionState::Idle | SessionState::Ready)
 }
 
 #[cfg(test)]

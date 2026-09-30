@@ -414,6 +414,12 @@ fn parse_session_command(action: &str, arguments: &[String]) -> Result<ControlCo
             }
             _ => Err(usage_failure()),
         },
+        "restart" => match arguments {
+            [session_id] => Ok(ControlCommand::SessionRestart(SessionIdParams {
+                session_id: session_id.clone(),
+            })),
+            _ => Err(usage_failure()),
+        },
         "state" => match arguments {
             [session_id, state] => Ok(ControlCommand::SessionSetState(SessionSetStateParams {
                 session_id: session_id.clone(),
@@ -994,7 +1000,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, SCOPE is all|staged|unstaged|untracked|committed|commit)"
+    "usage: agmuxctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session close ID [--allow-missing]|session restart ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

@@ -56,6 +56,7 @@ pub enum ControlCommand {
     SessionGetText(GetTextParams),
     SessionRename(RenameSessionParams),
     SessionClose(CloseSessionParams),
+    SessionRestart(SessionIdParams),
     SessionSetState(SessionSetStateParams),
     SessionOpenMagit(SessionIdParams),
     SessionOpenBranchReview(SessionIdParams),
@@ -564,6 +565,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             }
             ControlCommand::SessionSetState(params)
         }
+        "session.restart" => ControlCommand::SessionRestart(decode_session_params(wire.params)?),
         "session.open_magit" => {
             ControlCommand::SessionOpenMagit(decode_session_params(wire.params)?)
         }
@@ -686,6 +688,7 @@ impl ControlCommand {
             Self::SessionGetText(_) => "session.get_text",
             Self::SessionRename(_) => "session.rename",
             Self::SessionClose(_) => "session.close",
+            Self::SessionRestart(_) => "session.restart",
             Self::SessionSetState(_) => "session.set_state",
             Self::SessionOpenMagit(_) => "session.open_magit",
             Self::SessionOpenBranchReview(_) => "session.open_branch_review",
@@ -730,6 +733,7 @@ impl ControlCommand {
             Self::SessionGetText(params) => Ok(("session.get_text", serde_json::to_value(params)?)),
             Self::SessionRename(params) => Ok(("session.rename", serde_json::to_value(params)?)),
             Self::SessionClose(params) => Ok(("session.close", serde_json::to_value(params)?)),
+            Self::SessionRestart(params) => Ok(("session.restart", serde_json::to_value(params)?)),
             Self::SessionSetState(params) => {
                 Ok(("session.set_state", serde_json::to_value(params)?))
             }

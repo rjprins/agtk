@@ -211,6 +211,11 @@ fn every_core_method_decodes_to_a_typed_command() {
             "SessionClose",
         ),
         (
+            "session.restart",
+            r#"{"sessionId":"claude-1"}"#,
+            "SessionRestart",
+        ),
+        (
             "session.open_magit",
             r#"{"sessionId":"shell-1"}"#,
             "SessionOpenMagit",
