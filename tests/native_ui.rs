@@ -935,7 +935,10 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     );
     assert_eq!(review["name"], "review: PR #42");
     assert_eq!(review["cwd"], project.to_str().unwrap());
+    // A review never takes the selection away from what the user was doing.
+    assert_eq!(review["isSelected"], false);
     let review_id = review["id"].as_str().unwrap();
+    app.request("session.select", json!({"sessionId":review_id}));
 
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -1014,6 +1017,8 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
         );
         thread::sleep(Duration::from_millis(30));
     };
+    let state = app.request("app.get_state", json!({}));
+    assert_ne!(state["selectedSessionId"], auto_review_id.as_str());
     app.request("session.close", json!({"sessionId":review_id}));
     app.request("session.close", json!({"sessionId":auto_review_id}));
 }

@@ -859,7 +859,8 @@ impl Workspace {
             .worktree_path
             .clone()
             .unwrap_or_else(|| project_root.to_path_buf());
-        self.launch_controlled(
+        // A review can start while the user is typing elsewhere, so it never takes focus.
+        self.launch_session(
             CreateSessionParams {
                 kind: SessionKind::Codex,
                 command: None,
@@ -870,6 +871,8 @@ impl Workspace {
                 worktree_path: item.worktree_path.clone(),
                 initial_input: Some(format!("/review-pr {}", item.pull_request.id)),
             },
+            None,
+            Some(super::sessions::Placement::in_background()),
             pending,
         );
     }

@@ -442,7 +442,7 @@ impl Workspace {
             return;
         };
         let id = self.next_session_id(params.kind);
-        let position = placement.map(|p| p.position).unwrap_or_else(|| {
+        let position = placement.and_then(|p| p.position).unwrap_or_else(|| {
             self.sessions
                 .borrow()
                 .values()
@@ -1319,11 +1319,23 @@ fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
     terminal.add_controller(scroll);
 }
 
-/// Where a relaunched session goes, so it takes the place of the row it replaces.
+/// Where a new session goes and whether it takes the selection. A relaunch
+/// keeps the row it replaces; a review stays out of the way.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Placement {
-    pub(super) position: i64,
+    /// `None` appends the row after the last one.
+    pub(super) position: Option<i64>,
     pub(super) select: bool,
+}
+
+impl Placement {
+    /// A new last row that leaves the selected session alone.
+    pub(super) const fn in_background() -> Self {
+        Self {
+            position: None,
+            select: false,
+        }
+    }
 }
 
 /// An exited agent whose conversation agtk knows can start again in its row.

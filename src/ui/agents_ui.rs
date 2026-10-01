@@ -1189,7 +1189,7 @@ impl Workspace {
             initial_input: None,
         };
         let placement = super::sessions::Placement {
-            position: record.position,
+            position: Some(record.position),
             select: self.selected_session_id().as_deref() == Some(id),
         };
         self.stop_session_then(id, pending, move |workspace, pending| {

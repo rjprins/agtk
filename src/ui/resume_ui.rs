@@ -212,7 +212,7 @@ impl Workspace {
         };
         let params = relaunch_params(&record);
         let placement = sessions::Placement {
-            position: record.position,
+            position: Some(record.position),
             select: self.selected_session_id().as_deref() == Some(id),
         };
         self.stop_session_then(id, None, move |workspace, pending| {

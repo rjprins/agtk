@@ -48,7 +48,7 @@ Worktrees
 
 Integrations
 
-- Azure DevOps pull requests: see PRs that need your attention, and start a review in the matching worktree.
+- Azure DevOps pull requests: see PRs that need your attention, and start a review in the matching worktree. Review sessions open in the background and do not take the selection.
 - Emacs: open Magit or a branch review for the selected session.
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.
 
