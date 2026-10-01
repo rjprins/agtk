@@ -456,10 +456,24 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     launch_button.set_tooltip_text(Some("Launch a shell, Codex, Claude, or Gemini session"));
 
     let history_list = boxed_list();
-    let history_surface = dialog_page(
-        &history_list,
-        "Select a prompt to scroll the terminal back to it.",
-    );
+    let history_group = adw::PreferencesGroup::builder()
+        .description("Select a prompt to scroll the terminal back to it.")
+        .build();
+    history_group.add(&history_list);
+    // Prompts need more room than a preferences page's 600px clamp gives.
+    let history_clamp = adw::Clamp::builder()
+        .maximum_size(1100)
+        .tightening_threshold(800)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_top(24)
+        .margin_bottom(24)
+        .child(&history_group)
+        .build();
+    let history_surface = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .child(&history_clamp)
+        .build();
     let history_button = gtk::Button::builder()
         .label("History (0)")
         .sensitive(false)
@@ -562,7 +576,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         modal::Modal::new(&window, "Claude Model", 520, 340, &claude_model_surface);
     let launch = launch_ui::LaunchDialog::build(&window);
     let worktrees = worktrees_ui::WorktreeDialog::build(&window);
-    let history_window = modal::Modal::new(&window, "Prompt History", 620, 560, &history_surface);
+    let history_window = modal::Modal::new(&window, "Prompt History", 1100, 800, &history_surface);
     let preferences = preferences_ui::PreferencesDialog::build(&window);
     let prs = azure_ui::PrDialog::build(&window);
     let agents = agents_ui::AgentDialog::build(&window);

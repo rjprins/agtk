@@ -84,7 +84,7 @@ impl Workspace {
         for input in session.history.iter().rev() {
             let row = adw::ActionRow::builder()
                 .title(glib::markup_escape_text(input))
-                .title_lines(2)
+                .title_lines(8)
                 .activatable(true)
                 .build();
             row.set_tooltip_text(Some(input.as_str()));
