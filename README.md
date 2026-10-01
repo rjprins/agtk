@@ -49,7 +49,7 @@ Worktrees
 
 Integrations
 
-- Azure DevOps pull requests: see PRs that need your attention, and start a review in its own detached `pr-<id>` checkout next to the project. Review sessions open in the background and do not take the selection.
+- Azure DevOps pull requests: see PRs that need your attention, and start a review in its own detached `pr-<id>` checkout next to the project. Review sessions open in the background and do not take the selection, and so do sessions started by `agtkctl` or an agent over MCP.
 - A session that works on a PR, or reviews one, shows a PR button in its sidebar row and a PR bar above its terminal. Both open the PR in the browser.
 - Emacs: open Magit or a branch review for the selected session.
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.

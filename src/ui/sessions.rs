@@ -400,12 +400,19 @@ impl Workspace {
         );
     }
 
+    /// A session created over the control socket. A script or agent asks for it
+    /// while the user may be typing elsewhere, so it never takes the selection.
     pub(super) fn launch_controlled_session(
         &self,
         params: CreateSessionParams,
         pending: PendingRequest,
     ) {
-        self.launch_controlled(params, Some(pending));
+        self.launch_session(
+            params,
+            None,
+            Some(Placement::in_background()),
+            Some(pending),
+        );
     }
 
     pub(super) fn launch_controlled(
@@ -451,7 +458,8 @@ impl Workspace {
                 .unwrap_or(-1)
                 + 1
         });
-        let select = placement.is_none_or(|p| p.select);
+        // A background launch still fills an empty view, so the first row shows.
+        let select = placement.is_none_or(|p| p.select) || self.selected_session_id().is_none();
         let socket = self.paths.sessions_dir().join(format!("{id}.sock"));
         let paths = self.paths.clone();
         let host_binary = self.host_binary.clone();
@@ -1347,7 +1355,7 @@ pub(super) struct Placement {
 }
 
 impl Placement {
-    /// A new last row that leaves the selected session alone.
+    /// A new last row that leaves the selected session alone, unless nothing is selected.
     pub(super) const fn in_background() -> Self {
         Self {
             position: None,

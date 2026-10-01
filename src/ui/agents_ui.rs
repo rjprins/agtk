@@ -905,9 +905,11 @@ impl Workspace {
                 Ok(preview.session.restore_plan(target))
             },
             move |workspace, result| match result {
-                Ok(plan) => workspace.launch_controlled_with_conversation(
+                // Restores over the control socket stay out of the way like any scripted launch.
+                Ok(plan) => workspace.launch_session(
                     plan.params,
                     Some(plan.conversation_id),
+                    Some(super::sessions::Placement::in_background()),
                     Some(pending),
                 ),
                 Err(error) => workspace.report_failure(

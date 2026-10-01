@@ -570,7 +570,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "launch_agent",
             "Launch agent",
-            "Launch Codex or Claude directly with optional arguments and initial input.",
+            "Launch Codex or Claude directly with optional arguments and initial input. The session opens in the background and does not take the selection.",
             launch_schema(true),
         ),
         tool(

@@ -226,6 +226,33 @@ impl Drop for App {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn controlled_launches_fill_an_empty_view_but_never_take_the_selection() {
+    let app = App::new();
+    let first = app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":app.directory.path()}),
+    );
+    let first_id = first["id"].as_str().unwrap();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["selectedSessionId"], first_id);
+    let second = app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":app.directory.path()}),
+    );
+    let second_id = second["id"].as_str().unwrap();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["selectedSessionId"], first_id);
+    let order = state["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(order, vec![first_id, second_id]);
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn metadata_and_child_survive_ui_restart() {
     let mut app = App::new();
     let session = app.request("session.create", json!({"kind":"custom","command":"/bin/sh","args":["-c","stty -echo; printf '__AGTK_PID_%s__\\n' \"$$\"; exec /bin/sh -i"],"name":"before rename","cwd":app.directory.path(),"projectRoot":app.directory.path()}));
@@ -960,6 +987,11 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
         0
     );
 
+    // The user is busy in another session when the review starts.
+    app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":app.directory.path()}),
+    );
     let review = app.request(
         "pr.launch_review",
         json!({"projectRoot":project,"pullRequestId":42}),
@@ -1153,6 +1185,7 @@ fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
         json!({"kind":"shell","cwd":project,"projectRoot":project}),
     );
     let id = session["id"].as_str().unwrap();
+    app.request("session.select", json!({"sessionId":id}));
     let context = |app: &App| {
         let inspection = app.request("ui.inspect", json!({}));
         inspection["root"]["children"][1]["children"][0]["children"]
