@@ -5,6 +5,9 @@ use crate::agent_status::{self, Signal};
 use crate::control::{AgentSignalState, SessionSetStateParams};
 use crate::persist::now_millis;
 
+/// How long a ready session must stay in front of the user before it counts as viewed.
+pub(super) const VIEWED_AFTER: Duration = Duration::from_secs(7);
+
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 const STATE_CLASSES: [&str; 7] = [
     "state-running",
@@ -163,11 +166,51 @@ impl Workspace {
         }
     }
 
-    /// The user has seen the session, so a finished turn no longer needs attention.
+    /// The user is looking at the session. A finished turn stops needing
+    /// attention once they have stayed on it for `VIEWED_AFTER`, so a quick
+    /// pass through the list leaves the ready mark alone.
     pub(super) fn acknowledge_session(&self, id: &str) {
         if self.stack.visible_child_name().as_deref() != Some(id) {
             return;
         }
+        let generation = {
+            let mut viewing = self.viewing.borrow_mut();
+            let generation = viewing.as_ref().map_or(0, |view| view.generation) + 1;
+            *viewing = Some(Viewing {
+                session_id: id.to_owned(),
+                since: Instant::now(),
+                generation,
+            });
+            generation
+        };
+        let workspace = self.clone();
+        let id = id.to_owned();
+        glib::timeout_add_local_once(VIEWED_AFTER, move || {
+            let current = workspace
+                .viewing
+                .borrow()
+                .as_ref()
+                .map(|view| view.generation);
+            if current == Some(generation) && workspace.has_viewed(&id) {
+                workspace.mark_viewed(&id);
+            }
+        });
+    }
+
+    /// Whether the user has stayed on this session long enough for it to count as viewed.
+    fn has_viewed(&self, id: &str) -> bool {
+        let dwelt = self
+            .viewing
+            .borrow()
+            .as_ref()
+            .is_some_and(|view| view.session_id == id && view.since.elapsed() >= VIEWED_AFTER);
+        dwelt
+            && self.selected_session_id().as_deref() == Some(id)
+            && self.stack.visible_child_name().as_deref() == Some(id)
+            && self.window.is_active()
+    }
+
+    fn mark_viewed(&self, id: &str) {
         let is_ready = self
             .sessions
             .borrow()
@@ -179,11 +222,8 @@ impl Workspace {
     }
 
     fn transition_session(&self, id: &str, next: SessionState) {
-        // A turn that finishes in front of the user is already viewed.
-        let viewing = self.selected_session_id().as_deref() == Some(id)
-            && self.stack.visible_child_name().as_deref() == Some(id)
-            && self.window.is_active();
-        let next = if next == SessionState::Ready && viewing {
+        // A turn that finishes in front of a settled user is already viewed.
+        let next = if next == SessionState::Ready && self.has_viewed(id) {
             SessionState::Idle
         } else {
             next

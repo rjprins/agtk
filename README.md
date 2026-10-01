@@ -137,7 +137,7 @@ The Claude preset shortcut opens a chooser for the selected Claude session. Pres
 | ● | ready | The turn finished and you have not viewed it yet |
 | ○ | idle | Nothing is running, or you viewed the finished turn |
 
-Selecting a ready session marks it as viewed. The timer shows how long the session has been in its state.
+Staying on a ready session for 7 seconds marks it as viewed, so a quick pass through the list leaves the mark alone. The timer shows how long the session has been in its state.
 
 Claude sessions report their state through hooks that agtk generates. You do not need to change your Claude configuration. Codex and Gemini sessions are read from the screen once a second, with status rules ported from [agent-manager](https://github.com/YoanWai/agent-manager).
 

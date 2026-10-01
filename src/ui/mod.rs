@@ -178,6 +178,16 @@ struct Workspace {
     session_pr_cache: Rc<RefCell<HashMap<String, AzurePr>>>,
     claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
     selected_pr: Rc<RefCell<Option<SelectedPrContext>>>,
+    /// The session in front of the user and since when; see `acknowledge_session`.
+    viewing: Rc<RefCell<Option<Viewing>>>,
+}
+
+/// A selected session in a focused window. Only a stay this long counts as viewed.
+#[derive(Clone)]
+struct Viewing {
+    session_id: String,
+    since: std::time::Instant,
+    generation: u64,
 }
 
 #[derive(Clone)]
@@ -628,6 +638,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         session_pr_cache: Rc::new(RefCell::new(HashMap::new())),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         selected_pr: Rc::new(RefCell::new(None)),
+        viewing: Rc::new(RefCell::new(None)),
     };
 
     let dialog_workspace = workspace.clone();
