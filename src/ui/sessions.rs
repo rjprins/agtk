@@ -243,6 +243,7 @@ impl Workspace {
                     records.push(record);
                 }
                 let mut recovered = Vec::new();
+                let mut lost = Vec::new();
                 let known_project_roots = projects
                     .projects
                     .keys()
@@ -252,6 +253,9 @@ impl Workspace {
                 for mut record in records {
                     backfill_restored_session_context(&mut record, &known_project_roots, &manager);
                     let connected = connect_session(&record.socket_path).ok();
+                    if resume_ui::lost_its_host(record.state, connected.is_some()) {
+                        lost.push(record.id.clone());
+                    }
                     record.state = if connected.is_some() {
                         if matches!(
                             record.state,
@@ -287,6 +291,7 @@ impl Workspace {
                     changes_base_refs,
                     changes_commits_ago,
                     recovered,
+                    lost,
                 ))
             },
             |workspace, result| match result {
@@ -307,6 +312,7 @@ impl Workspace {
                     changes_base_refs,
                     changes_commits_ago,
                     recovered,
+                    lost,
                 )) => {
                     *workspace.store.borrow_mut() = Some(store);
                     workspace.load_dialog_sizes();
@@ -371,6 +377,7 @@ impl Workspace {
                     {
                         workspace.launch_shell();
                     }
+                    workspace.offer_to_resume_lost_sessions(&lost);
                 }
                 Err(error) => workspace.show_error(&format!("Could not load workspace: {error}")),
             },

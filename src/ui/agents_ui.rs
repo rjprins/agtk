@@ -161,7 +161,7 @@ fn restore_target_for_location(
     }
 }
 
-fn agent_project_name(root: &Path) -> String {
+pub(super) fn agent_project_name(root: &Path) -> String {
     let leaf = root
         .file_name()
         .and_then(|name| name.to_str())
@@ -719,7 +719,7 @@ impl Workspace {
             |workspace, result| match result {
                 Ok(mut sessions) => {
                     workspace.agents.loading.set(false);
-                    workspace.claim_live_conversations(&mut sessions);
+                    workspace.claim_live_conversations(&mut sessions, &[]);
                     workspace.agents.sessions.replace(sessions);
                     workspace.agents.selected.borrow_mut().take();
                     workspace.refresh_agent_project_choices();
@@ -1030,7 +1030,12 @@ impl Workspace {
 
     /// Restarts agents in their rows. Codex rows first claim their log, since
     /// Codex never reports which conversation it holds.
-    fn restart_agents(&self, ids: Vec<String>, only_idle: bool, pending: Option<PendingRequest>) {
+    pub(super) fn restart_agents(
+        &self,
+        ids: Vec<String>,
+        only_idle: bool,
+        pending: Option<PendingRequest>,
+    ) {
         let unclaimed = {
             let sessions = self.sessions.borrow();
             ids.iter().any(|id| {
@@ -1063,7 +1068,7 @@ impl Workspace {
             move |workspace, result| match result {
                 Ok(items) => {
                     if let Some(mut items) = items {
-                        workspace.claim_live_conversations(&mut items);
+                        workspace.claim_live_conversations(&mut items, &ids);
                     }
                     workspace.restart_claimed_agents(ids, only_idle, pending);
                 }
@@ -1194,13 +1199,15 @@ impl Workspace {
 
     /// Records the conversation of running agents that never reported one, and
     /// drops those conversations from the list since they are open already.
-    fn claim_live_conversations(&self, items: &mut Vec<AgentSessionItem>) {
+    /// Exited agents about to restart claim theirs too, so they resume it.
+    fn claim_live_conversations(&self, items: &mut Vec<AgentSessionItem>, restarting: &[String]) {
         let agents = self
             .sessions
             .borrow()
             .values()
             .filter(|session| {
-                session.record.state != SessionState::Exited
+                (session.record.state != SessionState::Exited
+                    || restarting.contains(&session.record.id))
                     && session.record.conversation_id.is_none()
             })
             .filter_map(|session| {
@@ -2006,7 +2013,7 @@ fn compact_agent_path(path: &Path) -> String {
     format!("…{suffix}")
 }
 
-fn agent_provider(kind: SessionKind) -> Option<AgentProvider> {
+pub(super) fn agent_provider(kind: SessionKind) -> Option<AgentProvider> {
     match kind {
         SessionKind::Claude => Some(AgentProvider::Claude),
         SessionKind::Codex => Some(AgentProvider::Codex),

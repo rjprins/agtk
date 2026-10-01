@@ -52,7 +52,7 @@ Integrations
 - Emacs: open Magit or a branch review for the selected session.
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.
 
-Sessions do not survive a reboot, and terminal scrollback is not saved. After a reboot, press Enter in the terminal of an agent to resume its conversation.
+Sessions do not survive a reboot, and terminal scrollback is not saved. After a reboot, agtk lists the sessions that were open and offers to start them again: agents resume their conversation, shells open in the same directory. Later, press Enter in the terminal of an exited agent to resume it.
 
 ## Requirements
 

@@ -160,6 +160,23 @@ impl App {
         }
     }
 
+    /// Ends every session host, as a reboot would, and waits for their sockets to go.
+    fn kill_hosts(&self) {
+        let sessions = self.paths.sessions_dir();
+        for entry in std::fs::read_dir(&sessions).unwrap().flatten() {
+            if let Ok(mut socket) = UnixStream::connect(entry.path()) {
+                let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
+                let _ = agtk::session::receive_attachment(&socket);
+                let _ = socket.write_all(b"K");
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while std::fs::read_dir(&sessions).unwrap().flatten().count() > 0 {
+            assert!(Instant::now() < deadline, "session hosts did not stop");
+            thread::sleep(Duration::from_millis(30));
+        }
+    }
+
     fn request(&self, method: &str, params: Value) -> Value {
         match self.request_body(method, params) {
             ResponseBody::Success(result) => result,
@@ -1725,6 +1742,102 @@ fn a_restarted_agent_resumes_its_conversation_in_the_same_place() {
             .iter()
             .all(|session| session["id"] != first.as_str() && session["id"] != second.as_str())
     );
+}
+
+#[test]
+#[ignore = "requires a private display"]
+fn sessions_that_lost_their_host_are_offered_for_resume_at_startup() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
+    let mut app = App::new();
+    let create = |app: &App, kind: &str, name: &str, script: &str| {
+        let session = app.request(
+            "session.create",
+            json!({
+                "kind":kind,
+                "command":"/bin/sh",
+                "args":["-c",script],
+                "cwd":app.directory.path(),
+                "name":name
+            }),
+        );
+        session["id"].as_str().unwrap().to_owned()
+    };
+    let agent = create(&app, "codex", "agent", "printf '__READY__\\n'; read line");
+    app.wait_text(&agent, "__READY__");
+    app.request(
+        "session.set_state",
+        json!({"sessionId":agent,"state":"idle","conversationId":"codex-conv-1"}),
+    );
+    let shell = create(&app, "shell", "shell", "printf '__SHELL__\\n'; read line");
+    app.wait_text(&shell, "__SHELL__");
+    // A session that ended on its own was not open, so it is not offered.
+    let finished = create(&app, "shell", "finished", "sleep 0.3");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = app.request("app.get_state", json!({}));
+        let exited = state["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["id"] == finished.as_str() && session["state"] == "exited");
+        if exited {
+            break;
+        }
+        assert!(Instant::now() < deadline, "finished session did not exit");
+        thread::sleep(Duration::from_millis(30));
+    }
+
+    app.stop();
+    app.kill_hosts();
+    app.start();
+
+    let state = app.request("app.get_state", json!({}));
+    for session in state["sessions"].as_array().unwrap() {
+        assert_eq!(session["state"], "exited", "{session}");
+    }
+    let inspection = app.request("ui.inspect", json!({}));
+    let prompt = find(&inspection["root"], "resume-prompt").expect("resume prompt is offered");
+    assert_eq!(prompt["isVisible"], true);
+    let offered = prompt["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|choice| {
+            assert_eq!(choice["isSelected"], true, "{choice}");
+            choice["id"].as_str().unwrap().to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        offered,
+        [
+            format!("resume-session-{agent}"),
+            format!("resume-session-{shell}")
+        ]
+    );
+    thread::sleep(Duration::from_millis(50));
+    let capture = app.request("ui.capture", json!({}));
+    if let Ok(target) = std::env::var("AGTK_TEST_CAPTURE_DIR") {
+        let path = std::path::Path::new(capture["path"].as_str().unwrap());
+        let _ = std::fs::copy(
+            path,
+            std::path::Path::new(&target).join("resume-prompt.png"),
+        );
+    }
+
+    // Rows that were already exited at startup are not offered again.
+    app.stop();
+    app.start();
+    let inspection = app.request("ui.inspect", json!({}));
+    assert!(find(&inspection["root"], "resume-prompt").is_none());
 }
 
 #[test]

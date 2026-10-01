@@ -441,7 +441,7 @@ impl Workspace {
             ],
         };
 
-        UiInspection {
+        let mut inspection = UiInspection {
             root: UiNode {
                 id: "main-window".to_owned(),
                 role: "window".to_owned(),
@@ -764,7 +764,14 @@ impl Workspace {
                 ],
             },
             is_truncated,
+        };
+        if let Some(prompt) = self.resume_prompt.borrow().as_ref() {
+            inspection
+                .root
+                .children
+                .push(prompt.inspection_node(&self.window));
         }
+        inspection
     }
 }
 

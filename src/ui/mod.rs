@@ -60,6 +60,7 @@ mod modal;
 mod preferences_ui;
 mod projects_ui;
 mod provider_icons;
+mod resume_ui;
 mod search_ui;
 mod session_worktree_ui;
 mod sessions;
@@ -151,6 +152,8 @@ struct Workspace {
     host_binary: PathBuf,
     sessions: Rc<RefCell<HashMap<String, SessionView>>>,
     closing_sessions: Rc<RefCell<HashSet<String>>>,
+    /// The startup offer to resume sessions that lost their host, while it is open.
+    resume_prompt: Rc<RefCell<Option<resume_ui::ResumePrompt>>>,
     selected_session: Rc<RefCell<Option<String>>>,
     suppress_session_activation: Rc<Cell<bool>>,
     sequence: Rc<Cell<u64>>,
@@ -623,6 +626,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         host_binary: sibling_binary("agtk-session"),
         sessions: Rc::new(RefCell::new(HashMap::new())),
         closing_sessions: Rc::new(RefCell::new(HashSet::new())),
+        resume_prompt: Rc::new(RefCell::new(None)),
         selected_session: Rc::new(RefCell::new(None)),
         suppress_session_activation: Rc::new(Cell::new(false)),
         sequence: Rc::new(Cell::new(0)),
