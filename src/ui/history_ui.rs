@@ -81,7 +81,8 @@ impl Workspace {
             .set_text(last_line.as_deref().unwrap_or("(none yet)"));
         self.content_title
             .set_tooltip_text(last_prompt.map(|input| input.trim()));
-        for input in session.history.iter().rev() {
+        let history = Rc::new(session.history.clone());
+        for (index, input) in history.iter().enumerate() {
             let row = adw::ActionRow::builder()
                 .title(glib::markup_escape_text(input))
                 .title_lines(8)
@@ -93,16 +94,9 @@ impl Workspace {
             let terminal = session.terminal.clone();
             let window = self.history_window.clone();
             let overlay = self.overlay.clone();
-            let input = input.clone();
+            let history = history.clone();
             row.connect_activated(move |_| {
-                let needle = history_needle(&input, 60);
-                let Ok(regex) = vte::Regex::for_search(&needle, PCRE2_UTF | PCRE2_LITERAL) else {
-                    overlay.add_toast(adw::Toast::new("Could not search terminal scrollback"));
-                    return;
-                };
-                terminal.search_set_regex(Some(&regex), 0);
-                terminal.search_set_wrap_around(false);
-                if !terminal.search_find_previous() {
+                if !scroll_to_prompt(&terminal, &history, index) {
                     overlay.add_toast(adw::Toast::new("Prompt is no longer in scrollback"));
                 }
                 window.hide();
@@ -110,5 +104,50 @@ impl Workspace {
             });
             self.history_list.append(&row);
         }
+        self.scroll_history_to_end();
     }
+
+    /// Keeps the newest prompt in view once the rows have been laid out.
+    pub(super) fn scroll_history_to_end(&self) {
+        let Some(scrolled) = self
+            .history_list
+            .ancestor(gtk::ScrolledWindow::static_type())
+            .and_downcast::<gtk::ScrolledWindow>()
+        else {
+            return;
+        };
+        let adjustment = scrolled.vadjustment();
+        glib::idle_add_local_once(move || {
+            adjustment.set_value(adjustment.upper() - adjustment.page_size());
+        });
+    }
+}
+
+/// Selects the prompt `history[index]` in the scrollback and scrolls to it.
+pub fn scroll_to_prompt(terminal: &vte::Terminal, history: &[String], index: usize) -> bool {
+    // Agents wrap long prompts with hard line breaks, so the needle must fit
+    // on the first rendered row.
+    let limit = (terminal.column_count() as usize)
+        .saturating_sub(12)
+        .clamp(16, 60);
+    let needle = history_needle(&history[index], limit);
+    // VTE rejects PCRE2_LITERAL for search regexes, so escape instead.
+    let pattern = glib::Regex::escape_string(&needle);
+    let Ok(regex) = vte::Regex::for_search(&pattern, PCRE2_UTF) else {
+        return false;
+    };
+    // VTE searches backwards from the selection, and a failed search parks an
+    // empty one at the top of the buffer, so always start from the very end.
+    terminal.unselect_all();
+    if let Some(adjustment) = terminal.vadjustment() {
+        adjustment.set_value(adjustment.upper() - adjustment.page_size());
+    }
+    terminal.search_set_regex(Some(&regex), 0);
+    terminal.search_set_wrap_around(false);
+    // Later prompts with the same opening words sit closer to the end.
+    let repeats = history[index + 1..]
+        .iter()
+        .filter(|later| history_needle(later, limit) == needle)
+        .count();
+    (0..=repeats).all(|_| terminal.search_find_previous())
 }

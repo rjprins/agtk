@@ -55,6 +55,7 @@ mod explorer_ui;
 mod file_tabs_ui;
 mod header_layout;
 mod history_ui;
+pub use history_ui::scroll_to_prompt;
 mod inspection;
 mod launch_ui;
 mod menus;
@@ -78,7 +79,6 @@ mod worktrees_ui;
 const EMPTY_PAGE: &str = "empty";
 const MAX_INSPECTED_SESSIONS: usize = 500;
 const DIALOG_SIZES_PREFERENCE: &str = "dialogSizes";
-const PCRE2_LITERAL: u32 = 0x0200_0000;
 const PCRE2_UTF: u32 = 0x0008_0000;
 const PCRE2_MULTILINE: u32 = 0x0000_0400;
 
@@ -692,6 +692,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
             dialog_workspace.history_window.present();
         }
     });
+    let dialog_workspace = workspace.clone();
+    workspace
+        .history_window
+        .connect_show(move || dialog_workspace.scroll_history_to_end());
     let dialog_workspace = workspace.clone();
     workspace.search_button.connect_clicked(move |_| {
         let open = !dialog_workspace.search_bar.is_search_mode();

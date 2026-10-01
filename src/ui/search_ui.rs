@@ -54,7 +54,9 @@ impl Workspace {
         else {
             return;
         };
-        let regex = match vte::Regex::for_search(&query, PCRE2_UTF | PCRE2_LITERAL) {
+        // VTE rejects PCRE2_LITERAL for search regexes, so escape instead.
+        let pattern = glib::Regex::escape_string(query.as_str());
+        let regex = match vte::Regex::for_search(&pattern, PCRE2_UTF) {
             Ok(regex) => regex,
             Err(error) => {
                 self.show_error(&format!("Could not search terminal: {error}"));
