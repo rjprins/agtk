@@ -344,8 +344,18 @@ fn combo_row(title: &str, flag: &str, values: &[&str]) -> adw::ComboRow {
         .title(title)
         .subtitle(flag)
         .model(&gtk::StringList::new(values))
+        .expression(string_item_expression())
         .enable_search(true)
         .build()
+}
+
+/// The popup search entry filters on this; without it typing matches nothing.
+fn string_item_expression() -> gtk::PropertyExpression {
+    gtk::PropertyExpression::new(
+        gtk::StringObject::static_type(),
+        None::<&gtk::Expression>,
+        "string",
+    )
 }
 
 fn switch_row(title: &str, flag: &str) -> adw::SwitchRow {
@@ -1410,8 +1420,9 @@ fn gemini_launch_options() -> (adw::ComboRow, adw::SwitchRow) {
 }
 
 fn searchable_path_dropdown(model: &gtk::StringList) -> gtk::DropDown {
-    let dropdown = gtk::DropDown::new(Some(model.clone()), None::<&gtk::Expression>);
+    let dropdown = gtk::DropDown::new(Some(model.clone()), Some(string_item_expression()));
     dropdown.set_enable_search(true);
+    dropdown.set_search_match_mode(gtk::StringFilterMatchMode::Substring);
     dropdown.set_show_arrow(true);
     dropdown.set_tooltip_text(Some("Search known paths or choose one"));
     dropdown
