@@ -58,6 +58,7 @@ impl Workspace {
             self.history_button.set_sensitive(false);
             self.history_button.set_label("History (0)");
             self.context_last_input.set_text("(none yet)");
+            self.content_title.set_tooltip_text(None);
             return;
         };
         let sessions = self.sessions.borrow();
@@ -65,19 +66,21 @@ impl Workspace {
             self.history_button.set_sensitive(false);
             self.history_button.set_label("History (0)");
             self.context_last_input.set_text("(none yet)");
+            self.content_title.set_tooltip_text(None);
             return;
         };
         self.history_button
             .set_sensitive(!session.history.is_empty());
         self.history_button
             .set_label(&format!("History ({})", session.history.len()));
-        // The subtitle is one line; the dialog rows keep the full prompt.
-        let last_line = session
-            .history
-            .last()
-            .map(|input| input.split_whitespace().collect::<Vec<_>>().join(" "));
+        // The subtitle is one line; hovering it shows the full prompt.
+        let last_prompt = session.history.last();
+        let last_line =
+            last_prompt.map(|input| input.split_whitespace().collect::<Vec<_>>().join(" "));
         self.context_last_input
             .set_text(last_line.as_deref().unwrap_or("(none yet)"));
+        self.content_title
+            .set_tooltip_text(last_prompt.map(|input| input.trim()));
         for input in session.history.iter().rev() {
             let row = adw::ActionRow::builder()
                 .title(glib::markup_escape_text(input))

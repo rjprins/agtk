@@ -53,6 +53,7 @@ mod controls;
 mod emacs_ui;
 mod explorer_ui;
 mod file_tabs_ui;
+mod header_layout;
 mod history_ui;
 mod inspection;
 mod launch_ui;
@@ -377,13 +378,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .sync_create()
         .build();
     session_details.append(&session_context_bar);
-    // Wrap at the children's natural widths, including the scrollable tabs.
-    // https://gnome.pages.gitlab.gnome.org/libadwaita/doc/1-latest/class.WrapBox.html
-    let header_contents = adw::WrapBox::new();
+    // Centre the title in the row until the tabs push it aside, then wrap it.
+    let header_contents = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    header_contents.set_layout_manager(Some(header_layout::HeaderLayout::new()));
     header_contents.set_hexpand(true);
-    header_contents.set_child_spacing(8);
-    header_contents.set_justify(adw::JustifyMode::Fill);
-    header_contents.set_justify_last_line(true);
     header_contents.append(&tabs_scroll);
     header_contents.append(&session_details);
     tabs_bar.set_title_widget(Some(&header_contents));
