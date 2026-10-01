@@ -467,6 +467,9 @@ impl Workspace {
                 if loaded.context.auto_review {
                     for item in loaded.context.pull_requests.iter().filter(|item| {
                         loaded.changed.contains(&item.pull_request.id)
+                            && item
+                                .attention
+                                .is_some_and(PrAttention::launches_auto_review)
                             && !item.pull_request.is_draft
                             && !item.pull_request.is_own_author
                     }) {

@@ -78,6 +78,11 @@ fn attention_baselines_then_tracks_new_published_and_review_events_with_cas_ackn
         &[pr(1, false, 2, 120), pr(2, false, 0, 110)],
     );
     assert_eq!(reviewed.state.attention[&1], PrAttention::Review);
+    assert_eq!(reviewed.changed, [1].into_iter().collect());
+    // A review thread (even one we posted ourselves) must not start another review.
+    assert!(!PrAttention::Review.launches_auto_review());
+    assert!(PrAttention::New.launches_auto_review());
+    assert!(PrAttention::Published.launches_auto_review());
     let acknowledged = acknowledge_attention(
         &reviewed.state,
         &[(1, PrAttention::Published), (2, PrAttention::New)],

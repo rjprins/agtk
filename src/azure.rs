@@ -90,6 +90,14 @@ pub enum PrAttention {
     Review,
 }
 
+impl PrAttention {
+    /// Only a PR that just appeared or left draft gets an automatic review. Review
+    /// activity stays sidebar attention: it fires on every thread, including our own.
+    pub const fn launches_auto_review(self) -> bool {
+        matches!(self, Self::New | Self::Published)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct KnownPr {
