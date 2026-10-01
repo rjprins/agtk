@@ -336,6 +336,46 @@ impl WorktreeManager {
         })
     }
 
+    /// The detached `pr-<id>` checkout next to the primary clone, created at the
+    /// PR's current source tip. An existing checkout moves to that tip when it
+    /// has no edits, so an earlier review's untracked notes survive.
+    pub fn review_checkout(
+        &self,
+        repo_root: &Path,
+        pull_request_id: u64,
+        source_branch: &str,
+    ) -> WorktreeResult<PathBuf> {
+        let repo_root = canonical_repo(repo_root)?;
+        let source_branch = source_branch.trim();
+        if source_branch.is_empty()
+            || source_branch.starts_with('-')
+            || source_branch.contains('\0')
+        {
+            return Err("source branch is invalid".into());
+        }
+        let parent = repo_root.parent().ok_or("repository root has no parent")?;
+        let path = parent.join(format!("pr-{pull_request_id}"));
+        run_git(&repo_root, os_args(&["fetch", "origin", source_branch]))?;
+        let tip = format!("origin/{source_branch}");
+        if path.exists() {
+            if !self.linked_paths(&repo_root)?.contains(&path) {
+                return Err(format!("review target is not a worktree: {}", path.display()).into());
+            }
+            let edited = !git_text(&path, ["status", "--porcelain", "--untracked-files=no"])?
+                .trim()
+                .is_empty();
+            if !edited {
+                run_git(&path, os_args(&["checkout", "--quiet", "--detach", &tip]))?;
+            }
+            return Ok(path);
+        }
+        let mut arguments = os_args(&["worktree", "add", "--detach"]);
+        arguments.push(path.as_os_str().to_owned());
+        arguments.push(tip.into());
+        run_git(&repo_root, arguments)?;
+        Ok(path)
+    }
+
     pub fn reap(&self, request: ReapRequest, live_paths: &[PathBuf]) -> WorktreeResult<ReapResult> {
         let path = request.path.canonicalize()?;
         let repo_root = common_repo_root(&path)?;

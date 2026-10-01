@@ -745,7 +745,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "launch_pr_review",
             "Launch PR review",
-            "Launch Codex with /review-pr for one active PR, reusing its source-branch worktree when available.",
+            "Launch Codex with /review-pr for one active PR in its own detached pr-<id> checkout next to the project.",
             schema(
                 &[
                     ("projectRoot", string()),

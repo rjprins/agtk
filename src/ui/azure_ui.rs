@@ -203,8 +203,8 @@ impl Workspace {
                 let state = preferences.project(&root_key);
                 let worktrees = manager.linked_worktrees(&project_root).unwrap_or_default();
                 let context = pr_context_from_list(project_root, list, &state, &worktrees);
-                // A review runs in the main checkout when the PR has no worktree,
-                // so its name is what links it to the PR.
+                // A review runs in its own detached pr-<id> checkout, so its
+                // name is what links it to the PR.
                 let reviewed = review_pr_id(&name).and_then(|id| {
                     context
                         .pull_requests
@@ -732,10 +732,7 @@ impl Workspace {
 
     fn pr_row(&self, context: &PrContext, item: &PrItem) -> adw::ActionRow {
         let pull_request = &item.pull_request;
-        let location = item
-            .worktree_path
-            .as_ref()
-            .map_or("project root".to_owned(), |path| path.display().to_string());
+        let location = review_checkout_path(&context.project_root, pull_request.id);
         let row = adw::ActionRow::builder()
             .title(glib::markup_escape_text(&pull_request.title))
             .subtitle(glib::markup_escape_text(&format!(
@@ -747,7 +744,11 @@ impl Workspace {
             )))
             .subtitle_lines(1)
             .build();
-        row.set_tooltip_text(Some(&format!("{}\nRuns in {location}", pull_request.title)));
+        row.set_tooltip_text(Some(&format!(
+            "{}\nReview runs in {}",
+            pull_request.title,
+            location.display()
+        )));
 
         let open = {
             let workspace = self.clone();
@@ -963,25 +964,44 @@ impl Workspace {
         item: &PrItem,
         pending: Option<PendingRequest>,
     ) {
-        let cwd = item
-            .worktree_path
-            .clone()
-            .unwrap_or_else(|| project_root.to_path_buf());
-        // A review can start while the user is typing elsewhere, so it never takes focus.
-        self.launch_session(
-            CreateSessionParams {
-                kind: SessionKind::Codex,
-                command: None,
-                args: Vec::new(),
-                cwd: Some(cwd),
-                name: Some(format!("review: PR #{}", item.pull_request.id)),
-                project_root: Some(project_root.to_path_buf()),
-                worktree_path: item.worktree_path.clone(),
-                initial_input: Some(format!("/review-pr {}", item.pull_request.id)),
+        let project_root = project_root.to_path_buf();
+        let pull_request = item.pull_request.clone();
+        let attic = self.paths.attic_dir();
+        let checkout_root = project_root.clone();
+        // Each review gets its own detached checkout, so it never runs in a
+        // worktree the user is editing and a repeat review reuses it.
+        self.run_slow(
+            move || {
+                WorktreeManager::new(attic).review_checkout(
+                    &checkout_root,
+                    pull_request.id,
+                    &pull_request.source_branch,
+                )
             },
-            None,
-            Some(super::sessions::Placement::in_background()),
-            pending,
+            move |workspace, result| match result {
+                // A review can start while the user is typing elsewhere, so it never takes focus.
+                Ok(worktree_path) => workspace.launch_session(
+                    CreateSessionParams {
+                        kind: SessionKind::Codex,
+                        command: None,
+                        args: Vec::new(),
+                        cwd: Some(worktree_path.clone()),
+                        name: Some(format!("review: PR #{}", pull_request.id)),
+                        project_root: Some(project_root),
+                        worktree_path: Some(worktree_path),
+                        initial_input: Some(format!("/review-pr {}", pull_request.id)),
+                    },
+                    None,
+                    Some(super::sessions::Placement::in_background()),
+                    pending,
+                ),
+                Err(error) => workspace.report_failure(
+                    pending,
+                    ErrorCode::OperationRefused,
+                    "Could not prepare the PR review checkout",
+                    error.to_string(),
+                ),
+            },
         );
     }
 
@@ -1127,6 +1147,14 @@ fn pr_context_from_list(
         auto_review: state.auto_review,
         pull_requests,
     }
+}
+
+/// Where `WorktreeManager::review_checkout` puts the review of one PR.
+fn review_checkout_path(project_root: &Path, pull_request_id: u64) -> PathBuf {
+    project_root
+        .parent()
+        .unwrap_or(project_root)
+        .join(format!("pr-{pull_request_id}"))
 }
 
 fn worktree_for_branch(worktrees: &[PorcelainWorktree], branch: &str) -> Option<PathBuf> {

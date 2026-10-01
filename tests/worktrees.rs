@@ -217,6 +217,68 @@ fn create_records_purpose_and_uses_the_sibling_template() {
 }
 
 #[test]
+fn review_checkout_is_a_detached_pr_sibling_that_follows_the_source_tip() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    git(fixture.root(), &["checkout", "-q", "-b", "feature/topic"]);
+    fs::write(fixture.root().join("topic.txt"), "one\n").unwrap();
+    git(fixture.root(), &["add", "topic.txt"]);
+    git(fixture.root(), &["commit", "-q", "-m", "topic one"]);
+    let first = git(fixture.root(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    let clone = fixture.root().parent().unwrap().join("clone");
+    git(
+        fixture.root(),
+        &[
+            "clone",
+            "-q",
+            fixture.root().to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    let clone = clone.canonicalize().unwrap();
+
+    let path = manager
+        .review_checkout(&clone, 42, "feature/topic")
+        .expect("create review checkout");
+
+    assert_eq!(path, clone.parent().unwrap().join("pr-42"));
+    assert_eq!(git(&path, &["rev-parse", "HEAD"]).trim(), first);
+    assert!(manager.branch_for_worktree(&path).unwrap().is_none());
+    let state = manager.list(&clone, &[]).unwrap();
+    let review = state.worktrees.iter().find(|w| w.path == path).unwrap();
+    assert_eq!(review.state, WorktreeState::Review);
+
+    // Notes from an earlier review survive, while the checkout follows new pushes.
+    fs::write(path.join("REVIEW.md"), "notes\n").unwrap();
+    fs::write(fixture.root().join("topic.txt"), "two\n").unwrap();
+    git(fixture.root(), &["commit", "-q", "-am", "topic two"]);
+    let second = git(fixture.root(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+
+    let again = manager
+        .review_checkout(&clone, 42, "feature/topic")
+        .unwrap();
+
+    assert_eq!(again, path);
+    assert_eq!(git(&path, &["rev-parse", "HEAD"]).trim(), second);
+    assert!(path.join("REVIEW.md").exists());
+
+    // Edits to tracked files pin the checkout where it is.
+    fs::write(path.join("topic.txt"), "edited\n").unwrap();
+    fs::write(fixture.root().join("topic.txt"), "three\n").unwrap();
+    git(fixture.root(), &["commit", "-q", "-am", "topic three"]);
+
+    manager
+        .review_checkout(&clone, 42, "feature/topic")
+        .unwrap();
+
+    assert_eq!(git(&path, &["rev-parse", "HEAD"]).trim(), second);
+}
+
+#[test]
 fn inventory_distinguishes_live_upstream_and_gone_upstream() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic());
