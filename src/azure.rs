@@ -162,14 +162,16 @@ impl AzureClient {
 
     pub fn repository(&self, project_root: &Path) -> AzureResult<Option<AzureRepoRef>> {
         let root = project_root.canonicalize()?;
+        // The configured URL, not `remote get-url`: an insteadOf rewrite to a
+        // mirror or SSH alias must not hide the Azure origin.
         let remote = run_command(
             "git",
             [
                 OsString::from("-C"),
                 root.as_os_str().to_owned(),
-                OsString::from("remote"),
-                OsString::from("get-url"),
-                OsString::from("origin"),
+                OsString::from("config"),
+                OsString::from("--get"),
+                OsString::from("remote.origin.url"),
             ],
         );
         let Ok(remote) = remote else {

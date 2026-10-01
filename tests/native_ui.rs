@@ -853,17 +853,36 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
                 .success()
         );
     }
+    // The origin is an Azure URL for detection, rewritten to a local bare
+    // repository so review checkouts can fetch the PR branches.
+    let origin = app.directory.path().join("azure-origin.git");
+    let origin_text = origin.to_str().unwrap().to_owned();
+    let rewrite = format!("url.{origin_text}.insteadOf");
+    assert!(
+        Command::new("git")
+            .args(["init", "-q", "--bare", &origin_text])
+            .status()
+            .unwrap()
+            .success()
+    );
     std::fs::write(project.join("tracked"), "base").unwrap();
     for args in [
         &["add", "tracked"][..],
         &["commit", "-qm", "base"][..],
         &["branch", "-M", "feature"][..],
+        &["branch", "later-attention"][..],
         &[
             "remote",
             "add",
             "origin",
             "https://dev.azure.com/org/project/_git/repo",
         ][..],
+        &[
+            "config",
+            &rewrite,
+            "https://dev.azure.com/org/project/_git/repo",
+        ][..],
+        &["push", "-q", "origin", "feature", "later-attention"][..],
     ] {
         assert!(
             Command::new("git")
@@ -874,6 +893,8 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
                 .success()
         );
     }
+    let project = project.canonicalize().unwrap();
+    let review_checkout = |id: u64| project.parent().unwrap().join(format!("pr-{id}"));
 
     let pr = |id: u64, branch: &str| {
         json!({
@@ -944,7 +965,13 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
         json!({"projectRoot":project,"pullRequestId":42}),
     );
     assert_eq!(review["name"], "review: PR #42");
-    assert_eq!(review["cwd"], project.to_str().unwrap());
+    // Each review runs in its own detached checkout at the PR tip.
+    assert_eq!(review["cwd"], review_checkout(42).to_str().unwrap());
+    assert_eq!(
+        review["worktreePath"],
+        review_checkout(42).to_str().unwrap()
+    );
+    assert_eq!(review["projectRoot"], project.to_str().unwrap());
     // A review never takes the selection away from what the user was doing.
     assert_eq!(review["isSelected"], false);
     let review_id = review["id"].as_str().unwrap();
@@ -1019,8 +1046,8 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     };
     let state = app.request("app.get_state", json!({}));
     assert_ne!(state["selectedSessionId"], auto_review_id.as_str());
-    // PR 44 has no worktree, so the review links to it by name: in the row at once,
-    // and in the PR bar once selected.
+    // The detached review checkout is on no branch, so the review links to its
+    // PR by name: in the row at once, and in the PR bar once selected.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let node = row_pr(&app, &auto_review_id);
@@ -1074,6 +1101,8 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     );
     app.request("session.close", json!({"sessionId":review_id}));
     app.request("session.close", json!({"sessionId":auto_review_id}));
+    assert!(review_checkout(42).is_dir());
+    assert!(review_checkout(44).is_dir());
 }
 
 #[test]
