@@ -67,6 +67,7 @@ mod shortcuts_ui;
 mod sidebar;
 mod status_ui;
 mod style;
+mod window_size;
 mod workspace_tabs_ui;
 mod worktrees_ui;
 
@@ -513,11 +514,18 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     let overlay = adw::ToastOverlay::new();
     overlay.set_child(Some(&split));
+    // Read synchronously so the window opens at its remembered size instead of jumping to it.
+    let stored_size = Store::open(&paths.database())
+        .and_then(|store| store.preference(window_size::WINDOW_SIZE_PREFERENCE))
+        .ok()
+        .flatten();
+    let size = window_size::WindowSize::from_preference(stored_size.as_ref());
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("agtk")
-        .default_width(1200)
-        .default_height(800)
+        .default_width(size.width)
+        .default_height(size.height)
+        .maximized(size.maximized)
         .content(&overlay)
         .build();
     // A half-screen tile gives the terminal the room; the toggle still shows the sidebar.
@@ -666,14 +674,39 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     });
 
     let sidebar_width_workspace = workspace.clone();
+    let handle_dragged = watch_handle_drags(&split);
     split.connect_position_notify(move |split| {
         let position = split.position();
-        if position >= sidebar::MIN_SIDEBAR_WIDTH {
+        // A narrow window also moves the handle; only a drag changes what the user wants.
+        if handle_dragged.get() && position >= sidebar::MIN_SIDEBAR_WIDTH {
             sidebar_width_workspace.save_preference(
                 sidebar::SIDEBAR_WIDTH_PREFERENCE,
                 serde_json::json!(position),
             );
         }
+    });
+    let size_workspace = workspace.clone();
+    let size_save_pending = Rc::new(Cell::new(false));
+    let remember_window_size = move |_: &adw::ApplicationWindow| {
+        // Interactive resizes notify every frame; one write after they settle is enough.
+        if size_save_pending.replace(true) {
+            return;
+        }
+        let workspace = size_workspace.clone();
+        let pending = size_save_pending.clone();
+        glib::timeout_add_local_once(Duration::from_millis(500), move || {
+            pending.set(false);
+            workspace.save_window_size(false);
+        });
+    };
+    window.connect_default_width_notify(remember_window_size.clone());
+    window.connect_default_height_notify(remember_window_size.clone());
+    window.connect_maximized_notify(remember_window_size);
+    let closing_workspace = workspace.clone();
+    window.connect_close_request(move |_| {
+        // Quitting stops the I/O worker before a queued write lands, so write now.
+        closing_workspace.save_window_size(true);
+        glib::Propagation::Proceed
     });
     let changes_width_workspace = workspace.clone();
     changes
@@ -1038,6 +1071,26 @@ impl Workspace {
         );
     }
 
+    fn save_window_size(&self, immediately: bool) {
+        let (width, height) = self.window.default_size();
+        let size = window_size::WindowSize {
+            width,
+            height,
+            maximized: self.window.is_maximized(),
+        };
+        if size.width <= 0 || size.height <= 0 {
+            return;
+        }
+        if immediately {
+            if let Some(store) = self.store.borrow().as_ref() {
+                let _ = store
+                    .set_preference(window_size::WINDOW_SIZE_PREFERENCE, &size.to_preference());
+            }
+            return;
+        }
+        self.save_preference(window_size::WINDOW_SIZE_PREFERENCE, size.to_preference());
+    }
+
     fn persist_record(&self, record: SessionRecord) {
         let Some(store) = self.store.borrow().clone() else {
             return;
@@ -1156,6 +1209,49 @@ fn sibling_binary(name: &str) -> PathBuf {
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.join(name)))
         .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// True while the pointer holds the paned's handle.
+fn watch_handle_drags(split: &gtk::Paned) -> Rc<Cell<bool>> {
+    let dragging = Rc::new(Cell::new(false));
+    let events = gtk::EventControllerLegacy::new();
+    events.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let state = dragging.clone();
+    events.connect_event(move |controller, event| {
+        use gtk::gdk::EventType;
+        match event.event_type() {
+            EventType::ButtonPress | EventType::TouchBegin => {
+                let on_handle = controller
+                    .widget()
+                    .and_downcast::<gtk::Paned>()
+                    .is_some_and(|split| handle_at(&split, event));
+                if on_handle {
+                    state.set(true);
+                }
+            }
+            EventType::ButtonRelease | EventType::TouchEnd | EventType::TouchCancel => {
+                state.set(false);
+            }
+            _ => {}
+        }
+        glib::Propagation::Proceed
+    });
+    split.add_controller(events);
+    dragging
+}
+
+/// Whether the event lands on the paned's own handle rather than on either child.
+fn handle_at(split: &gtk::Paned, event: &gtk::gdk::Event) -> bool {
+    let Some((x, y)) = sessions::widget_position(split, event) else {
+        return false;
+    };
+    split
+        .pick(x, y, gtk::PickFlags::DEFAULT)
+        .is_some_and(|widget| {
+            widget.parent().as_ref() == Some(split.upcast_ref())
+                && split.start_child().as_ref() != Some(&widget)
+                && split.end_child().as_ref() != Some(&widget)
+        })
 }
 
 fn quit_on_main_window_close(quit: impl FnOnce()) -> glib::Propagation {

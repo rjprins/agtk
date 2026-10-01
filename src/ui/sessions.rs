@@ -1247,13 +1247,16 @@ fn link_at(
     }
 }
 
-/// Raw events carry surface coordinates; link lookup needs terminal coordinates.
-fn widget_position(terminal: &vte::Terminal, event: &gtk::gdk::Event) -> Option<(f64, f64)> {
+/// Raw events carry surface coordinates; this gives them in the widget's own.
+pub(super) fn widget_position(
+    widget: &impl IsA<gtk::Widget>,
+    event: &gtk::gdk::Event,
+) -> Option<(f64, f64)> {
     let (x, y) = event.position()?;
-    let native = terminal.native()?;
+    let native = widget.native()?;
     let (offset_x, offset_y) = native.surface_transform();
     let point = native.upcast_ref::<gtk::Widget>().compute_point(
-        terminal,
+        widget,
         &gtk::graphene::Point::new((x - offset_x) as f32, (y - offset_y) as f32),
     )?;
     Some((f64::from(point.x()), f64::from(point.y())))

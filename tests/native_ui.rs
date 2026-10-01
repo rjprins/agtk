@@ -451,6 +451,67 @@ fn sidebar_width_is_restored_on_ui_restart() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn window_size_is_restored_on_ui_restart() {
+    let mut app = App::new();
+    app.stop();
+    let store = Store::open(&app.paths.database()).unwrap();
+    store
+        .set_preference("windowSize", &json!({"width": 1300, "height": 700}))
+        .unwrap();
+    app.start();
+
+    let inspection = app.request("ui.inspect", json!({}));
+    let bounds = &inspection["root"]["bounds"];
+    assert_eq!(
+        (bounds["width"].as_f64(), bounds["height"].as_f64()),
+        (Some(1300.0), Some(700.0))
+    );
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn a_narrow_window_keeps_the_stored_sidebar_width() {
+    let mut app = App::new();
+    app.stop();
+    let store = Store::open(&app.paths.database()).unwrap();
+    store.set_preference("sidebarWidth", &json!(600)).unwrap();
+    store
+        .set_preference("changesSidebarOpen", &json!(true))
+        .unwrap();
+    store
+        .set_preference("changesSidebarWidth", &json!(500))
+        .unwrap();
+    // Too narrow for both panels at their stored widths, so GTK narrows the sidebar.
+    store
+        .set_preference("windowSize", &json!({"width": 1150, "height": 700}))
+        .unwrap();
+    app.start();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut shown = 0.0;
+    while Instant::now() < deadline {
+        let inspection = app.request("ui.inspect", json!({}));
+        shown = inspection["root"]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == "sidebar")
+            .unwrap()["bounds"]["width"]
+            .as_f64()
+            .unwrap();
+        if shown < 600.0 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(shown < 600.0, "sidebar was not narrowed: {shown}");
+    // Give a wrongly queued save time to land before checking.
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(store.preference("sidebarWidth").unwrap(), Some(json!(600)));
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn changes_sidebar_width_is_restored_on_ui_restart() {
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
         if node["id"] == id {
