@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use std::fs;
 
 use agtk::control::{
-    ClaudePresetApplyParams, ControlCommand, PrListParams, SendInputParams,
-    SetSessionWorktreeParams,
+    ClaudePresetApplyParams, ControlCommand, CreateSessionParams, PrListParams, SendInputParams,
+    SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
 };
 use agtk::mcp::{ControlBackend, McpServer};
 use serde_json::{Value, json};
@@ -170,6 +170,81 @@ fn setting_a_session_worktree_maps_to_the_typed_local_control_protocol() {
             }
         )]
     );
+}
+
+#[test]
+fn launching_an_agent_with_a_branch_creates_the_worktree_first() {
+    let backend = MockBackend::default();
+    backend.results.borrow_mut().push_back(Ok(json!({
+        "repoRoot":"/work/agtk",
+        "path":"/work/agtk-fix-login",
+        "branch":"fix-login",
+        "purpose":"Fix the login redirect"
+    })));
+    backend
+        .results
+        .borrow_mut()
+        .push_back(Ok(json!({"id":"claude-1","isSelected":false})));
+    let mut server = McpServer::new(backend);
+    let response = server
+        .handle(request(
+            9,
+            "tools/call",
+            json!({
+                "name":"launch_agent",
+                "arguments":{
+                    "provider":"claude",
+                    "projectRoot":"/work/agtk",
+                    "branch":"fix-login",
+                    "purpose":"Fix the login redirect",
+                    "initialInput":"Fix the login redirect"
+                }
+            }),
+        ))
+        .unwrap();
+    assert_eq!(response["result"]["isError"], false);
+    let text: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text["session"]["id"], "claude-1");
+    assert_eq!(text["worktree"]["path"], "/work/agtk-fix-login");
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        [
+            ControlCommand::WorktreeCreate(WorktreeCreateParams {
+                project_root: "/work/agtk".into(),
+                branch: "fix-login".to_owned(),
+                base_branch: None,
+                purpose: "Fix the login redirect".to_owned(),
+            }),
+            ControlCommand::SessionCreate(CreateSessionParams {
+                kind: SessionKind::Claude,
+                command: None,
+                args: Vec::new(),
+                cwd: Some("/work/agtk-fix-login".into()),
+                name: None,
+                project_root: Some("/work/agtk".into()),
+                worktree_path: Some("/work/agtk-fix-login".into()),
+                initial_input: Some("Fix the login redirect".to_owned()),
+            }),
+        ]
+    );
+
+    // A branch without a purpose, or next to an explicit worktree, is refused before any call.
+    for arguments in [
+        json!({"provider":"claude","projectRoot":"/work/agtk","branch":"fix-login"}),
+        json!({"provider":"claude","projectRoot":"/work/agtk","branch":"fix-login","purpose":"x","worktreePath":"/elsewhere"}),
+    ] {
+        let calls_before = server.backend().calls.borrow().len();
+        let response = server
+            .handle(request(
+                10,
+                "tools/call",
+                json!({"name":"launch_agent","arguments":arguments}),
+            ))
+            .unwrap();
+        assert_eq!(response["result"]["isError"], true);
+        assert_eq!(server.backend().calls.borrow().len(), calls_before);
+    }
 }
 
 #[test]

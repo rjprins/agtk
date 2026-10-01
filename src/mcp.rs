@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 use crate::control::{
     CloseSessionParams, ControlClient, ControlCommand, ControlRequest, CreateSessionParams,
     PROTOCOL_VERSION, ResponseBody, SessionIdParams, UiOpenDiffParams, UiOpenFileParams,
-    WorktreeListParams,
+    WorktreeCreateParams, WorktreeListParams,
 };
 use crate::providers::AgentProvider;
 
@@ -223,6 +223,9 @@ impl<B: ControlBackend> McpServer<B> {
             }
             "launch_agent" => {
                 let params: LaunchAgentArgs = parse_args(arguments)?;
+                if params.branch.is_some() {
+                    return self.launch_agent_in_new_worktree(params);
+                }
                 ControlCommand::SessionCreate(CreateSessionParams {
                     kind: params.provider.kind(),
                     command: None,
@@ -285,6 +288,56 @@ impl<B: ControlBackend> McpServer<B> {
             _ => value,
         };
         Ok(ToolOutput::Json(value))
+    }
+
+    /// Creates the worktree first, so the agent starts inside it and the
+    /// session is grouped under it from the first prompt.
+    fn launch_agent_in_new_worktree(&self, params: LaunchAgentArgs) -> Result<ToolOutput, String> {
+        let branch = params.branch.ok_or("branch is required")?;
+        let project_root = params
+            .project_root
+            .ok_or("projectRoot is required to create a worktree for branch")?;
+        let purpose = params
+            .purpose
+            .ok_or("purpose is required to create a worktree for branch")?;
+        if params.worktree_path.is_some() || params.cwd.is_some() {
+            return Err(
+                "branch creates the worktree, so worktreePath and cwd must be absent".into(),
+            );
+        }
+        let created = self
+            .backend
+            .call(ControlCommand::WorktreeCreate(WorktreeCreateParams {
+                project_root: project_root.clone(),
+                branch,
+                base_branch: params.base_branch,
+                purpose,
+            }))?;
+        let path = created
+            .get("path")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+            .ok_or("worktree creation returned no path")?;
+        let repo_root = created
+            .get("repoRoot")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+            .unwrap_or(project_root);
+        let session = self
+            .backend
+            .call(ControlCommand::SessionCreate(CreateSessionParams {
+                kind: params.provider.kind(),
+                command: None,
+                args: params.args,
+                cwd: Some(path.clone()),
+                name: params.name,
+                project_root: Some(repo_root),
+                worktree_path: Some(path),
+                initial_input: params.initial_input,
+            }))?;
+        Ok(ToolOutput::Json(
+            json!({"session":session,"worktree":created}),
+        ))
     }
 
     fn worktree_context(&self, arguments: Value) -> Result<ToolOutput, String> {
@@ -523,6 +576,9 @@ struct LaunchAgentArgs {
     project_root: Option<PathBuf>,
     worktree_path: Option<PathBuf>,
     initial_input: Option<String>,
+    branch: Option<String>,
+    base_branch: Option<String>,
+    purpose: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -570,7 +626,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "launch_agent",
             "Launch agent",
-            "Launch Codex or Claude directly with optional arguments and initial input. The session opens in the background and does not take the selection.",
+            "Launch Codex or Claude directly with optional arguments and initial input. The session opens in the background and does not take the selection. Give branch, purpose and projectRoot to create a new worktree first and start the agent inside it; the result then holds both the session and the worktree.",
             launch_schema(true),
         ),
         tool(
@@ -850,6 +906,9 @@ fn launch_schema(agent: bool) -> Value {
         properties.insert(0, ("provider", enum_values(&["codex", "claude"])));
         properties.push(("args", json!({"type":"array","items":{"type":"string"}})));
         properties.push(("initialInput", string()));
+        properties.push(("branch", string()));
+        properties.push(("baseBranch", string()));
+        properties.push(("purpose", string()));
         required.push("provider");
     }
     schema(&properties, &required)
