@@ -60,6 +60,7 @@ mod menus;
 mod modal;
 mod preferences_ui;
 mod projects_ui;
+mod prompt_log_ui;
 mod provider_icons;
 mod resume_ui;
 mod search_ui;
@@ -216,8 +217,11 @@ struct SessionView {
     /// Opens the session's pull request; hidden until one is linked.
     pr_button: gtk::Button,
     history: Vec<String>,
-    /// The last history entry came from keystrokes and a hook may still correct it.
-    typed_history_pending: bool,
+    /// How many trailing history entries came from keystrokes and still await
+    /// the agent's own version.
+    typed_history_pending: usize,
+    /// Follows the Codex rollout for submitted prompts; None until it is found.
+    prompt_log: prompt_log_ui::PromptLogFollower,
     /// Last state an agent hook reported; None until the agent sends one.
     hook_signal: Option<crate::agent_status::Signal>,
     tracker: crate::agent_status::ScreenTracker,

@@ -26,15 +26,20 @@ impl Workspace {
         let Some(session) = sessions.get_mut(id) else {
             return;
         };
-        // The hook's version supersedes the keystroke guess for the same turn.
-        if session.typed_history_pending && !typed {
-            session.history.pop();
-        }
-        session.typed_history_pending = typed;
-        if session.history.last() != Some(&input) {
-            session.history.push(input);
-            if session.history.len() > 200 {
-                session.history.remove(0);
+        let history = &mut session.history;
+        if !typed && session.typed_history_pending > 0 {
+            // The agent's version supersedes the oldest keystroke guess still waiting.
+            let index = history.len() - session.typed_history_pending;
+            history[index] = input;
+            session.typed_history_pending -= 1;
+        } else if history.last() != Some(&input) {
+            history.push(input);
+            if typed {
+                session.typed_history_pending += 1;
+            }
+            if history.len() > 200 {
+                history.remove(0);
+                session.typed_history_pending = session.typed_history_pending.min(history.len());
             }
         }
         drop(sessions);

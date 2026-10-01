@@ -268,3 +268,132 @@ fn titles_prefer_the_given_name_then_the_provider_title_then_the_command() {
     assert_eq!(codex.prompt_count, 1);
     assert!(cache.exists());
 }
+
+#[test]
+fn prompt_log_reader_follows_appended_codex_prompts() {
+    use agtk::providers::PromptLogReader;
+    use std::io::Write;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let path = fixture.path().join("rollout-a.jsonl");
+    let mut log = fs::File::create(&path).unwrap();
+    writeln!(
+        log,
+        r#"{{"timestamp":"2026-09-23T10:03:07.757Z","type":"session_meta","payload":{{"id":"codex-1","cwd":"/work"}}}}"#
+    )
+    .unwrap();
+    // Before the agtk session existed: an earlier life of the conversation.
+    writeln!(
+        log,
+        r#"{{"timestamp":"2026-09-23T10:03:08.000Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"old prompt"}}]}}}}"#
+    )
+    .unwrap();
+    writeln!(
+        log,
+        r#"{{"timestamp":"2026-09-23T10:04:10.000Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"<environment_context>x</environment_context>"}}]}}}}"#
+    )
+    .unwrap();
+    writeln!(
+        log,
+        r#"{{"timestamp":"2026-09-23T10:04:10.401Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"  fix the build\nthen test  "}}]}}}}"#
+    )
+    .unwrap();
+    // Older logs repeat the prompt as an event right after the item.
+    writeln!(
+        log,
+        r#"{{"timestamp":"2026-09-23T10:04:10.401Z","type":"event_msg","payload":{{"type":"user_message","message":"fix the build\nthen test"}}}}"#
+    )
+    .unwrap();
+    write!(log, r#"{{"timestamp":"2026-09-23T10:05:00.000Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"partial"#).unwrap();
+    log.flush().unwrap();
+
+    let since = 1_790_157_849_000; // 2026-09-23T10:04:09Z
+    let mut reader = PromptLogReader::new(path.clone(), since);
+    assert_eq!(reader.read_new().unwrap(), ["fix the build\nthen test"]);
+    // Nothing new, and the unfinished line is not consumed.
+    assert_eq!(reader.read_new().unwrap(), Vec::<String>::new());
+
+    writeln!(log, r#" line"}}]}}}}"#).unwrap();
+    writeln!(
+        log,
+        r#"{{"timestamp":"2026-09-23T10:05:01.000Z","type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"done"}}]}}}}"#
+    )
+    .unwrap();
+    log.flush().unwrap();
+    assert_eq!(reader.read_new().unwrap(), ["partial line"]);
+    assert_eq!(reader.path(), path);
+}
+
+#[test]
+fn codex_log_is_located_by_conversation_or_by_directory_and_launch_time() {
+    let fixture = tempfile::tempdir().unwrap();
+    let codex = fixture.path().join("codex");
+    let day = codex.join("sessions/2026/09/23");
+    fs::create_dir_all(&day).unwrap();
+    let rollout = |id: &str, started: &str, cwd: &str| {
+        format!(
+            "{{\"timestamp\":\"{started}\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"timestamp\":\"{started}\",\"cwd\":\"{cwd}\"}}}}\n"
+        )
+    };
+    let older = day.join("rollout-2026-09-23T11-00-00-older.jsonl");
+    let mine = day.join("rollout-2026-09-23T12-03-07-mine.jsonl");
+    let later = day.join("rollout-2026-09-23T12-10-00-later.jsonl");
+    let elsewhere = day.join("rollout-2026-09-23T12-03-08-elsewhere.jsonl");
+    fs::write(
+        &older,
+        rollout("older", "2026-09-23T09:00:00.000Z", "/work"),
+    )
+    .unwrap();
+    fs::write(&mine, rollout("mine", "2026-09-23T10:03:07.757Z", "/work")).unwrap();
+    fs::write(
+        &later,
+        rollout("later", "2026-09-23T10:10:00.000Z", "/work"),
+    )
+    .unwrap();
+    fs::write(
+        &elsewhere,
+        rollout("elsewhere", "2026-09-23T10:03:08.000Z", "/other"),
+    )
+    .unwrap();
+    let discovery = ProviderDiscovery::new(
+        DiscoveryRoots {
+            claude_config_dir: fixture.path().join("claude"),
+            codex_home_dir: codex,
+        },
+        100,
+        u64::MAX,
+    );
+    let launched_at = 1_790_157_787_000; // 2026-09-23T10:03:07Z
+    let none = BTreeSet::new();
+
+    assert_eq!(
+        discovery
+            .locate_codex_log(None, std::path::Path::new("/work"), launched_at, &none)
+            .unwrap(),
+        Some(("mine".to_owned(), mine.clone()))
+    );
+    let claimed = BTreeSet::from(["mine".to_owned()]);
+    assert_eq!(
+        discovery
+            .locate_codex_log(None, std::path::Path::new("/work"), launched_at, &claimed)
+            .unwrap(),
+        Some(("later".to_owned(), later))
+    );
+    assert_eq!(
+        discovery
+            .locate_codex_log(
+                Some("older"),
+                std::path::Path::new("/work"),
+                launched_at,
+                &none
+            )
+            .unwrap(),
+        Some(("older".to_owned(), older))
+    );
+    assert_eq!(
+        discovery
+            .locate_codex_log(None, std::path::Path::new("/nowhere"), launched_at, &none)
+            .unwrap(),
+        None
+    );
+}
