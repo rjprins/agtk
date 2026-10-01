@@ -826,6 +826,16 @@ fn claude_model_presets_are_exact_provider_only_and_durable() {
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn azure_pr_attention_and_review_launch_use_the_project_context() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
     let app = App::new();
     let project = app.directory.path().join("azure-project");
     std::fs::create_dir(&project).unwrap();
@@ -959,25 +969,15 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
         );
         thread::sleep(Duration::from_millis(30));
     }
-
-    assert_eq!(
-        app.request("ui.show", json!({"surface":"pull-requests"}))["shown"],
-        true
-    );
-    thread::sleep(Duration::from_millis(100));
-    let inspection = app.request("ui.inspect", json!({}));
-    let pr_node = inspection["root"]["children"][0]["children"][3]["children"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|node| node["id"] == "pull-requests")
-        .unwrap();
-    assert_eq!(pr_node["isSelected"], true, "PR inspection node: {pr_node}");
-    let capture = app.request("ui.capture", json!({}));
-    assert!(
-        capture["path"].as_str().is_some(),
-        "unexpected capture: {capture}"
-    );
+    let row_pr = |app: &App, id: &str| -> Value {
+        let inspection = app.request("ui.inspect", json!({}));
+        find(&inspection["root"], &format!("session-pr-{id}"))
+            .cloned()
+            .expect("session row has a PR node")
+    };
+    let review_pr = row_pr(&app, review_id);
+    assert_eq!(review_pr["isVisible"], true, "{review_pr}");
+    assert_eq!(review_pr["label"], "#42");
 
     assert_eq!(
         app.request(
@@ -1019,6 +1019,59 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     };
     let state = app.request("app.get_state", json!({}));
     assert_ne!(state["selectedSessionId"], auto_review_id.as_str());
+    // PR 44 has no worktree, so the review links to it by name: in the row at once,
+    // and in the PR bar once selected.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let node = row_pr(&app, &auto_review_id);
+        if node["isVisible"] == true {
+            assert_eq!(node["label"], "#44");
+            break;
+        }
+        assert!(Instant::now() < deadline, "row PR button did not appear");
+        thread::sleep(Duration::from_millis(30));
+    }
+    app.request("session.select", json!({"sessionId":auto_review_id}));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let inspection = app.request("ui.inspect", json!({}));
+        let pr_context = find(&inspection["root"], "pr-context").unwrap();
+        if pr_context["isVisible"] == true && pr_context["label"] != "PR #42: Review feature" {
+            assert_eq!(pr_context["label"], "PR #44: Review later-attention");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "PR bar did not show the reviewed PR"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+    thread::sleep(Duration::from_millis(50));
+    let capture = app.request("ui.capture", json!({}));
+    if let Ok(target) = std::env::var("AGTK_TEST_CAPTURE_DIR") {
+        let path = std::path::Path::new(capture["path"].as_str().unwrap());
+        let _ = std::fs::copy(path, std::path::Path::new(&target).join("session-pr.png"));
+    }
+
+    // The dialog opens last, so the capture above shows the main window.
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"pull-requests"}))["shown"],
+        true
+    );
+    thread::sleep(Duration::from_millis(100));
+    let inspection = app.request("ui.inspect", json!({}));
+    let pr_node = inspection["root"]["children"][0]["children"][3]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "pull-requests")
+        .unwrap();
+    assert_eq!(pr_node["isSelected"], true, "PR inspection node: {pr_node}");
+    let capture = app.request("ui.capture", json!({}));
+    assert!(
+        capture["path"].as_str().is_some(),
+        "unexpected capture: {capture}"
+    );
     app.request("session.close", json!({"sessionId":review_id}));
     app.request("session.close", json!({"sessionId":auto_review_id}));
 }

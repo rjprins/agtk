@@ -210,6 +210,8 @@ struct SessionView {
     worktree_label: gtk::Label,
     state_label: gtk::Label,
     elapsed_label: gtk::Label,
+    /// Opens the session's pull request; hidden until one is linked.
+    pr_button: gtk::Button,
     history: Vec<String>,
     /// Last state an agent hook reported; None until the agent sends one.
     hook_signal: Option<crate::agent_status::Signal>,

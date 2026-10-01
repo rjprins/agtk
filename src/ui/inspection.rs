@@ -97,16 +97,34 @@ impl Workspace {
                     is_enabled: session.row.is_sensitive(),
                     is_selected: selected_session_id.as_deref() == Some(id.as_str()),
                     bounds: widget_bounds(&session.row, &self.window),
-                    children: vec![UiNode {
-                        id: format!("session-state-{id}"),
-                        role: "status".to_owned(),
-                        label: Some(format!("{:?}", session.record.state).to_lowercase()),
-                        is_visible: session.state_label.is_visible(),
-                        is_enabled: true,
-                        is_selected: false,
-                        bounds: widget_bounds(&session.state_label, &self.window),
-                        children: Vec::new(),
-                    }],
+                    children: vec![
+                        UiNode {
+                            id: format!("session-state-{id}"),
+                            role: "status".to_owned(),
+                            label: Some(format!("{:?}", session.record.state).to_lowercase()),
+                            is_visible: session.state_label.is_visible(),
+                            is_enabled: true,
+                            is_selected: false,
+                            bounds: widget_bounds(&session.state_label, &self.window),
+                            children: Vec::new(),
+                        },
+                        UiNode {
+                            id: format!("session-pr-{id}"),
+                            role: "button".to_owned(),
+                            label: Some(
+                                session
+                                    .pr_button
+                                    .label()
+                                    .map(String::from)
+                                    .unwrap_or_default(),
+                            ),
+                            is_visible: session.pr_button.is_visible(),
+                            is_enabled: session.pr_button.is_sensitive(),
+                            is_selected: false,
+                            bounds: widget_bounds(&session.pr_button, &self.window),
+                            children: Vec::new(),
+                        },
+                    ],
                 })
             })
             .collect();

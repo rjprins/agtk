@@ -155,7 +155,7 @@ impl Workspace {
 impl Workspace {
     pub(super) fn refresh_selected_pr_context(&self, session_id: &str) {
         self.clear_selected_pr_context();
-        let Some((project_root, worktree_path, kind, conversation_id, cwd)) =
+        let Some((project_root, worktree_path, kind, conversation_id, cwd, name)) =
             self.sessions.borrow().get(session_id).and_then(|session| {
                 Some((
                     session.record.project_root.clone(),
@@ -167,6 +167,7 @@ impl Workspace {
                     session.record.kind,
                     session.record.conversation_id.clone(),
                     session.record.cwd.clone(),
+                    session.record.name.clone(),
                 ))
             })
         else {
@@ -202,15 +203,23 @@ impl Workspace {
                 let state = preferences.project(&root_key);
                 let worktrees = manager.linked_worktrees(&project_root).unwrap_or_default();
                 let context = pr_context_from_list(project_root, list, &state, &worktrees);
-                let mut selected = branch.as_deref().and_then(|branch| {
+                // A review runs in the main checkout when the PR has no worktree,
+                // so its name is what links it to the PR.
+                let reviewed = review_pr_id(&name).and_then(|id| {
+                    context
+                        .pull_requests
+                        .iter()
+                        .find(|item| item.pull_request.id == id)
+                });
+                let on_branch = branch.as_deref().and_then(|branch| {
                     context
                         .pull_requests
                         .iter()
                         .find(|item| item.pull_request.source_branch == branch)
-                        .map(|item| SelectedPrContext {
-                            session_id: session_id.clone(),
-                            pull_request: item.pull_request.clone(),
-                        })
+                });
+                let mut selected = reviewed.or(on_branch).map(|item| SelectedPrContext {
+                    session_id: session_id.clone(),
+                    pull_request: item.pull_request.clone(),
                 });
 
                 if selected.is_none() {
@@ -290,6 +299,7 @@ impl Workspace {
                     workspace.clear_selected_pr_context();
                 }
                 workspace.save_session_pr_cache();
+                workspace.refresh_session_pr_button(&loaded.session_id);
             },
         );
     }
@@ -303,6 +313,103 @@ impl Workspace {
     pub(super) fn save_session_pr_cache(&self) {
         if let Ok(value) = serde_json::to_value(&*self.session_pr_cache.borrow()) {
             self.save_preference("sessionPullRequests", value);
+        }
+    }
+
+    /// Links every session of the project to its PR, so the sidebar shows a
+    /// PR button without the session ever being selected.
+    fn match_sessions_to_prs(&self, context: &PrContext) {
+        let records = self
+            .sessions
+            .borrow()
+            .values()
+            .map(|session| session.record.clone())
+            .collect::<Vec<_>>();
+        let mut changed = Vec::new();
+        for record in records {
+            let mut cache = self.session_pr_cache.borrow_mut();
+            match session_pr_from_context(&record, context) {
+                Some(pull_request) => {
+                    if cache.get(&record.id) != Some(&pull_request) {
+                        cache.insert(record.id.clone(), pull_request);
+                        changed.push(record.id);
+                    }
+                }
+                // A PR matched from the agent's edits stays until it leaves the list.
+                None if in_project(&record, context)
+                    && cache.get(&record.id).is_some_and(|cached| {
+                        !context
+                            .pull_requests
+                            .iter()
+                            .any(|item| item.pull_request.id == cached.id)
+                    }) =>
+                {
+                    cache.remove(&record.id);
+                    changed.push(record.id);
+                }
+                None => {}
+            }
+        }
+        if changed.is_empty() {
+            return;
+        }
+        self.save_session_pr_cache();
+        let selected = self.selected_session_id();
+        for id in &changed {
+            self.refresh_session_pr_button(id);
+            if selected.as_deref() == Some(id.as_str()) {
+                self.refresh_selected_pr_context(id);
+            }
+        }
+    }
+
+    /// Shows the row's PR button when the session has a PR, matching it from
+    /// the project's PR list if it was not linked yet.
+    pub(super) fn refresh_session_pr_button(&self, id: &str) {
+        let Some((record, button)) = self
+            .sessions
+            .borrow()
+            .get(id)
+            .map(|session| (session.record.clone(), session.pr_button.clone()))
+        else {
+            return;
+        };
+        let mut pull_request = self.session_pr_cache.borrow().get(id).cloned();
+        if pull_request.is_none()
+            && let Some(project) = record.project_root.as_deref()
+            && let Some(context) = self.pr_context_cache.borrow().get(&pr_cache_key(project))
+            && let Some(found) = session_pr_from_context(&record, context)
+        {
+            self.session_pr_cache
+                .borrow_mut()
+                .insert(id.to_owned(), found.clone());
+            self.save_session_pr_cache();
+            pull_request = Some(found);
+        }
+        match pull_request {
+            Some(pull_request) => {
+                button.set_label(&format!("#{}", pull_request.id));
+                button.set_tooltip_text(Some(&format!(
+                    "Open PR #{}: {}",
+                    pull_request.id, pull_request.title
+                )));
+                button.set_visible(true);
+            }
+            None => button.set_visible(false),
+        }
+    }
+
+    pub(super) fn open_session_pr(&self, id: &str) {
+        let url = self
+            .session_pr_cache
+            .borrow()
+            .get(id)
+            .map(|pull_request| pull_request.url.clone());
+        match url {
+            Some(url) => self.open_pr_link(&url),
+            None => self
+                .overlay
+                .add_toast(adw::Toast::new("No pull request is linked to this session")),
         }
     }
 
@@ -438,6 +545,7 @@ impl Workspace {
                 }
                 workspace.update_pr_indicator();
                 workspace.cache_pr_context(&loaded.context);
+                workspace.match_sessions_to_prs(&loaded.context);
                 if pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                     == pr_cache_key(&loaded.context.project_root)
                 {
@@ -1035,6 +1143,44 @@ fn pr_cache_key(root: &Path) -> String {
         .into_owned()
 }
 
+/// The PR number in the name of a session that `launch_pr_review` started.
+fn review_pr_id(name: &str) -> Option<u64> {
+    name.strip_prefix("review: PR #")?.trim().parse().ok()
+}
+
+fn in_project(record: &SessionRecord, context: &PrContext) -> bool {
+    record
+        .project_root
+        .as_deref()
+        .is_some_and(|root| pr_cache_key(root) == pr_cache_key(&context.project_root))
+}
+
+/// The PR a session works on: the one it reviews, else the one whose branch
+/// its worktree has checked out.
+fn session_pr_from_context(record: &SessionRecord, context: &PrContext) -> Option<AzurePr> {
+    if !in_project(record, context) {
+        return None;
+    }
+    if let Some(id) = review_pr_id(&record.name)
+        && let Some(item) = context
+            .pull_requests
+            .iter()
+            .find(|item| item.pull_request.id == id)
+    {
+        return Some(item.pull_request.clone());
+    }
+    let worktree = pr_cache_key(record.worktree_path.as_deref().or(record.cwd.as_deref())?);
+    context
+        .pull_requests
+        .iter()
+        .find(|item| {
+            item.worktree_path
+                .as_deref()
+                .is_some_and(|path| pr_cache_key(path) == worktree)
+        })
+        .map(|item| item.pull_request.clone())
+}
+
 const fn attention_name(attention: PrAttention) -> &'static str {
     match attention {
         PrAttention::New => "new",
@@ -1049,4 +1195,96 @@ fn badge(text: &str, class: &str) -> gtk::Label {
     label.add_css_class(class);
     label.set_valign(gtk::Align::Center);
     label
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{review_pr_id, session_pr_from_context};
+    use crate::azure::{AzurePr, AzureRepoRef, PrContext, PrItem};
+    use crate::persist::SessionRecord;
+    use std::path::PathBuf;
+
+    fn pull_request(id: u64, branch: &str) -> AzurePr {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "title": format!("Review {branch}"), "author": "Colleague",
+            "isOwnAuthor": false, "isDraft": false, "sourceBranch": branch,
+            "targetBranch": "main", "createdAt": 0, "updatedAt": 0, "latestReviewAt": 0,
+            "mergeStatus": "succeeded", "reviewerVotes": [], "unresolvedThreads": 0,
+            "url": format!("https://dev.azure.com/org/project/_git/repo/pullrequest/{id}")
+        }))
+        .unwrap()
+    }
+
+    fn context(project: &std::path::Path) -> PrContext {
+        PrContext {
+            project_root: project.to_owned(),
+            repository: AzureRepoRef {
+                org_url: "https://dev.azure.com/org".to_owned(),
+                project: "project".to_owned(),
+                repository: "repo".to_owned(),
+            },
+            current_user: None,
+            auto_review: false,
+            pull_requests: vec![
+                PrItem {
+                    pull_request: pull_request(42, "feature"),
+                    attention: None,
+                    worktree_path: Some(project.join("wt/feature")),
+                },
+                PrItem {
+                    pull_request: pull_request(44, "later"),
+                    attention: None,
+                    worktree_path: None,
+                },
+            ],
+        }
+    }
+
+    fn record(name: &str, project: &std::path::Path, cwd: &std::path::Path) -> SessionRecord {
+        let mut record = SessionRecord::discovered("codex-1", PathBuf::from("/tmp/a.sock"));
+        record.name = name.to_owned();
+        record.project_root = Some(project.to_owned());
+        record.cwd = Some(cwd.to_owned());
+        record
+    }
+
+    #[test]
+    fn only_a_review_session_name_carries_a_pr_number() {
+        assert_eq!(review_pr_id("review: PR #42"), Some(42));
+        assert_eq!(review_pr_id("review: PR #x"), None);
+        assert_eq!(review_pr_id("PR #42"), None);
+    }
+
+    #[test]
+    fn a_review_links_by_name_even_from_the_main_checkout() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path();
+        let context = context(project);
+        let review = record("review: PR #44", project, project);
+        assert_eq!(
+            session_pr_from_context(&review, &context).map(|pr| pr.id),
+            Some(44)
+        );
+    }
+
+    #[test]
+    fn other_sessions_link_through_their_worktree() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path();
+        std::fs::create_dir_all(project.join("wt/feature")).unwrap();
+        let context = context(project);
+        let on_branch = record("Codex 3", project, &project.join("wt/feature"));
+        assert_eq!(
+            session_pr_from_context(&on_branch, &context).map(|pr| pr.id),
+            Some(42)
+        );
+        let elsewhere = record("Codex 4", project, project);
+        assert_eq!(session_pr_from_context(&elsewhere, &context), None);
+        let other_project = record(
+            "Codex 5",
+            &project.join("other"),
+            &project.join("wt/feature"),
+        );
+        assert_eq!(session_pr_from_context(&other_project, &context), None);
+    }
 }

@@ -1130,6 +1130,17 @@ impl Workspace {
         show_worktree_caption(&worktree_label, &record);
         mainline.append(&worktree_label);
         content.append(&mainline);
+        // Just the number: the sidebar is narrow and the tooltip carries the title.
+        let pr_button = gtk::Button::with_label("#");
+        pr_button.add_css_class("flat");
+        pr_button.add_css_class("accent");
+        pr_button.add_css_class("caption");
+        pr_button.set_valign(gtk::Align::Center);
+        pr_button.set_visible(false);
+        let pr_workspace = self.clone();
+        let pr_id = id.clone();
+        pr_button.connect_clicked(move |_| pr_workspace.open_session_pr(&pr_id));
+        content.append(&pr_button);
         let elapsed_label = gtk::Label::new(None);
         elapsed_label.add_css_class("caption");
         elapsed_label.add_css_class("dim-label");
@@ -1170,6 +1181,11 @@ impl Workspace {
                 "win.session-launch-here",
                 &id,
             ));
+            edit_section.append_item(&menus::targeted_item(
+                "Open Pull Request",
+                "win.session-open-pr",
+                &id,
+            ));
         }
         menu.append_section(None, &edit_section);
         let close_section = gio::Menu::new();
@@ -1202,6 +1218,7 @@ impl Workspace {
                 worktree_label,
                 state_label,
                 elapsed_label,
+                pr_button,
                 history: Vec::new(),
                 hook_signal: None,
                 tracker: ScreenTracker::new(Instant::now()),
@@ -1212,6 +1229,7 @@ impl Workspace {
         );
         self.attach_workspace_session(&id);
         self.apply_session_state(&id);
+        self.refresh_session_pr_button(&id);
         self.rebuild_sidebar();
         if select {
             self.list.select_row(Some(&row));
