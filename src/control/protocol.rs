@@ -6,6 +6,7 @@ use std::time::Duration;
 use crate::appearance::ThemeKey;
 use crate::azure::PrAttention;
 use crate::claude_presets::{ClaudeModelPreset, ClaudePresetPreferences};
+use crate::history::submitted_prompt;
 use crate::providers::AgentProvider;
 use crate::shortcuts::ShortcutAction;
 use crate::worktrees::DeleteBranch;
@@ -282,6 +283,9 @@ pub struct SessionSetStateParams {
     /// The provider conversation the agent is on now, as its hook reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
+    /// The prompt the user just submitted, as the agent's hook reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -593,11 +597,12 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             ControlCommand::SessionClose(params)
         }
         "session.set_state" => {
-            let params: SessionSetStateParams = decode_params(wire.params)?;
+            let mut params: SessionSetStateParams = decode_params(wire.params)?;
             validate_session_id(&params.session_id)?;
             if let Some(conversation_id) = &params.conversation_id {
                 validate_provider_session_id(conversation_id)?;
             }
+            params.prompt = params.prompt.as_deref().and_then(submitted_prompt);
             ControlCommand::SessionSetState(params)
         }
         "session.restart" => ControlCommand::SessionRestart(decode_session_params(wire.params)?),

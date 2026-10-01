@@ -81,6 +81,9 @@ impl Workspace {
         if let Some(record) = changed_record {
             self.persist_record(record);
         }
+        if let Some(prompt) = params.prompt {
+            self.record_submitted_prompt(&params.session_id, prompt);
+        }
         if state == SessionState::Exited {
             self.report_failure(
                 Some(pending),

@@ -510,6 +510,7 @@ fn agent_and_readiness_commands_have_typed_protocol_mappings() {
             session_id: "claude-1".to_owned(),
             state: AgentSignalState::Ready,
             conversation_id: None,
+            prompt: None,
         }),
     );
 }

@@ -16,6 +16,7 @@ use agtk::control::{
     ShortcutSetParams, UiDiffScope, UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface,
     WaitCondition, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
+use agtk::history::submitted_prompt;
 use agtk::instance::{InstanceName, InstancePaths};
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -474,12 +475,15 @@ fn parse_session_command(action: &str, arguments: &[String]) -> Result<ControlCo
                 session_id: session_id.clone(),
                 state: parse_agent_signal_state(state)?,
                 conversation_id: None,
+                prompt: None,
             })),
             [session_id, state, flag] if flag == "--hook-input" => {
+                let hook = HookInput::read(std::io::stdin().lock());
                 Ok(ControlCommand::SessionSetState(SessionSetStateParams {
                     session_id: session_id.clone(),
                     state: parse_agent_signal_state(state)?,
-                    conversation_id: hook_conversation_id(std::io::stdin().lock()),
+                    conversation_id: hook.session_id,
+                    prompt: hook.prompt,
                 }))
             }
             _ => Err(usage_failure()),
@@ -1031,17 +1035,36 @@ fn parse_bool(option: &str, value: &str) -> Result<bool, Failure> {
     }
 }
 
-/// The `session_id` from the JSON a Claude Code hook gets on stdin.
-fn hook_conversation_id(input: impl std::io::Read) -> Option<String> {
-    let mut text = String::new();
-    std::io::Read::read_to_string(&mut input.take(1024 * 1024), &mut text).ok()?;
-    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
-    value
-        .get("session_id")?
-        .as_str()
-        .map(str::trim)
-        .filter(|id| !id.is_empty() && !id.chars().any(char::is_whitespace))
-        .map(str::to_owned)
+/// What agtk needs from the JSON a Claude Code hook gets on stdin.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct HookInput {
+    session_id: Option<String>,
+    /// Only UserPromptSubmit carries the prompt, exactly as the user sent it.
+    prompt: Option<String>,
+}
+
+impl HookInput {
+    fn read(input: impl std::io::Read) -> Self {
+        let mut text = String::new();
+        if std::io::Read::read_to_string(&mut input.take(1024 * 1024), &mut text).is_err() {
+            return Self::default();
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+            return Self::default();
+        };
+        Self {
+            session_id: value
+                .get("session_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty() && !id.chars().any(char::is_whitespace))
+                .map(str::to_owned),
+            prompt: value
+                .get("prompt")
+                .and_then(serde_json::Value::as_str)
+                .and_then(submitted_prompt),
+        }
+    }
 }
 
 fn usage_failure() -> Failure {
@@ -1079,16 +1102,28 @@ enum Failure {
 
 #[cfg(test)]
 mod tests {
-    use super::hook_conversation_id;
+    use super::HookInput;
 
     #[test]
     fn hook_input_yields_the_claude_session_id() {
         let input = br#"{"session_id":"a3030a89-3680","hook_event_name":"Stop"}"#;
+        let hook = HookInput::read(&input[..]);
+        assert_eq!(hook.session_id.as_deref(), Some("a3030a89-3680"));
+        assert_eq!(hook.prompt, None);
+        assert_eq!(HookInput::read(&b"not json"[..]), HookInput::default());
         assert_eq!(
-            hook_conversation_id(&input[..]).as_deref(),
-            Some("a3030a89-3680")
+            HookInput::read(&br#"{"session_id":""}"#[..]).session_id,
+            None
         );
-        assert_eq!(hook_conversation_id(&b"not json"[..]), None);
-        assert_eq!(hook_conversation_id(&br#"{"session_id":""}"#[..]), None);
+    }
+
+    #[test]
+    fn hook_input_yields_the_submitted_prompt() {
+        let input = br#"{"session_id":"a3030a89-3680","hook_event_name":"UserPromptSubmit","prompt":"  fix the build\nthen run tests  "}"#;
+        assert_eq!(
+            HookInput::read(&input[..]).prompt.as_deref(),
+            Some("fix the build\nthen run tests")
+        );
+        assert_eq!(HookInput::read(&br#"{"prompt":"   "}"#[..]).prompt, None);
     }
 }

@@ -48,6 +48,7 @@ fn hooks_outlast_the_agtkctl_reply_deadline() {
         session_id: "claude-1".to_owned(),
         state: AgentSignalState::Busy,
         conversation_id: None,
+        prompt: None,
     }));
     // Otherwise Claude Code kills a hook that agtkctl would have given up on quietly.
     assert!(Duration::from_secs(HOOK_TIMEOUT_SECONDS) > deadline);

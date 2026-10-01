@@ -216,6 +216,8 @@ struct SessionView {
     /// Opens the session's pull request; hidden until one is linked.
     pr_button: gtk::Button,
     history: Vec<String>,
+    /// The last history entry came from keystrokes and a hook may still correct it.
+    typed_history_pending: bool,
     /// Last state an agent hook reported; None until the agent sends one.
     hook_signal: Option<crate::agent_status::Signal>,
     tracker: crate::agent_status::ScreenTracker,

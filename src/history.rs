@@ -1,4 +1,20 @@
 const MAX_INPUT_CHARS: usize = 512;
+/// Pasted prompts can be huge; history only needs enough to recognise them.
+const MAX_PROMPT_CHARS: usize = 2_000;
+
+/// A prompt as an agent hook reports it, trimmed and bounded. None when it is blank.
+pub fn submitted_prompt(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.chars().count() <= MAX_PROMPT_CHARS {
+        return Some(trimmed.to_owned());
+    }
+    let mut cut = trimmed.chars().take(MAX_PROMPT_CHARS).collect::<String>();
+    cut.push('…');
+    Some(cut)
+}
 
 pub fn history_needle(text: &str, max_chars: usize) -> String {
     let first_line = text.lines().next().unwrap_or_default();

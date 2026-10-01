@@ -282,6 +282,30 @@ fn provider_commands_are_bounded_and_typed() {
             session_id: "claude-1".to_owned(),
             state: AgentSignalState::Waiting,
             conversation_id: None,
+            prompt: None,
+        })
+    );
+    // A hook-reported prompt is kept as sent, minus surrounding whitespace.
+    assert_eq!(
+        decode_request(br#"{"version":1,"id":"agent","method":"session.set_state","params":{"sessionId":"claude-1","state":"busy","conversationId":"a3030a89","prompt":" fix the build\nthen test "}}"#)
+            .unwrap()
+            .command,
+        ControlCommand::SessionSetState(SessionSetStateParams {
+            session_id: "claude-1".to_owned(),
+            state: AgentSignalState::Busy,
+            conversation_id: Some("a3030a89".to_owned()),
+            prompt: Some("fix the build\nthen test".to_owned()),
+        })
+    );
+    assert_eq!(
+        decode_request(br#"{"version":1,"id":"agent","method":"session.set_state","params":{"sessionId":"claude-1","state":"busy","prompt":"  "}}"#)
+            .unwrap()
+            .command,
+        ControlCommand::SessionSetState(SessionSetStateParams {
+            session_id: "claude-1".to_owned(),
+            state: AgentSignalState::Busy,
+            conversation_id: None,
+            prompt: None,
         })
     );
 

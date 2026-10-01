@@ -1088,7 +1088,7 @@ impl Workspace {
         let history_id = id.clone();
         terminal.connect_commit(move |_, text, _| {
             if let Some(input) = tracker.borrow_mut().push(text) {
-                history_workspace.record_input(&history_id, input);
+                history_workspace.record_typed_input(&history_id, input);
             }
         });
 
@@ -1228,6 +1228,7 @@ impl Workspace {
                 elapsed_label,
                 pr_button,
                 history: Vec::new(),
+                typed_history_pending: false,
                 hook_signal: None,
                 tracker: ScreenTracker::new(Instant::now()),
                 pending_agent_name: None,

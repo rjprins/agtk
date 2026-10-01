@@ -1,11 +1,36 @@
 use super::*;
 
 impl Workspace {
-    pub(super) fn record_input(&self, id: &str, input: String) {
+    /// A line the user typed into the terminal, reconstructed from keystrokes.
+    pub(super) fn record_typed_input(&self, id: &str, input: String) {
+        let hooked = self
+            .sessions
+            .borrow()
+            .get(id)
+            .is_some_and(|session| session.hook_signal.is_some());
+        // Keystrokes are a guess: cursor motion and completions are invisible
+        // here. Once an agent hook has reported, the hook delivers the prompt.
+        if !hooked {
+            self.push_history(id, input, true);
+        }
+        self.mark_agent_busy(id);
+    }
+
+    /// A prompt as the agent's hook reported it.
+    pub(super) fn record_submitted_prompt(&self, id: &str, prompt: String) {
+        self.push_history(id, prompt, false);
+    }
+
+    fn push_history(&self, id: &str, input: String, typed: bool) {
         let mut sessions = self.sessions.borrow_mut();
         let Some(session) = sessions.get_mut(id) else {
             return;
         };
+        // The hook's version supersedes the keystroke guess for the same turn.
+        if session.typed_history_pending && !typed {
+            session.history.pop();
+        }
+        session.typed_history_pending = typed;
         if session.history.last() != Some(&input) {
             session.history.push(input);
             if session.history.len() > 200 {
@@ -13,8 +38,6 @@ impl Workspace {
             }
         }
         drop(sessions);
-
-        self.mark_agent_busy(id);
 
         if self.selected_session_id().as_deref() == Some(id) {
             self.render_history(Some(id));
@@ -43,20 +66,20 @@ impl Workspace {
             .set_sensitive(!session.history.is_empty());
         self.history_button
             .set_label(&format!("History ({})", session.history.len()));
-        self.context_last_input.set_text(
-            session
-                .history
-                .last()
-                .map(String::as_str)
-                .unwrap_or("(none yet)"),
-        );
+        // The subtitle is one line; the dialog rows keep the full prompt.
+        let last_line = session
+            .history
+            .last()
+            .map(|input| input.split_whitespace().collect::<Vec<_>>().join(" "));
+        self.context_last_input
+            .set_text(last_line.as_deref().unwrap_or("(none yet)"));
         for input in session.history.iter().rev() {
             let row = adw::ActionRow::builder()
                 .title(glib::markup_escape_text(input))
                 .title_lines(2)
                 .activatable(true)
                 .build();
-            row.set_tooltip_text(Some("Scroll the terminal to this prompt"));
+            row.set_tooltip_text(Some(input.as_str()));
             row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
 
             let terminal = session.terminal.clone();
