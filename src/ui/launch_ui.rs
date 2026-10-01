@@ -72,7 +72,6 @@ pub(super) struct LaunchDialog {
     pub(super) base_branch_completion_items: Rc<RefCell<Vec<(String, String)>>>,
     pub(super) worktree_values: Rc<RefCell<Vec<Option<String>>>>,
     pub(super) project_values: Rc<RefCell<Vec<Option<String>>>>,
-    pub(super) project_custom: Rc<Cell<bool>>,
     pub(super) creating_worktree: Rc<Cell<bool>>,
     pub(super) choice_sequence: Rc<Cell<u64>>,
     pub(super) updating_choices: Rc<Cell<bool>>,
@@ -321,7 +320,6 @@ impl LaunchDialog {
             base_branch_completion_items,
             worktree_values: Rc::new(RefCell::new(Vec::new())),
             project_values: Rc::new(RefCell::new(Vec::new())),
-            project_custom: Rc::new(Cell::new(false)),
             creating_worktree: Rc::new(Cell::new(false)),
             choice_sequence: Rc::new(Cell::new(0)),
             updating_choices: Rc::new(Cell::new(false)),
@@ -437,8 +435,7 @@ impl Workspace {
         if self.launch.project.text().trim().is_empty()
             && let Some(root) = self.preferred_project_root()
         {
-            self.launch.project.set_text(&root);
-            self.launch.cwd.set_text(&root);
+            self.set_launch_location(&root, &root);
         }
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
@@ -448,18 +445,16 @@ impl Workspace {
     }
 
     pub(super) fn load_quick_launch(&self, preferences: QuickLaunchPreferences) {
+        self.set_launch_location(
+            &display_path(preferences.project_root.as_ref()),
+            &display_path(preferences.worktree_path.as_ref()),
+        );
         self.launch.cwd.set_text(&display_path(
             preferences
                 .cwd
                 .as_ref()
                 .or(preferences.worktree_path.as_ref()),
         ));
-        self.launch
-            .project
-            .set_text(&display_path(preferences.project_root.as_ref()));
-        self.launch
-            .worktree
-            .set_text(&display_path(preferences.worktree_path.as_ref()));
         self.set_launch_worktree_mode(false);
         self.launch.args.set_text(&if preferences.args.is_empty() {
             String::new()
@@ -468,7 +463,6 @@ impl Workspace {
         });
         self.apply_launch_flags(&preferences.flags);
         self.set_launch_agent(preferences.kind);
-        self.launch.project_custom.set(false);
         *self.quick_launch.borrow_mut() = preferences;
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
@@ -571,10 +565,7 @@ impl Workspace {
     }
 
     pub(super) fn open_launch_for_project(&self, root: &str) {
-        self.launch.project_custom.set(false);
-        self.launch.project.set_text(root);
-        self.launch.cwd.set_text(root);
-        self.launch.worktree.set_text(root);
+        self.set_launch_location(root, root);
         self.set_launch_worktree_mode(false);
         self.launch.branch.set_text(&generated_branch_name());
         self.launch.base_branch.set_text(DEFAULT_BASE_BRANCH);
@@ -609,23 +600,27 @@ impl Workspace {
     }
 
     pub(super) fn open_launch_for_worktree(&self, project_root: &Path, worktree: &Path) {
-        self.launch.project_custom.set(false);
-        self.launch
-            .project
-            .set_text(project_root.to_string_lossy().as_ref());
-        self.launch
-            .worktree
-            .set_text(worktree.to_string_lossy().as_ref());
+        self.set_launch_location(
+            project_root.to_string_lossy().as_ref(),
+            worktree.to_string_lossy().as_ref(),
+        );
         self.set_launch_worktree_mode(false);
-        self.launch
-            .cwd
-            .set_text(worktree.to_string_lossy().as_ref());
         self.launch.branch.set_text(&generated_branch_name());
         self.launch.base_branch.set_text(DEFAULT_BASE_BRANCH);
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
         self.worktrees.modal.hide();
         self.launch.modal.present();
+    }
+
+    /// Fill the location fields without the entry handlers reacting; callers
+    /// refresh the choices themselves.
+    fn set_launch_location(&self, project_root: &str, worktree: &str) {
+        self.launch.updating_choices.set(true);
+        self.launch.project.set_text(project_root);
+        self.launch.worktree.set_text(worktree);
+        self.launch.cwd.set_text(worktree);
+        self.launch.updating_choices.set(false);
     }
 
     pub(super) fn refresh_launch_project_choices(&self) {
@@ -724,6 +719,10 @@ impl Workspace {
             },
         );
         self.launch.updating_choices.set(false);
+        // A half-typed path has no worktrees to list yet.
+        if !Path::new(&root).is_dir() {
+            return;
+        }
         let worker_root = root.clone();
         self.run_slow(
             move || manager.linked_paths(Path::new(&worker_root)),
@@ -778,6 +777,20 @@ impl Workspace {
         );
     }
 
+    /// A changed project selects its main directory as the worktree, however
+    /// the project was changed: dropdown, completion popup, or typing. The
+    /// user picks another tree afterwards if they want one.
+    fn follow_launch_project(&self) {
+        let root = self.launch.project.text().trim().to_owned();
+        self.launch.worktree.set_text(&root);
+        self.launch.cwd.set_text(&root);
+        self.set_launch_worktree_mode(self.launch.creating_worktree.get());
+        self.launch.branch.set_text(&generated_branch_name());
+        self.launch.base_branch.set_text(DEFAULT_BASE_BRANCH);
+        self.refresh_launch_worktree_choices();
+        self.refresh_launch_base_branches();
+    }
+
     pub(super) fn connect_launch_path_controls(&self) {
         let existing_workspace = self.clone();
         self.launch
@@ -807,24 +820,8 @@ impl Workspace {
                 let Some(root) = project_workspace.selected_project_path(dropdown) else {
                     return;
                 };
+                // The entry's changed handler moves the worktree along.
                 project_workspace.launch.project.set_text(&root);
-                project_workspace.launch.project_custom.set(false);
-                project_workspace.launch.cwd.set_text(&root);
-                // Selecting a different project also selects its main
-                // directory. This keeps the visible worktree control and the
-                // launch target in sync until the user picks another tree.
-                project_workspace.launch.worktree.set_text(&root);
-                project_workspace.set_launch_worktree_mode(false);
-                project_workspace
-                    .launch
-                    .branch
-                    .set_text(&generated_branch_name());
-                project_workspace
-                    .launch
-                    .base_branch
-                    .set_text(DEFAULT_BASE_BRANCH);
-                project_workspace.refresh_launch_worktree_choices();
-                project_workspace.refresh_launch_base_branches();
             });
 
         let worktree_workspace = self.clone();
@@ -853,51 +850,19 @@ impl Workspace {
             worktree_entry_workspace.launch.cwd.set_text(&value);
         });
 
+        // Enter on a typed path adds it to the project choices; the worktree
+        // already followed the text while it was typed.
         let project_workspace = self.clone();
         self.launch.project.connect_activate(move |_| {
-            project_workspace.launch.project_custom.set(true);
-            project_workspace.set_launch_worktree_mode(false);
-            let project_root = project_workspace.launch.project.text().trim().to_owned();
-            if !project_root.is_empty() {
-                project_workspace.launch.worktree.set_text(&project_root);
-                project_workspace.launch.cwd.set_text(&project_root);
-            }
             project_workspace.refresh_launch_project_choices();
-            project_workspace.refresh_launch_worktree_choices();
-            project_workspace.refresh_launch_base_branches();
         });
 
-        let project_completion_workspace = self.clone();
-        self.launch.project.connect_changed(move |entry| {
-            if project_completion_workspace.launch.updating_choices.get()
-                || !entry.has_focus()
-                || !project_completion_workspace
-                    .launch
-                    .project_values
-                    .borrow()
-                    .iter()
-                    .any(|value| value.as_deref() == Some(entry.text().trim()))
-            {
+        let project_entry_workspace = self.clone();
+        self.launch.project.connect_changed(move |_| {
+            if project_entry_workspace.launch.updating_choices.get() {
                 return;
             }
-            let root = entry.text().trim().to_owned();
-            project_completion_workspace
-                .launch
-                .project_custom
-                .set(false);
-            project_completion_workspace.launch.cwd.set_text(&root);
-            project_completion_workspace.launch.worktree.set_text(&root);
-            project_completion_workspace.set_launch_worktree_mode(false);
-            project_completion_workspace
-                .launch
-                .branch
-                .set_text(&generated_branch_name());
-            project_completion_workspace
-                .launch
-                .base_branch
-                .set_text(DEFAULT_BASE_BRANCH);
-            project_completion_workspace.refresh_launch_worktree_choices();
-            project_completion_workspace.refresh_launch_base_branches();
+            project_entry_workspace.follow_launch_project();
         });
 
         let base_workspace = self.clone();
@@ -941,10 +906,17 @@ impl Workspace {
             self.launch.updating_choices.set(false);
             return;
         }
+        if !Path::new(&root).is_dir() {
+            return;
+        }
         let manager = WorktreeManager::new(self.paths.attic_dir());
+        let worker_root = root.clone();
         self.run_slow(
-            move || manager.branch_names(Path::new(&root)),
+            move || manager.branch_names(Path::new(&worker_root)),
             move |workspace, result| {
+                if launch_path_text(&workspace.launch.project).as_deref() != Some(root.as_str()) {
+                    return;
+                }
                 let Ok(branches) = result else {
                     return;
                 };
