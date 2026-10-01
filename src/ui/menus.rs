@@ -189,9 +189,7 @@ impl Workspace {
         self.add_target_action("session-restart", |workspace, id| {
             workspace.restart_agent(id, None)
         });
-        self.add_target_action("session-close", |workspace, id| {
-            workspace.stop_session(id, None)
-        });
+        self.add_target_action("session-close", |workspace, id| workspace.close_session(id));
         self.add_target_action("session-open-pr", |workspace, id| {
             workspace.open_session_pr(id)
         });

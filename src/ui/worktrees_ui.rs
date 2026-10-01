@@ -243,6 +243,7 @@ impl Workspace {
             expected_head: params.expected_head,
             expected_status_hash: params.expected_status_hash,
             delete_branch: params.delete_branch,
+            confirmed: false,
         };
         self.run_slow(
             move || manager.reap(request, &live_paths),
@@ -379,6 +380,7 @@ impl Workspace {
             expected_head: worktree.head.unwrap_or_default(),
             expected_status_hash: worktree.status_hash,
             delete_branch: DeleteBranch::Auto,
+            confirmed: false,
         };
         self.render_worktree_message("Removing with preview guards…");
         self.run_slow(

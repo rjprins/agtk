@@ -4,7 +4,7 @@
 #
 # Usage: scripts/ui-preview.sh [--dark] [--keep] [--font-size N] [SURFACE...]
 #   SURFACE: main changes files launch appearance shortcuts history search worktrees agents
-#            pull-requests claude-models (default: all)
+#            pull-requests claude-models close-session (default: all)
 #   --keep   leave the instance running and print how to drive it
 set -euo pipefail
 
@@ -21,7 +21,7 @@ while (($#)); do
   esac
   shift
 done
-((${#surfaces[@]})) || surfaces=(main changes files launch appearance shortcuts history search worktrees agents pull-requests claude-models)
+((${#surfaces[@]})) || surfaces=(main changes files launch appearance shortcuts history search worktrees agents pull-requests claude-models close-session)
 
 command -v mutter >/dev/null || { echo "ui-preview needs mutter" >&2; exit 1; }
 "$repo/scripts/build-viewer.sh"
@@ -187,6 +187,11 @@ for surface in "${surfaces[@]}"; do
   start_ui
   ctl session select "$main_id" >/dev/null
   if [[ $surface == changes || $surface == files ]]; then
+    ctl session select "$(id_of 'cursor pagination')" >/dev/null
+  fi
+  if [[ $surface == close-session ]]; then
+    # The prompt only opens for the last session in a worktree.
+    ctl session close "$(id_of 'test shell')" >/dev/null
     ctl session select "$(id_of 'cursor pagination')" >/dev/null
   fi
   # Prompt history only lives as long as one UI process.

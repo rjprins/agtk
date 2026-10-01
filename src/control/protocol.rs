@@ -298,6 +298,8 @@ pub enum UiSurface {
     Agents,
     PullRequests,
     ClaudeModels,
+    /// The close prompt for the selected session, when its worktree could go with it.
+    CloseSession,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

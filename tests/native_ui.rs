@@ -1525,6 +1525,119 @@ fn a_session_can_move_to_another_worktree_and_keeps_it_across_restart() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn closing_the_last_session_in_a_worktree_offers_to_remove_it() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
+    let app = App::new();
+    let repo = app.directory.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    std::fs::write(repo.join("README.md"), "fixture\n").unwrap();
+    for arguments in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.name", "Agtk Test"],
+        vec!["config", "user.email", "agtk@example.invalid"],
+        vec!["add", "README.md"],
+        vec!["commit", "-m", "fixture"],
+        vec!["worktree", "add", "-b", "fix", "../repo-fix"],
+    ] {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+    let repo = repo.canonicalize().unwrap();
+    let fix = app
+        .directory
+        .path()
+        .join("repo-fix")
+        .canonicalize()
+        .unwrap();
+    std::fs::write(fix.join("notes.txt"), "uncommitted\n").unwrap();
+    let create = |app: &App, worktree: &std::path::Path| {
+        let session = app.request(
+            "session.create",
+            json!({
+                "kind":"custom",
+                "command":"/bin/sh",
+                "args":["-c", "exec sleep 30"],
+                "cwd":worktree,
+                "projectRoot":repo,
+                "worktreePath":worktree
+            }),
+        );
+        session["id"].as_str().unwrap().to_owned()
+    };
+
+    // The main checkout never offers removal.
+    let main = create(&app, &repo);
+    app.request("session.select", json!({"sessionId":main}));
+    let shown = app.request("ui.show", json!({"surface":"close-session"}));
+    assert_eq!(shown["shown"], false);
+
+    let first = create(&app, &fix);
+    let second = create(&app, &fix);
+    app.request("session.select", json!({"sessionId":first}));
+    let shown = app.request("ui.show", json!({"surface":"close-session"}));
+    assert_eq!(
+        shown["shown"], false,
+        "another session still uses the worktree"
+    );
+    app.request("session.close", json!({"sessionId":second}));
+
+    let shown = app.request("ui.show", json!({"surface":"close-session"}));
+    assert_eq!(shown["shown"], true);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let prompt = loop {
+        let inspection = app.request("ui.inspect", json!({}));
+        let prompt = find(&inspection["root"], "close-prompt")
+            .expect("close prompt is open")
+            .clone();
+        assert_eq!(prompt["isVisible"], true);
+        if find(&prompt, "close-prompt-remove").unwrap()["isEnabled"] == true {
+            break prompt;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "worktree scan did not finish: {prompt}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    };
+    let status = find(&prompt, "close-prompt-status").unwrap()["label"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(status.contains("uncommitted changes"), "{status}");
+    let branch = find(&prompt, "close-prompt-delete-branch").unwrap();
+    assert_eq!(branch["isVisible"], true);
+    assert_eq!(branch["label"], "Also delete branch fix");
+    assert_eq!(
+        branch["isSelected"], false,
+        "an unmerged branch is kept by default"
+    );
+    thread::sleep(Duration::from_millis(50));
+    let capture = app.request("ui.capture", json!({}));
+    if let Ok(target) = std::env::var("AGTK_TEST_CAPTURE_DIR") {
+        let path = std::path::Path::new(capture["path"].as_str().unwrap());
+        let _ = std::fs::copy(path, std::path::Path::new(&target).join("close-prompt.png"));
+    }
+
+    app.request("session.close", json!({"sessionId":first}));
+    app.request("session.close", json!({"sessionId":main}));
+    assert!(fix.exists(), "control closes never remove worktrees");
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn control_api_completes_disposable_worktree_lifecycle() {
     let app = App::new();
     let repo = app.directory.path().join("repo");

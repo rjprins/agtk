@@ -41,7 +41,7 @@ impl Workspace {
         });
         self.add_action("close-session", true, |workspace| {
             if let Some(id) = workspace.selected_session_id() {
-                workspace.stop_session(&id, None);
+                workspace.close_session(&id);
             }
         });
         self.add_action("toggle-sidebar", true, |workspace| {

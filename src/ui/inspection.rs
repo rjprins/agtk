@@ -789,6 +789,12 @@ impl Workspace {
                 .children
                 .push(prompt.inspection_node(&self.window));
         }
+        if let Some(prompt) = self.close_prompt.borrow().as_ref() {
+            inspection
+                .root
+                .children
+                .push(prompt.inspection_node(&self.window));
+        }
         inspection
     }
 }

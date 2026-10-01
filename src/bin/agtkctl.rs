@@ -367,6 +367,7 @@ fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
         "agents" => Ok(UiSurface::Agents),
         "pull-requests" | "prs" => Ok(UiSurface::PullRequests),
         "claude-models" => Ok(UiSurface::ClaudeModels),
+        "close-session" => Ok(UiSurface::CloseSession),
         _ => Err(Failure::Usage(format!("unknown UI surface: {value}"))),
     }
 }

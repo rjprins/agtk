@@ -463,6 +463,7 @@ fn reap_aborts_on_drift_then_salvages_and_attic_tags_dirty_work() {
             expected_head: worktree.head.clone().unwrap(),
             expected_status_hash: worktree.status_hash.clone(),
             delete_branch: DeleteBranch::Force,
+            confirmed: false,
         },
         &[],
     );
@@ -493,6 +494,7 @@ fn reap_aborts_on_drift_then_salvages_and_attic_tags_dirty_work() {
                 expected_head: "wrong".to_owned(),
                 expected_status_hash: worktree.status_hash.clone(),
                 delete_branch: DeleteBranch::Force,
+                confirmed: false,
             },
             &[],
         )
@@ -512,6 +514,7 @@ fn reap_aborts_on_drift_then_salvages_and_attic_tags_dirty_work() {
                 expected_head: worktree.head.clone().unwrap(),
                 expected_status_hash: worktree.status_hash.clone(),
                 delete_branch: DeleteBranch::Force,
+                confirmed: false,
             },
             &[],
         )
@@ -533,6 +536,7 @@ fn reap_aborts_on_drift_then_salvages_and_attic_tags_dirty_work() {
                 expected_head: worktree.head.clone().unwrap(),
                 expected_status_hash: worktree.status_hash.clone(),
                 delete_branch: DeleteBranch::Force,
+                confirmed: false,
             },
             &[],
         )
@@ -546,6 +550,109 @@ fn reap_aborts_on_drift_then_salvages_and_attic_tags_dirty_work() {
         attic_tag
     );
     assert!(result.branch_deleted);
+}
+
+#[test]
+fn a_confirmed_reap_removes_an_active_worktree_but_keeps_its_branch_unless_forced() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let created = manager
+        .create(
+            fixture.root(),
+            "closing",
+            Some("main"),
+            "exercise confirmed reap",
+        )
+        .unwrap();
+    fs::write(created.path.join("feature.txt"), "local commit\n").unwrap();
+    git(&created.path, &["add", "feature.txt"]);
+    git(&created.path, &["commit", "-m", "fresh work"]);
+    fs::write(created.path.join("untracked.txt"), "recover me\n").unwrap();
+    let preview = manager.list(fixture.root(), &[]).unwrap();
+    let worktree = preview
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.path == created.path)
+        .unwrap();
+    assert_eq!(worktree.state, WorktreeState::Active);
+    assert_eq!(worktree.reap_class, None);
+    let request = ReapRequest {
+        path: created.path.clone(),
+        expected_head: worktree.head.clone().unwrap(),
+        expected_status_hash: worktree.status_hash.clone(),
+        delete_branch: DeleteBranch::Never,
+        confirmed: false,
+    };
+
+    let refused = manager.reap(request.clone(), &[]);
+    assert!(refused.unwrap_err().to_string().contains("Active"));
+    assert!(created.path.exists());
+
+    let live = manager.reap(
+        ReapRequest {
+            confirmed: true,
+            ..request.clone()
+        },
+        &[created.path.clone()],
+    );
+    assert!(live.unwrap_err().to_string().contains("live sessions"));
+
+    let kept = manager
+        .reap(
+            ReapRequest {
+                confirmed: true,
+                ..request.clone()
+            },
+            &[],
+        )
+        .expect("confirmed reap");
+    assert!(kept.ok, "{:?}", kept.reason);
+    assert!(!created.path.exists());
+    assert!(!kept.branch_deleted);
+    assert!(kept.salvage_path.as_ref().unwrap().exists());
+    assert!(git(fixture.root(), &["branch", "--list", "closing"]).contains("closing"));
+
+    let created = manager
+        .create(
+            fixture.root(),
+            "closing-forced",
+            Some("main"),
+            "exercise forced delete",
+        )
+        .unwrap();
+    fs::write(created.path.join("feature.txt"), "local commit\n").unwrap();
+    git(&created.path, &["add", "feature.txt"]);
+    git(&created.path, &["commit", "-m", "fresh work"]);
+    let preview = manager.list(fixture.root(), &[]).unwrap();
+    let worktree = preview
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.path == created.path)
+        .unwrap();
+    let deleted = manager
+        .reap(
+            ReapRequest {
+                path: created.path.clone(),
+                expected_head: worktree.head.clone().unwrap(),
+                expected_status_hash: worktree.status_hash.clone(),
+                delete_branch: DeleteBranch::Force,
+                confirmed: true,
+            },
+            &[],
+        )
+        .expect("forced reap");
+    assert!(deleted.ok, "{:?}", deleted.reason);
+    assert!(deleted.branch_deleted);
+    let attic_tag = deleted.attic_tag.as_ref().unwrap();
+    assert_eq!(
+        git(fixture.root(), &["tag", "-l", attic_tag]).trim(),
+        attic_tag
+    );
+    assert!(
+        git(fixture.root(), &["branch", "--list", "closing-forced"])
+            .trim()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -589,6 +696,7 @@ fn staged_deletions_do_not_block_listing_or_reaping() {
                 expected_head: worktree.head.clone().unwrap(),
                 expected_status_hash: worktree.status_hash.clone(),
                 delete_branch: DeleteBranch::Force,
+                confirmed: false,
             },
             &[],
         )

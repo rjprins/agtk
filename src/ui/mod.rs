@@ -47,6 +47,7 @@ mod azure_ui;
 mod capture;
 mod changes_ui;
 mod claude_ui;
+mod close_session_ui;
 mod code_viewer;
 mod controls;
 mod emacs_ui;
@@ -154,6 +155,8 @@ struct Workspace {
     closing_sessions: Rc<RefCell<HashSet<String>>>,
     /// The startup offer to resume sessions that lost their host, while it is open.
     resume_prompt: Rc<RefCell<Option<resume_ui::ResumePrompt>>>,
+    /// The offer to remove a worktree with its last session, while it is open.
+    close_prompt: Rc<RefCell<Option<close_session_ui::ClosePrompt>>>,
     selected_session: Rc<RefCell<Option<String>>>,
     suppress_session_activation: Rc<Cell<bool>>,
     sequence: Rc<Cell<u64>>,
@@ -629,6 +632,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         sessions: Rc::new(RefCell::new(HashMap::new())),
         closing_sessions: Rc::new(RefCell::new(HashSet::new())),
         resume_prompt: Rc::new(RefCell::new(None)),
+        close_prompt: Rc::new(RefCell::new(None)),
         selected_session: Rc::new(RefCell::new(None)),
         suppress_session_activation: Rc::new(Cell::new(false)),
         sequence: Rc::new(Cell::new(0)),

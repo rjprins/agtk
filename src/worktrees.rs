@@ -105,6 +105,9 @@ pub struct ReapRequest {
     pub expected_head: String,
     pub expected_status_hash: String,
     pub delete_branch: DeleteBranch,
+    /// A person confirmed this removal, so the lifecycle class no longer gates it.
+    /// The HEAD and content guards, salvage, and attic tags still apply.
+    pub confirmed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -393,7 +396,7 @@ impl WorktreeManager {
         if preview.live_session_count > 0 {
             return Err("refusing to reap a worktree with live sessions".into());
         }
-        if preview.reap_class.is_none() {
+        if preview.reap_class.is_none() && !request.confirmed {
             return Err(format!(
                 "refusing to reap a worktree classified as {:?}: {}",
                 preview.state, preview.evidence

@@ -232,6 +232,9 @@ impl Workspace {
                         true
                     }
                     UiSurface::ClaudeModels => false,
+                    UiSurface::CloseSession => self
+                        .selected_session_id()
+                        .is_some_and(|id| self.offer_worktree_removal(&id)),
                 };
                 ControlResponse::success(
                     id,
