@@ -1,24 +1,28 @@
 # agtk
 
-## Why I made this
+A native GNOME workspace for running many coding agents at once.
 
-I run several coding agents at the same time, each in its own worktree. Keeping them in separate terminal tabs did not work: I lost track of which agent was waiting for me, and of what each one had changed.
-
-agtk was inspired by [Orca](https://github.com/stablyai/orca). Orca puts the worktree first, and you work from there. I wanted the agent sessions first: which ones need me now, what they did, and where they run. The worktree is context for a session, not the other way round.
-
-## What it is
-
-agtk is a coding agent manager for GNOME. It runs Claude Code, Codex, Gemini and plain shells in one native window, grouped by project and git worktree.
+agtk runs Claude Code, Codex, Gemini and plain shells side by side in one window, grouped by project and git worktree. It shows which agent needs you, what each one changed, and keeps every session running even when the window closes.
 
 ![agtk with an agent session and the Changes sidebar](docs/screenshot.png)
 
-The sidebar shows every session and whether it is busy, waiting for you, or done. The terminal in the middle is a real VTE terminal. The Changes sidebar on the right shows what the agent changed in its worktree.
+## Highlights
 
-agtk is a personal project. I use it every day on Arch Linux with GNOME on Wayland. It is not tested on other setups, and things can change without notice.
+- **Know which agent needs you.** Every session shows a live state: busy, waiting for input, ready for review, or idle. `Ctrl+Shift+Space` jumps to the next session that is ready.
+- **Sessions outlive the window.** Each terminal runs in its own process. Close, crash, or rebuild agtk and it reattaches to every running agent. After a reboot it offers to resume each conversation where it stopped.
+- **Worktree-native.** Launch an agent in a fresh worktree with a generated branch in one step. Removing a worktree saves uncommitted work and tags the branch tip first, so nothing is lost.
+- **Review without leaving the window.** The Changes sidebar shows staged, unstaged, branch and commit diffs for the session's worktree. File paths in the terminal open in the built-in viewer at the right line.
+- **Scriptable and agent-controllable.** `agtkctl` and an MCP server expose sessions, terminal text, diffs, worktrees and pull requests over a local socket, so scripts and agents can start and supervise other agents. Nothing listens on the network.
+- **Native, not Electron.** Built in Rust with GTK 4 and libadwaita. Each session is a real VTE terminal with true color, search and prompt history.
+- **Zero agent setup.** Claude Code reports its state through hooks that agtk generates on the fly. Your Claude configuration stays untouched.
+
+## Project status
+
+agtk is developed and used daily on Arch Linux with GNOME on Wayland. Other distributions and desktops are untested, and the interface and command line may change between versions.
 
 ## Features
 
-Sessions
+### Sessions
 
 - Sessions are grouped by project in the sidebar. Each project has buttons to launch, pin, resume, and manage worktrees and pull requests.
 - Launch Claude, Codex, Gemini, a shell, or a custom command in an exact directory and worktree.
@@ -29,32 +33,32 @@ Sessions
 - Switch Claude model and effort with presets.
 - Closing the last session in a worktree offers to remove the worktree too. Uncommitted changes are saved to the attic first, and the branch can go with it after an attic tag.
 
-Terminal
+Sessions do not survive a reboot, and terminal scrollback is not saved. After a reboot, agtk lists the sessions that were open and offers to start them again: agents resume their conversation, shells open in the same directory. Later, press Enter in the terminal of an exited agent to resume it.
+
+### Terminal
 
 - True color, search, copy and paste, and prompt history.
 - Selected text is copied to the clipboard.
 - Click a file path such as `src/main.rs:42:7` to open it in the file viewer at that line. Click a URL to open it in the browser.
 - `Ctrl++` and `Ctrl+-` scale the font of the whole window.
 
-Changes and files
+### Changes and files
 
 - The Changes sidebar shows staged, unstaged, untracked, branch, and commit diffs. It is read only.
 - Choose what to compare with: a branch, or a number of commits back.
 - The Files page lists every file in the worktree, with a filter. Files open read only in the same viewer.
 
-Worktrees
+### Worktrees
 
 - Create a worktree with a generated branch name from the launch dialog.
 - Remove a finished worktree safely. agtk saves uncommitted work and tags the branch tip before it deletes anything.
 
-Integrations
+### Integrations
 
 - Azure DevOps pull requests: see PRs that need your attention, and start a review in its own detached `pr-<id>` checkout next to the project. Review sessions open in the background and do not take the selection, and so do sessions started by `agtkctl` or an agent over MCP.
 - A session that works on a PR, or reviews one, shows a PR button in its sidebar row and a PR bar above its terminal. Both open the PR in the browser.
 - Emacs: open Magit or a branch review for the selected session.
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.
-
-Sessions do not survive a reboot, and terminal scrollback is not saved. After a reboot, agtk lists the sessions that were open and offers to start them again: agents resume their conversation, shells open in the same directory. Later, press Enter in the terminal of an exited agent to resume it.
 
 ## Requirements
 
@@ -226,6 +230,11 @@ The UI tests use the same kind of compositor. Start one, then run:
 ```sh
 AGTK_TEST_DISPLAY=$XDG_RUNTIME_DIR/DISPLAY_NAME cargo test --test native_ui -- --ignored --test-threads=1
 ```
+
+## Acknowledgements
+
+- [Orca](https://github.com/stablyai/orca) inspired the idea. agtk puts agent sessions first and treats the worktree as their context.
+- The Codex and Gemini status rules are ported from [agent-manager](https://github.com/YoanWai/agent-manager).
 
 ## License
 
