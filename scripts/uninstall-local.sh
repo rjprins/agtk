@@ -20,6 +20,7 @@ for task_binary in agtk agtk-session agtkctl agtk-mcp; do
     rm -f -- "$task_destdir$task_prefix/bin/$task_binary"
 done
 rm -f -- "$task_destdir$task_prefix/share/applications/nl.rutger.Agtk.desktop"
+rm -f -- "$task_destdir$task_prefix/share/icons/hicolor/512x512/apps/nl.rutger.Agtk.png"
 rm -f -- "$task_destdir$task_prefix/share/icons/hicolor/scalable/apps/nl.rutger.Agtk.svg"
 
 if [ -z "$task_destdir" ] && command -v update-desktop-database >/dev/null 2>&1; then

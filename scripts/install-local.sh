@@ -32,8 +32,10 @@ sed "s|@BINDIR@|$task_prefix/bin|g" \
     "$task_repo/data/nl.rutger.Agtk.desktop.in" > "$task_desktop"
 install -Dm644 "$task_desktop" \
     "$task_destdir$task_prefix/share/applications/nl.rutger.Agtk.desktop"
-install -Dm644 "$task_repo/data/nl.rutger.Agtk.svg" \
-    "$task_destdir$task_prefix/share/icons/hicolor/scalable/apps/nl.rutger.Agtk.svg"
+install -Dm644 "$task_repo/galaxy.png" \
+    "$task_destdir$task_prefix/share/icons/hicolor/512x512/apps/nl.rutger.Agtk.png"
+# Earlier installs shipped a scalable SVG, which the icon theme would prefer.
+rm -f -- "$task_destdir$task_prefix/share/icons/hicolor/scalable/apps/nl.rutger.Agtk.svg"
 
 if [ -z "$task_destdir" ] && command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$task_prefix/share/applications" >/dev/null 2>&1 || true

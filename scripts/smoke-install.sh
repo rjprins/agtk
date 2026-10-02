@@ -19,9 +19,10 @@ grep -Fqx 'Exec=/usr/local/bin/agtk' "$task_desktop"
 grep -Fqx 'TryExec=/usr/local/bin/agtk' "$task_desktop"
 grep -Fqx 'Icon=nl.rutger.Agtk' "$task_desktop"
 
-task_icon="$task_stage/usr/local/share/icons/hicolor/scalable/apps/nl.rutger.Agtk.svg"
+task_icon="$task_stage/usr/local/share/icons/hicolor/512x512/apps/nl.rutger.Agtk.png"
 test -f "$task_icon"
-grep -Fq '<svg' "$task_icon"
+cmp -s "$task_repo/galaxy.png" "$task_icon"
+test ! -e "$task_stage/usr/local/share/icons/hicolor/scalable/apps/nl.rutger.Agtk.svg"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$task_desktop"
