@@ -343,10 +343,11 @@ pub fn parse_azure_remote(remote: &str) -> Option<AzureRepoRef> {
                 .iter()
                 .all(|part| !part.is_empty())
         {
+            // SSH remotes percent-encode spaces just like HTTPS ones do.
             return Some(AzureRepoRef {
-                org_url: format!("https://dev.azure.com/{org}"),
-                project: project.to_owned(),
-                repository: repository.to_owned(),
+                org_url: format!("https://dev.azure.com/{}", percent_decode(org)?),
+                project: percent_decode(project)?,
+                repository: percent_decode(repository)?,
             });
         }
         return None;
@@ -749,6 +750,17 @@ fn days_from_civil(mut year: i64, month: i64, day: i64) -> i64 {
 mod tests {
     use super::{normalize_linked_pbis, normalize_thread_summary, parse_azure_remote};
     use serde_json::json;
+
+    #[test]
+    fn ssh_remotes_decode_spaces_in_project_and_repository() {
+        let reference = parse_azure_remote(
+            "git@ssh.dev.azure.com:v3/greenchoice/Flex%20Optimization/Flex%20Optimization",
+        )
+        .unwrap();
+        assert_eq!(reference.org_url, "https://dev.azure.com/greenchoice");
+        assert_eq!(reference.project, "Flex Optimization");
+        assert_eq!(reference.repository, "Flex Optimization");
+    }
 
     #[test]
     fn linked_pbis_validate_ids_deduplicate_and_build_browser_links() {
