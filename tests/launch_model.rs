@@ -229,3 +229,30 @@ fn a_restarted_agent_keeps_its_launch_flags_but_not_its_resume_or_prompt() {
     );
     assert!(carried_agent_args(SessionKind::Shell, &args(&["--model", "x"])).is_empty());
 }
+
+#[test]
+fn a_restarted_fork_resumes_its_own_conversation_instead_of_forking_again() {
+    let args = |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        carried_agent_args(
+            SessionKind::Claude,
+            &args(&[
+                "--resume",
+                "parent-id",
+                "--fork-session",
+                "--session-id",
+                "fork-id",
+                "--model",
+                "opus",
+            ])
+        ),
+        args(&["--model", "opus"])
+    );
+    assert_eq!(
+        carried_agent_args(
+            SessionKind::Codex,
+            &args(&["fork", "parent-id", "-m", "o3"])
+        ),
+        args(&["-m", "o3"])
+    );
+}

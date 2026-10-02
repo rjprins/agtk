@@ -4,7 +4,7 @@ use std::fs;
 
 use agtk::control::{
     ClaudePresetApplyParams, ControlCommand, CreateSessionParams, PrListParams, SendInputParams,
-    SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
+    SessionIdParams, SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
 };
 use agtk::mcp::{ControlBackend, McpServer};
 use serde_json::{Value, json};
@@ -61,6 +61,7 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "snapshot",
             "spawn_shell",
             "launch_agent",
+            "fork_session",
             "select_session",
             "open_diff",
             "open_file",
@@ -143,6 +144,25 @@ fn send_input_maps_to_the_typed_local_control_protocol() {
             session_id: "session-1".to_owned(),
             text: "hello".to_owned(),
             append_enter: true,
+        })]
+    );
+}
+
+#[test]
+fn forking_a_session_maps_to_the_typed_local_control_protocol() {
+    let mut server = McpServer::new(MockBackend::default());
+    let response = server
+        .handle(request(
+            8,
+            "tools/call",
+            json!({"name":"fork_session","arguments":{"sessionId":"claude-1"}}),
+        ))
+        .unwrap();
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        [ControlCommand::SessionFork(SessionIdParams {
+            session_id: "claude-1".to_owned(),
         })]
     );
 }

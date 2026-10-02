@@ -281,6 +281,28 @@ impl Workspace {
         true
     }
 
+    /// Moves every row after `id` down one and returns the position straight
+    /// below it, or `None` once `id` is gone.
+    pub(super) fn make_room_below(&self, id: &str) -> Option<i64> {
+        let (position, moved) = {
+            let mut sessions = self.sessions.borrow_mut();
+            let position = sessions.get(id)?.record.position;
+            let moved = sessions
+                .values_mut()
+                .filter(|session| session.record.position > position)
+                .map(|session| {
+                    session.record.position += 1;
+                    session.record.clone()
+                })
+                .collect::<Vec<_>>();
+            (position, moved)
+        };
+        for record in moved {
+            self.persist_record(record);
+        }
+        Some(position + 1)
+    }
+
     /// Replaces only the changed middle of the key list, so untouched rows keep focus.
     fn splice_sidebar(&self, keys: &[String]) {
         let model = &self.sidebar_model;

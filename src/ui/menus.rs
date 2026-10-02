@@ -186,6 +186,9 @@ impl Workspace {
         self.add_target_action("session-resume", |workspace, id| {
             workspace.resume_exited_session(id)
         });
+        self.add_target_action("session-fork", |workspace, id| {
+            workspace.fork_agent(id, None)
+        });
         self.add_target_action("session-restart", |workspace, id| {
             workspace.restart_agent(id, None)
         });

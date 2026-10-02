@@ -1178,6 +1178,11 @@ impl Workspace {
                 &id,
             ));
             edit_section.append_item(&menus::targeted_item(
+                "Fork Conversation",
+                "win.session-fork",
+                &id,
+            ));
+            edit_section.append_item(&menus::targeted_item(
                 "Restart Agent",
                 "win.session-restart",
                 &id,

@@ -237,6 +237,7 @@ impl<B: ControlBackend> McpServer<B> {
                     initial_input: params.initial_input,
                 })
             }
+            "fork_session" => ControlCommand::SessionFork(parse_args(arguments)?),
             "select_session" => ControlCommand::SessionSelect(parse_args(arguments)?),
             "open_diff" => ControlCommand::UiOpenDiff(parse_args::<UiOpenDiffParams>(arguments)?),
             "open_file" => ControlCommand::UiOpenFile(parse_args::<UiOpenFileParams>(arguments)?),
@@ -628,6 +629,12 @@ fn tool_definitions() -> Vec<Value> {
             "Launch agent",
             "Launch Codex or Claude directly with optional arguments and initial input. The session opens in the background and does not take the selection. Give branch, purpose and projectRoot to create a new worktree first and start the agent inside it; the result then holds both the session and the worktree.",
             launch_schema(true),
+        ),
+        tool(
+            "fork_session",
+            "Fork session",
+            "Start a copy of one Claude or Codex session's conversation in a new session in the same worktree. The original keeps running, and both agents edit the same files. The fork opens in the background and does not take the selection.",
+            schema(&[("sessionId", string())], &["sessionId"]),
         ),
         tool(
             "select_session",

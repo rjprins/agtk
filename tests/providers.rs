@@ -152,6 +152,42 @@ fn preview_is_bounded_and_restore_uses_provider_specific_direct_arguments() {
 }
 
 #[test]
+fn a_fork_copies_the_conversation_under_a_new_id() {
+    let fork = AgentProvider::Claude.fork_plan("parent-1").unwrap();
+    let id = fork.conversation_id.clone().unwrap();
+    assert_eq!(
+        fork.args,
+        [
+            "--resume",
+            "parent-1",
+            "--fork-session",
+            "--session-id",
+            id.as_str()
+        ]
+    );
+    // Claude only accepts a version 4 UUID for --session-id.
+    let groups = id.split('-').map(str::len).collect::<Vec<_>>();
+    assert_eq!(groups, [8, 4, 4, 4, 12]);
+    assert!(
+        id.chars()
+            .all(|c| c == '-' || c.is_ascii_digit() || ('a'..='f').contains(&c))
+    );
+    assert_eq!(&id[14..15], "4");
+    assert!("89ab".contains(&id[19..20]));
+    assert_ne!(
+        AgentProvider::Claude
+            .fork_plan("parent-1")
+            .unwrap()
+            .conversation_id,
+        Some(id)
+    );
+
+    let fork = AgentProvider::Codex.fork_plan("codex-9").unwrap();
+    assert_eq!(fork.args, ["fork", "codex-9"]);
+    assert_eq!(fork.conversation_id, None);
+}
+
+#[test]
 fn recent_mutated_paths_only_tracks_claude_file_mutations_newest_first() {
     let fixture = tempfile::tempdir().unwrap();
     let log = fixture.path().join("session.jsonl");

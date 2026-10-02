@@ -5,7 +5,7 @@ use super::*;
 use crate::control::{AgentListParams, AgentPreviewParams, AgentRestoreParams};
 use crate::persist::now_millis;
 use crate::providers::{
-    AgentProvider, ConversationRole, DiscoveryRoots, ProviderDiscovery, ProviderPreview,
+    AgentProvider, ConversationRole, DiscoveryRoots, ForkPlan, ProviderDiscovery, ProviderPreview,
     ProviderSession, RestoreTarget,
 };
 
@@ -1038,6 +1038,135 @@ impl Workspace {
         only_idle: bool,
         pending: Option<PendingRequest>,
     ) {
+        self.claim_conversations(ids, move |workspace, ids, result| match result {
+            Ok(()) => workspace.restart_claimed_agents(ids, only_idle, pending),
+            Err(error) => workspace.report_failure(
+                pending,
+                ErrorCode::InternalError,
+                "Could not restart agent",
+                format!("could not read the agent logs: {error}"),
+            ),
+        });
+    }
+
+    /// Starts a copy of an agent's conversation in a new row below it, in the
+    /// same place and with the same launch flags. The original keeps running.
+    pub(super) fn fork_agent(&self, id: &str, pending: Option<PendingRequest>) {
+        let Some(kind) = self.sessions.borrow().get(id).map(|s| s.record.kind) else {
+            return;
+        };
+        if agent_provider(kind).is_none() {
+            self.report_failure(
+                pending,
+                ErrorCode::OperationRefused,
+                "Could not fork session",
+                "only Claude and Codex agents can fork".into(),
+            );
+            return;
+        }
+        let id = id.to_owned();
+        self.claim_conversations(vec![id.clone()], move |workspace, _, result| match result {
+            Ok(()) => workspace.fork_claimed_agent(&id, pending),
+            Err(error) => workspace.report_failure(
+                pending,
+                ErrorCode::InternalError,
+                "Could not fork agent",
+                format!("could not read the agent logs: {error}"),
+            ),
+        });
+    }
+
+    /// Copies the conversation once agtk knows it. A conversation gets its log
+    /// at the first prompt, so before that there is nothing to copy.
+    fn fork_claimed_agent(&self, id: &str, pending: Option<PendingRequest>) {
+        let Some(record) = self.sessions.borrow().get(id).map(|s| s.record.clone()) else {
+            self.report_failure(
+                pending,
+                ErrorCode::SessionNotFound,
+                "Could not fork agent",
+                "the session closed".into(),
+            );
+            return;
+        };
+        let Some(provider) = agent_provider(record.kind) else {
+            return;
+        };
+        let nothing_to_copy = "it has no conversation to copy yet";
+        let Some(conversation_id) = record.conversation_id.clone() else {
+            self.report_failure(
+                pending,
+                ErrorCode::OperationRefused,
+                "Could not fork agent",
+                nothing_to_copy.into(),
+            );
+            return;
+        };
+        let discovery = self.provider_discovery();
+        self.run_slow(
+            move || {
+                if !discovery.has_log(provider, &conversation_id)? {
+                    return Ok(None);
+                }
+                provider.fork_plan(&conversation_id).map(Some)
+            },
+            move |workspace, result| match result {
+                Ok(Some(plan)) => workspace.launch_fork(&record, plan, pending),
+                Ok(None) => workspace.report_failure(
+                    pending,
+                    ErrorCode::OperationRefused,
+                    "Could not fork agent",
+                    nothing_to_copy.into(),
+                ),
+                Err(error) => workspace.report_failure(
+                    pending,
+                    ErrorCode::InternalError,
+                    "Could not fork agent",
+                    error.to_string(),
+                ),
+            },
+        );
+    }
+
+    fn launch_fork(&self, parent: &SessionRecord, plan: ForkPlan, pending: Option<PendingRequest>) {
+        let mut args = plan.args;
+        args.extend(crate::launch_model::carried_agent_args(
+            parent.kind,
+            &parent.args,
+        ));
+        let name = {
+            let sessions = self.sessions.borrow();
+            let records = sessions
+                .values()
+                .map(|s| s.record.clone())
+                .collect::<Vec<_>>();
+            crate::session_names::next_fork_name(&parent.name, &records)
+        };
+        let existing = |path: Option<PathBuf>| path.filter(|path| path.exists());
+        let params = crate::control::CreateSessionParams {
+            kind: parent.kind,
+            command: None,
+            args,
+            cwd: existing(parent.cwd.clone()).or(existing(parent.project_root.clone())),
+            name: Some(name),
+            project_root: parent.project_root.clone(),
+            worktree_path: existing(parent.worktree_path.clone()),
+            initial_input: None,
+        };
+        // A fork from the menu takes the selection; a scripted one stays out of the way.
+        let placement = super::sessions::Placement {
+            position: self.make_room_below(&parent.id),
+            select: pending.is_none(),
+        };
+        self.launch_session(params, plan.conversation_id, Some(placement), pending);
+    }
+
+    /// Records the conversation of each of `ids` that never reported one,
+    /// exited or not. Reads the logs only when one is missing.
+    fn claim_conversations(
+        &self,
+        ids: Vec<String>,
+        claimed: impl FnOnce(&Self, Vec<String>, PersistResult<()>) + 'static,
+    ) {
         let unclaimed = {
             let sessions = self.sessions.borrow();
             ids.iter().any(|id| {
@@ -1067,19 +1196,13 @@ impl Workspace {
                     ))
                 })
             },
-            move |workspace, result| match result {
-                Ok(items) => {
+            move |workspace, result| {
+                let result = result.map(|items| {
                     if let Some(mut items) = items {
                         workspace.claim_live_conversations(&mut items, &ids);
                     }
-                    workspace.restart_claimed_agents(ids, only_idle, pending);
-                }
-                Err(error) => workspace.report_failure(
-                    pending,
-                    ErrorCode::InternalError,
-                    "Could not restart agent",
-                    format!("could not read the agent logs: {error}"),
-                ),
+                });
+                claimed(workspace, ids, result);
             },
         );
     }
@@ -1201,15 +1324,15 @@ impl Workspace {
 
     /// Records the conversation of running agents that never reported one, and
     /// drops those conversations from the list since they are open already.
-    /// Exited agents about to restart claim theirs too, so they resume it.
-    fn claim_live_conversations(&self, items: &mut Vec<AgentSessionItem>, restarting: &[String]) {
+    /// Exited agents in `wanted` claim theirs too, for a restart or fork that needs it.
+    fn claim_live_conversations(&self, items: &mut Vec<AgentSessionItem>, wanted: &[String]) {
         let agents = self
             .sessions
             .borrow()
             .values()
             .filter(|session| {
                 (session.record.state != SessionState::Exited
-                    || restarting.contains(&session.record.id))
+                    || wanted.contains(&session.record.id))
                     && session.record.conversation_id.is_none()
             })
             .filter_map(|session| {

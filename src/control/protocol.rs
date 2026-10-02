@@ -60,6 +60,7 @@ pub enum ControlCommand {
     SessionSetWorktree(SetSessionWorktreeParams),
     SessionClose(CloseSessionParams),
     SessionRestart(SessionIdParams),
+    SessionFork(SessionIdParams),
     SessionSetState(SessionSetStateParams),
     SessionOpenMagit(SessionIdParams),
     SessionOpenBranchReview(SessionIdParams),
@@ -606,6 +607,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             ControlCommand::SessionSetState(params)
         }
         "session.restart" => ControlCommand::SessionRestart(decode_session_params(wire.params)?),
+        "session.fork" => ControlCommand::SessionFork(decode_session_params(wire.params)?),
         "session.open_magit" => {
             ControlCommand::SessionOpenMagit(decode_session_params(wire.params)?)
         }
@@ -731,6 +733,7 @@ impl ControlCommand {
             Self::SessionSetWorktree(_) => "session.set_worktree",
             Self::SessionClose(_) => "session.close",
             Self::SessionRestart(_) => "session.restart",
+            Self::SessionFork(_) => "session.fork",
             Self::SessionSetState(_) => "session.set_state",
             Self::SessionOpenMagit(_) => "session.open_magit",
             Self::SessionOpenBranchReview(_) => "session.open_branch_review",
@@ -780,6 +783,7 @@ impl ControlCommand {
             }
             Self::SessionClose(params) => Ok(("session.close", serde_json::to_value(params)?)),
             Self::SessionRestart(params) => Ok(("session.restart", serde_json::to_value(params)?)),
+            Self::SessionFork(params) => Ok(("session.fork", serde_json::to_value(params)?)),
             Self::SessionSetState(params) => {
                 Ok(("session.set_state", serde_json::to_value(params)?))
             }

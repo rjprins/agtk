@@ -1979,6 +1979,106 @@ fn a_restarted_agent_resumes_its_conversation_in_the_same_place() {
 
 #[test]
 #[ignore = "requires a private display"]
+fn a_forked_agent_copies_its_conversation_into_a_new_row_below_it() {
+    let app = App::new();
+    let agent = |kind: &str, name: &str| {
+        let session = app.request(
+            "session.create",
+            json!({
+                "kind":kind,
+                "command":"/bin/sh",
+                "args":["-c","printf '__READY__\\n'; read line"],
+                "cwd":app.directory.path(),
+                "name":name
+            }),
+        );
+        let id = session["id"].as_str().unwrap().to_owned();
+        app.wait_text(&id, "__READY__");
+        id
+    };
+    let claude = agent("claude", "claude");
+    let codex = agent("codex", "codex");
+    let fresh = agent("claude", "fresh");
+    for (id, conversation) in [
+        (&claude, "claude-conv-1"),
+        (&codex, "codex-conv-1"),
+        (&fresh, "claude-conv-2"),
+    ] {
+        app.request(
+            "session.set_state",
+            json!({"sessionId":id,"state":"idle","conversationId":conversation}),
+        );
+    }
+    // A conversation without a log has not started, so it has nothing to copy.
+    let claude_logs = app.directory.path().join("claude/projects/demo");
+    std::fs::create_dir_all(&claude_logs).unwrap();
+    std::fs::write(
+        claude_logs.join("claude-conv-1.jsonl"),
+        "{\"type\":\"user\",\"sessionId\":\"claude-conv-1\"}\n",
+    )
+    .unwrap();
+    let codex_logs = app.directory.path().join("codex/sessions/2026/09/30");
+    std::fs::create_dir_all(&codex_logs).unwrap();
+    std::fs::write(
+        codex_logs.join("rollout-2026-09-30T10-00-00-codex-conv-1.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-conv-1\"}}\n",
+    )
+    .unwrap();
+
+    let claude_fork = app.request("session.fork", json!({"sessionId":claude}));
+    let claude_fork = claude_fork["id"].as_str().unwrap().to_owned();
+    app.wait_text(&claude_fork, "__RESTORE_ARGS_--resume_claude-conv-1__");
+    let codex_fork = app.request("session.fork", json!({"sessionId":codex}));
+    let codex_fork = codex_fork["id"].as_str().unwrap().to_owned();
+    app.wait_text(&codex_fork, "__RESTORE_ARGS_fork_codex-conv-1__");
+    match app.request_body("session.fork", json!({"sessionId":fresh})) {
+        ResponseBody::Failure(error) => assert_eq!(error.code, ErrorCode::OperationRefused),
+        body => panic!("forked a conversation that has no log: {body:?}"),
+    }
+
+    // Each fork sits below its original, which keeps running and keeps the selection.
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["selectedSessionId"], claude.as_str());
+    let mut sessions = state["sessions"].as_array().unwrap().clone();
+    sessions.sort_by_key(|session| session["position"].as_i64().unwrap());
+    let names = sessions
+        .iter()
+        .map(|session| session["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        ["claude", "claude fork", "codex", "codex fork", "fresh"]
+    );
+    assert!(sessions.iter().all(|session| session["state"] != "exited"));
+
+    // The Claude fork holds its own conversation from the start, so a restart
+    // resumes the copy. Codex names its copy itself, found later in the logs.
+    let records = Store::open(&app.paths.database())
+        .unwrap()
+        .sessions()
+        .unwrap();
+    let record = |id: &str| records.iter().find(|record| record.id == id).unwrap();
+    let copy = record(&claude_fork).conversation_id.clone().unwrap();
+    assert_ne!(copy, "claude-conv-1");
+    assert_eq!(
+        record(&claude_fork).args,
+        [
+            "--resume",
+            "claude-conv-1",
+            "--fork-session",
+            "--session-id",
+            copy.as_str()
+        ]
+    );
+    assert_eq!(record(&codex_fork).conversation_id, None);
+    assert_eq!(
+        record(&claude).conversation_id.as_deref(),
+        Some("claude-conv-1")
+    );
+}
+
+#[test]
+#[ignore = "requires a private display"]
 fn sessions_that_lost_their_host_are_offered_for_resume_at_startup() {
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
         if node["id"] == id {

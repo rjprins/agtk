@@ -113,6 +113,58 @@ impl AgentProvider {
             Self::Claude => vec!["--resume".to_owned(), provider_session_id.to_owned()],
         }
     }
+
+    /// Starts a new conversation from a copy of `provider_session_id` and
+    /// leaves the original alone, so both can carry on.
+    pub fn fork_plan(self, provider_session_id: &str) -> PersistResult<ForkPlan> {
+        Ok(match self {
+            Self::Codex => ForkPlan {
+                args: vec!["fork".to_owned(), provider_session_id.to_owned()],
+                conversation_id: None,
+            },
+            Self::Claude => {
+                let conversation_id = random_uuid()?;
+                ForkPlan {
+                    args: vec![
+                        "--resume".to_owned(),
+                        provider_session_id.to_owned(),
+                        "--fork-session".to_owned(),
+                        "--session-id".to_owned(),
+                        conversation_id.clone(),
+                    ],
+                    conversation_id: Some(conversation_id),
+                }
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkPlan {
+    pub args: Vec<String>,
+    /// The copy's conversation, when agtk chooses it. Codex picks its own,
+    /// which agtk finds in the logs like any other Codex conversation.
+    pub conversation_id: Option<String>,
+}
+
+/// A random version 4 UUID, the form Claude requires for a session ID.
+fn random_uuid() -> PersistResult<String> {
+    let mut bytes = [0_u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

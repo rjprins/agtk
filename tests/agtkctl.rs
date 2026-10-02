@@ -326,6 +326,12 @@ fn session_mutation_commands_have_typed_protocol_mappings() {
         }),
     );
     assert_fixture_command(
+        &["session", "fork", "claude-42"],
+        ControlCommand::SessionFork(SessionIdParams {
+            session_id: "claude-42".to_owned(),
+        }),
+    );
+    assert_fixture_command(
         &["session", "magit", "shell-42"],
         ControlCommand::SessionOpenMagit(SessionIdParams {
             session_id: "shell-42".to_owned(),

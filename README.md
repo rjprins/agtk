@@ -30,6 +30,7 @@ agtk is developed and used daily on Arch Linux with GNOME on Wayland. Other dist
 - Each agent row shows a state: busy, waiting, ready, or idle. See [Agent states](#agent-states).
 - Resume a closed Claude or Codex conversation with `Ctrl+Shift+R`. The list shows where each one stopped and which files it changed.
 - Restart Agent in the row menu stops an agent and resumes the same conversation, so an updated Claude or Codex takes over. Restart Idle Agents in the main menu does this for every agent that is between turns.
+- Fork Conversation in the row menu starts a copy of a Claude or Codex conversation in a new row below it. The original keeps running. Both agents use the same worktree, so give them work on different files.
 - Switch Claude model and effort with presets.
 - Closing the last session in a worktree offers to remove the worktree too. Uncommitted changes are saved to the attic first, and the branch can go with it after an attic tag.
 
@@ -156,6 +157,7 @@ agtkctl state
 agtkctl session create --kind codex --cwd /absolute/project
 agtkctl session text SESSION_ID --lines 200
 agtkctl session restart SESSION_ID
+agtkctl session fork SESSION_ID
 agtkctl ui inspect
 agtkctl ui capture
 agtkctl ui show changes

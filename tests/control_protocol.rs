@@ -220,6 +220,7 @@ fn every_core_method_decodes_to_a_typed_command() {
             r#"{"sessionId":"claude-1"}"#,
             "SessionRestart",
         ),
+        ("session.fork", r#"{"sessionId":"claude-1"}"#, "SessionFork"),
         (
             "session.open_magit",
             r#"{"sessionId":"shell-1"}"#,
