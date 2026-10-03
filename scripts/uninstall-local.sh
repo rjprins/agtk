@@ -30,6 +30,17 @@ if [ -z "$task_destdir" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; t
     gtk-update-icon-cache -f -t "$task_prefix/share/icons/hicolor" >/dev/null 2>&1 || true
 fi
 
+if [ -z "$task_destdir" ]; then
+    task_claude=${AGTK_CLAUDE_BIN:-claude}
+    if command -v "$task_claude" >/dev/null 2>&1; then
+        "$task_claude" mcp remove --scope user agtk >/dev/null 2>&1 || true
+    fi
+    task_codex=${AGTK_CODEX_BIN:-codex}
+    if command -v "$task_codex" >/dev/null 2>&1; then
+        "$task_codex" mcp remove agtk >/dev/null 2>&1 || true
+    fi
+fi
+
 if [ -n "$task_destdir" ]; then
     printf '%s\n' "Removed staged agtk files from $task_destdir$task_prefix"
 else

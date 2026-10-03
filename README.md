@@ -14,7 +14,7 @@ agtk runs Claude Code, Codex, Gemini and plain shells side by side in one window
 - **Review without leaving the window.** The Changes sidebar shows staged, unstaged, branch and commit diffs for the session's worktree. File paths in the terminal open in the built-in viewer at the right line.
 - **Scriptable and agent-controllable.** `agtkctl` and an MCP server expose sessions, terminal text, diffs, worktrees and pull requests over a local socket, so scripts and agents can start and supervise other agents. Nothing listens on the network.
 - **Native, not Electron.** Built in Rust with GTK 4 and libadwaita. Each session is a real VTE terminal with true color, search and prompt history.
-- **Zero agent setup.** Claude Code reports its state through hooks that agtk generates on the fly. Your Claude configuration stays untouched.
+- **Zero agent setup.** Claude Code reports its state through hooks that agtk generates on the fly. The installer adds the agtk MCP server to Claude Code and Codex, so agents can use agtk right away.
 
 ## Project status
 
@@ -110,7 +110,8 @@ Then start "agtk" from the GNOME overview, or run `~/.local/bin/agtk`.
 
 - To install somewhere else, set `PREFIX` to an absolute path.
 - To upgrade, run the installer again.
-- To remove agtk, run `./scripts/uninstall-local.sh`. Your saved sessions and settings are kept.
+- The installer adds `agtk-mcp` as an MCP server named `agtk` to Claude Code and Codex, when they are installed. See [MCP](#mcp).
+- To remove agtk, run `./scripts/uninstall-local.sh`. It also removes the `agtk` MCP server. Your saved sessions and settings are kept.
 
 If agtk does not start from the overview, look in the user journal for its output.
 
@@ -179,18 +180,23 @@ The states are `busy`, `waiting`, `ready`, and `idle`. Add `--hook-input` when t
 
 ## MCP
 
-Add `agtk-mcp` to an MCP client as a local stdio server:
+`./scripts/install-local.sh` adds `agtk-mcp` to Claude Code and Codex as a user-wide MCP server named `agtk`. Restart running agents to give them the tools: use Restart Idle Agents in the main menu.
+
+Without `--instance`, `agtk-mcp` talks to the instance of the session it runs in, or `default` outside agtk.
+
+To add it to another MCP client, use it as a local stdio server:
 
 ```json
 {
   "mcpServers": {
     "agtk": {
-      "command": "/home/you/.local/bin/agtk-mcp",
-      "args": ["--instance", "default"]
+      "command": "/home/you/.local/bin/agtk-mcp"
     }
   }
 }
 ```
+
+An agent can open a shell with `spawn_shell` and give it an `initialCommand`, such as a `sudo` command. Type the password in that shell, and the agent reads the result with `snapshot`.
 
 The tools cover sessions, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, and screenshots of the agtk window. The server never captures the rest of the desktop.
 
