@@ -218,7 +218,7 @@ impl<B: ControlBackend> McpServer<B> {
                     name: params.name,
                     project_root: params.project_root,
                     worktree_path: params.worktree_path,
-                    initial_input: None,
+                    initial_input: params.initial_command,
                 })
             }
             "launch_agent" => {
@@ -564,6 +564,7 @@ struct SpawnShellArgs {
     name: Option<String>,
     project_root: Option<PathBuf>,
     worktree_path: Option<PathBuf>,
+    initial_command: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -621,7 +622,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "spawn_shell",
             "Spawn shell",
-            "Launch a native shell session in an optional project or worktree.",
+            "Launch a native shell session in an optional project or worktree. Give initialCommand to run it in the shell once it starts; read its output with snapshot. The session opens in the background and does not take the selection.",
             launch_schema(false),
         ),
         tool(
@@ -917,6 +918,8 @@ fn launch_schema(agent: bool) -> Value {
         properties.push(("baseBranch", string()));
         properties.push(("purpose", string()));
         required.push("provider");
+    } else {
+        properties.push(("initialCommand", string()));
     }
     schema(&properties, &required)
 }

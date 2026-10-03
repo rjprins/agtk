@@ -149,6 +149,35 @@ fn send_input_maps_to_the_typed_local_control_protocol() {
 }
 
 #[test]
+fn spawning_a_shell_passes_its_initial_command_as_input() {
+    let mut server = McpServer::new(MockBackend::default());
+    let response = server
+        .handle(request(
+            8,
+            "tools/call",
+            json!({
+                "name":"spawn_shell",
+                "arguments":{"cwd":"/work/agtk","initialCommand":"cargo test"}
+            }),
+        ))
+        .unwrap();
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        [ControlCommand::SessionCreate(CreateSessionParams {
+            kind: SessionKind::Shell,
+            command: None,
+            args: Vec::new(),
+            cwd: Some("/work/agtk".into()),
+            name: None,
+            project_root: None,
+            worktree_path: None,
+            initial_input: Some("cargo test".to_owned()),
+        })]
+    );
+}
+
+#[test]
 fn forking_a_session_maps_to_the_typed_local_control_protocol() {
     let mut server = McpServer::new(MockBackend::default());
     let response = server

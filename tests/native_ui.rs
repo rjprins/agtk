@@ -1979,6 +1979,22 @@ fn a_restarted_agent_resumes_its_conversation_in_the_same_place() {
 
 #[test]
 #[ignore = "requires a private display"]
+fn a_shell_runs_its_initial_command_once_it_starts() {
+    let app = App::new();
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"shell",
+            "cwd":app.directory.path(),
+            "initialInput":"echo __SHELL_$((6*7))__"
+        }),
+    );
+    // The shell computes 42, so this is its output, not the echoed input.
+    app.wait_text(session["id"].as_str().unwrap(), "__SHELL_42__");
+}
+
+#[test]
+#[ignore = "requires a private display"]
 fn a_forked_agent_copies_its_conversation_into_a_new_row_below_it() {
     let app = App::new();
     let agent = |kind: &str, name: &str| {
