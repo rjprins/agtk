@@ -20,7 +20,7 @@ agtk runs Claude Code, Codex, Gemini and plain shells side by side in one window
 
 agtk is developed and used daily on Arch Linux with GNOME on Wayland. Other distributions and desktops are untested, and the interface and command line may change between versions.
 
-## Let an agent install it
+## Install
 
 Paste this into Claude Code, Codex, or another coding agent. It checks agtk before running anything, and asks you before it installs.
 
@@ -28,12 +28,44 @@ Paste this into Claude Code, Codex, or another coding agent. It checks agtk befo
 I'd like to try agtk, a GNOME app for running coding agents side by side: https://github.com/rjprins/agtk
 
 1. Clone it into a directory of your choice and tell me where.
-2. Before running anything from it, check that it is safe to build and run. Read start.sh, build.rs and the scripts in scripts/. Look through the source for network access, commands run as root, and files written outside the clone, ~/.local, and agtk's own state and runtime directories. Note what the build downloads (Cargo.lock and viewer/package-lock.json) and what the installer changes in my Claude Code and Codex settings. Tell me what you found.
+2. Before running anything from it, check that it is safe to build and run. Read build.rs and the scripts in scripts/. Look through the source for network access, commands run as root, and files written outside the clone, ~/.local, and agtk's own state and runtime directories. Note what the build downloads (Cargo.lock and viewer/package-lock.json) and what the installer changes in my Claude Code and Codex settings. Tell me what you found.
 3. Check my system against the requirements in the README. Tell me what is missing and how to install it, but don't install system packages yourself.
 4. Ask me whether to go ahead. Only when I say yes, run ./scripts/install-local.sh and start agtk detached from your shell, for example with `setsid -f ~/.local/bin/agtk`.
 ```
 
-agtk opens with an agent in its own source code. Ask it how a feature works, or to change agtk to fit your workflow. See [Your agtk](#your-agtk).
+To install by hand, install the [requirements](#requirements), clone the repository, and run:
+
+```sh
+./scripts/install-local.sh
+```
+
+This builds agtk and installs it with a GNOME launcher under `~/.local`. Start "agtk" from the GNOME overview, or run `~/.local/bin/agtk`.
+
+- To install somewhere else, set `PREFIX` to an absolute path.
+- To upgrade, run the installer again.
+- The installer adds `agtk-mcp` as an MCP server named `agtk` to Claude Code and Codex, when they are installed. See [MCP](#mcp).
+- To remove agtk, run `./scripts/uninstall-local.sh`. It also removes the `agtk` MCP server. Your saved sessions and settings are kept.
+
+If agtk does not start from the overview, look in the user journal for its output.
+
+### Requirements
+
+- Linux with GNOME on Wayland
+- GTK 4.22, libadwaita 1.9, VTE 0.84, WebKitGTK 6.0, and SQLite
+- Rust 1.92 or newer
+- Node.js and npm, only to build the Changes viewer
+
+On Arch Linux:
+
+```sh
+sudo pacman -S gtk4 libadwaita vte4 webkitgtk-6.0 sqlite rust nodejs npm
+```
+
+Optional tools:
+
+- `claude`, `codex`, or `gemini` for the agents you want to run
+- The Azure CLI with the Azure DevOps extension, signed in, for pull requests
+- `emacsclient` for the Emacs actions
 
 ## Your agtk
 
@@ -81,60 +113,6 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 - A session that works on a PR, or reviews one, shows a PR button in its sidebar row and a PR bar above its terminal. Both open the PR in the browser.
 - Emacs: open Magit or a branch review for the selected session.
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.
-
-## Requirements
-
-- Linux with GNOME on Wayland
-- GTK 4.22, libadwaita 1.9, VTE 0.84, WebKitGTK 6.0, and SQLite
-- Rust 1.92 or newer
-- Node.js and npm, only to build the Changes viewer
-
-On Arch Linux:
-
-```sh
-sudo pacman -S gtk4 libadwaita vte4 webkitgtk-6.0 sqlite rust nodejs npm
-```
-
-Optional tools:
-
-- `claude`, `codex`, or `gemini` for the agents you want to run
-- The Azure CLI with the Azure DevOps extension, signed in, for pull requests
-- `emacsclient` for the Emacs actions
-
-## Build and run
-
-Clone the repository and run:
-
-```sh
-./start.sh
-```
-
-This builds the viewer and all binaries in debug mode, then starts agtk. Arguments are passed on to `agtk`.
-
-To build and run by hand:
-
-```sh
-scripts/build-viewer.sh
-cargo build --bins
-./target/debug/agtk
-```
-
-## Install
-
-Install a release build and a GNOME launcher under `~/.local`:
-
-```sh
-./scripts/install-local.sh
-```
-
-Then start "agtk" from the GNOME overview, or run `~/.local/bin/agtk`.
-
-- To install somewhere else, set `PREFIX` to an absolute path.
-- To upgrade, run the installer again.
-- The installer adds `agtk-mcp` as an MCP server named `agtk` to Claude Code and Codex, when they are installed. See [MCP](#mcp).
-- To remove agtk, run `./scripts/uninstall-local.sh`. It also removes the `agtk` MCP server. Your saved sessions and settings are kept.
-
-If agtk does not start from the overview, look in the user journal for its output.
 
 ## Keyboard shortcuts
 
@@ -236,6 +214,8 @@ agtk has four binaries:
 - `agtk-session` runs one terminal process. This is why sessions survive a restart of the window.
 - `agtkctl` is the command line tool.
 - `agtk-mcp` is the MCP server.
+
+To try a change, run `./scripts/install-local.sh` and restart agtk. The installer makes a debug build with optimized dependencies, so it takes seconds after a change. Sessions keep running while agtk restarts.
 
 Run the checks:
 

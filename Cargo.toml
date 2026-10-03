@@ -32,9 +32,11 @@ tempfile = "3.23"
 [build-dependencies]
 glib-build-tools = "=0.22.8"
 
-# Scanning agent logs is slow unoptimized, and start.sh runs debug builds.
-[profile.dev.package.memchr]
-opt-level = 3
+# The installed agtk is a debug build, so a change rebuilds in seconds.
+# Dependencies compile once, so they are optimized: agtk's log scanning and
+# screen parsing lean on regex, memchr and serde_json.
+[profile.dev]
+debug = "line-tables-only"
 
-[profile.dev.package.serde_json]
+[profile.dev.package."*"]
 opt-level = 3

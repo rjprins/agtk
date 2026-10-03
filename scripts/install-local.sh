@@ -19,11 +19,12 @@ case "$task_prefix" in
 esac
 
 "$task_repo/scripts/build-viewer.sh"
-cargo build --manifest-path "$task_repo/Cargo.toml" --release --locked --bins
+# A debug build with optimized dependencies; see the dev profile in Cargo.toml.
+cargo build --manifest-path "$task_repo/Cargo.toml" --locked --bins
 
 task_bindir="$task_destdir$task_prefix/bin"
 for task_binary in agtk agtk-session agtkctl agtk-mcp; do
-    install -Dm755 "$task_target/release/$task_binary" "$task_bindir/$task_binary"
+    install -Dm755 "$task_target/debug/$task_binary" "$task_bindir/$task_binary"
 done
 
 task_desktop=$(mktemp)
