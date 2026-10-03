@@ -375,11 +375,32 @@ impl Workspace {
                     if workspace.sessions.borrow().is_empty()
                         && workspace.paths.name().as_str() == "default"
                     {
-                        workspace.launch_shell();
+                        workspace.launch_welcome_session();
                     }
                     workspace.offer_to_resume_lost_sessions(&lost);
                 }
                 Err(error) => workspace.show_error(&format!("Could not load workspace: {error}")),
+            },
+        );
+    }
+
+    /// Opens an agent in agtk's own source, or a shell without an agent or source.
+    fn launch_welcome_session(&self) {
+        self.run_slow(
+            || {
+                Ok(crate::welcome::source_dir().and_then(|source| {
+                    crate::welcome::session_params(&source, crate::session::is_installed)
+                }))
+            },
+            |workspace, params| {
+                // The user may have opened a session while the agents were looked up.
+                if !workspace.sessions.borrow().is_empty() {
+                    return;
+                }
+                match params {
+                    Ok(Some(params)) => workspace.launch_controlled(params, None),
+                    _ => workspace.launch_shell(),
+                }
             },
         );
     }

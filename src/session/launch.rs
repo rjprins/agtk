@@ -42,17 +42,9 @@ impl SessionLaunchPlan {
         let project_root = canonical_directory(params.project_root, "project root")?;
         let worktree_path = canonical_directory(params.worktree_path, "worktree path")?;
 
-        let command = params.command.unwrap_or_else(|| match params.kind {
-            SessionKind::Shell => env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()),
-            SessionKind::Codex => env::var("AGTK_CODEX_BIN").unwrap_or_else(|_| "codex".to_owned()),
-            SessionKind::Claude => {
-                env::var("AGTK_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned())
-            }
-            SessionKind::Gemini => {
-                env::var("AGTK_GEMINI_BIN").unwrap_or_else(|_| "gemini".to_owned())
-            }
-            SessionKind::Custom => String::new(),
-        });
+        let command = params
+            .command
+            .unwrap_or_else(|| default_command(params.kind));
         if command.trim().is_empty() {
             return Err(LaunchPlanError(
                 "custom sessions require an executable".to_owned(),
@@ -190,6 +182,28 @@ impl SessionHostLaunchPlan {
         command.args(args);
         Some(command)
     }
+}
+
+/// The program a session of this kind runs when the launch names none.
+fn default_command(kind: SessionKind) -> String {
+    match kind {
+        SessionKind::Shell => env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()),
+        SessionKind::Codex => env::var("AGTK_CODEX_BIN").unwrap_or_else(|_| "codex".to_owned()),
+        SessionKind::Claude => env::var("AGTK_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned()),
+        SessionKind::Gemini => env::var("AGTK_GEMINI_BIN").unwrap_or_else(|_| "gemini".to_owned()),
+        SessionKind::Custom => String::new(),
+    }
+}
+
+/// Whether a session of this kind would find its program. Reads the login
+/// shell PATH, so it can take a second when nothing launched yet.
+pub fn is_installed(kind: SessionKind) -> bool {
+    let command = default_command(kind);
+    !command.is_empty()
+        && cached_shell_path().is_ok_and(|path| {
+            resolve_executable_from(&command, None, Some(&path), env::var_os("HOME").as_deref())
+                .is_some()
+        })
 }
 
 fn canonical_directory(

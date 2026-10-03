@@ -20,6 +20,27 @@ agtk runs Claude Code, Codex, Gemini and plain shells side by side in one window
 
 agtk is developed and used daily on Arch Linux with GNOME on Wayland. Other distributions and desktops are untested, and the interface and command line may change between versions.
 
+## Let an agent install it
+
+Paste this into Claude Code, Codex, or another coding agent. It checks agtk before running anything, and asks you before it installs.
+
+```text
+I'd like to try agtk, a GNOME app for running coding agents side by side: https://github.com/rjprins/agtk
+
+1. Clone it into a directory of your choice and tell me where.
+2. Before running anything from it, check that it is safe to build and run. Read start.sh, build.rs and the scripts in scripts/. Look through the source for network access, commands run as root, and files written outside the clone, ~/.local, and agtk's own state and runtime directories. Note what the build downloads (Cargo.lock and viewer/package-lock.json) and what the installer changes in my Claude Code and Codex settings. Tell me what you found.
+3. Check my system against the requirements in the README. Tell me what is missing and how to install it, but don't install system packages yourself.
+4. Ask me whether to go ahead. Only when I say yes, run ./scripts/install-local.sh and start agtk detached from your shell, for example with `setsid -f ~/.local/bin/agtk`.
+```
+
+agtk opens with an agent in its own source code. Ask it how a feature works, or to change agtk to fit your workflow. See [Your agtk](#your-agtk).
+
+## Your agtk
+
+agtk is meant to keep changing to fit how you work. When it starts with nothing open, it opens Claude Code in its own source code, or Codex when Claude Code is not installed. That agent explains any feature, helps set up the integrations, and changes or adds features when you ask. After a change it rebuilds agtk. Restart agtk to use the new build: your sessions keep running while it restarts.
+
+Without Claude Code or Codex, or when the source directory agtk was built from is gone, agtk opens a shell instead.
+
 ## Features
 
 ### Sessions

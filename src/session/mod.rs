@@ -4,7 +4,9 @@ mod launch;
 mod protocol;
 mod session_host;
 
-pub use launch::{LaunchPlanError, SessionHostLaunchPlan, SessionLaunchPlan, warm_shell_path};
+pub use launch::{
+    LaunchPlanError, SessionHostLaunchPlan, SessionLaunchPlan, is_installed, warm_shell_path,
+};
 pub use protocol::{Attachment, receive_attachment, send_attachment};
 pub use session_host::run_session_host;
 
