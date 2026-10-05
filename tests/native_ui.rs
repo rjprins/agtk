@@ -1727,7 +1727,15 @@ fn closing_the_last_session_in_a_worktree_offers_to_remove_it() {
             .expect("close prompt is open")
             .clone();
         assert_eq!(prompt["isVisible"], true);
-        if find(&prompt, "close-prompt-remove").unwrap()["isEnabled"] == true {
+        assert_eq!(
+            find(&prompt, "close-prompt-remove").unwrap()["isEnabled"],
+            true
+        );
+        assert_eq!(
+            find(&prompt, "close-prompt-remove-regardless").unwrap()["isEnabled"],
+            true
+        );
+        if find(&prompt, "close-prompt-status").unwrap()["label"] != "Checking the worktree…" {
             break prompt;
         }
         assert!(
