@@ -39,10 +39,10 @@ To install by hand, install the [requirements](#requirements), clone the reposit
 ./scripts/install-local.sh
 ```
 
-This builds agtk and installs it with a GNOME launcher under `~/.local`. Start "agtk" from the GNOME overview, or run `~/.local/bin/agtk`.
+This builds agtk, links its binaries under `~/.local/bin`, and adds a GNOME launcher. Keep the checkout and its build output in place. Start "agtk" from the GNOME overview, or run `~/.local/bin/agtk`.
 
 - To install somewhere else, set `PREFIX` to an absolute path.
-- To upgrade, run the installer again.
+- To use code changes, rebuild and restart agtk.
 - The installer adds `agtk-mcp` as an MCP server named `agtk` to Claude Code and Codex, when they are installed. See [MCP](#mcp).
 - To remove agtk, run `./scripts/uninstall-local.sh`. It also removes the `agtk` MCP server. Your saved sessions and settings are kept.
 
@@ -225,9 +225,7 @@ agtk has four binaries:
 - `agtkctl` is the command line tool.
 - `agtk-mcp` is the MCP server.
 
-For development, run `./scripts/install-local.sh --dev` once. This links the installed binaries to this checkout. After a change, run `./scripts/build-viewer.sh` and `cargo build --locked --bins`, then restart agtk. Sessions keep running while agtk restarts. Keep the checkout and its build output in place while using this mode.
-
-For an installation that does not depend on the checkout, run `./scripts/install-local.sh` without `--dev`. Run it again after changes to update the installed copies.
+Run `./scripts/install-local.sh` once. This links the installed commands to this checkout's build output. After a change, run `./scripts/build-viewer.sh` and `cargo build --locked --bins`, then restart agtk. Sessions keep running while agtk restarts. Keep the checkout and its build output in place.
 
 Run the checks:
 

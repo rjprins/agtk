@@ -1,15 +1,13 @@
 #!/bin/sh
 set -eu
 
-task_dev=0
 case "$#:$*" in
     0:) ;;
-    1:--dev) task_dev=1 ;;
     1:--help|1:-h)
-        printf '%s\n' "Usage: scripts/install-local.sh [--dev]" \
-            "  --dev  Link installed binaries to this checkout; rebuild and restart to use changes."
+        printf '%s\n' "Usage: scripts/install-local.sh" \
+            "Links installed binaries to this checkout; rebuild and restart to use changes."
         exit 0 ;;
-    *) printf '%s\n' "Usage: scripts/install-local.sh [--dev]" >&2; exit 2 ;;
+    *) printf '%s\n' "Usage: scripts/install-local.sh" >&2; exit 2 ;;
 esac
 
 task_repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -38,15 +36,7 @@ task_target=$(CDPATH= cd -- "$task_target" && pwd)
 task_bindir="$task_destdir$task_prefix/bin"
 mkdir -p "$task_bindir"
 for task_binary in agtk agtk-session agtkctl agtk-mcp; do
-    if [ "$task_dev" -eq 1 ]; then
-        ln -sfn "$task_target/debug/$task_binary" "$task_bindir/$task_binary"
-    else
-        # Do not follow an earlier development link when installing a copy.
-        if [ -L "$task_bindir/$task_binary" ]; then
-            rm "$task_bindir/$task_binary"
-        fi
-        install -Dm755 "$task_target/debug/$task_binary" "$task_bindir/$task_binary"
-    fi
+    ln -sfn "$task_target/debug/$task_binary" "$task_bindir/$task_binary"
 done
 
 task_desktop=$(mktemp)
@@ -95,9 +85,5 @@ fi
 if [ -n "$task_destdir" ]; then
     printf '%s\n' "Staged agtk in $task_destdir$task_prefix"
 else
-    if [ "$task_dev" -eq 1 ]; then
-        printf '%s\n' "Linked agtk in $task_prefix to $task_target/debug"
-    else
-        printf '%s\n' "Installed agtk in $task_prefix"
-    fi
+    printf '%s\n' "Linked agtk in $task_prefix to $task_target/debug"
 fi

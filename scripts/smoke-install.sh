@@ -6,25 +6,24 @@ task_stage=$(mktemp -d)
 trap 'find "$task_stage" -depth -delete' EXIT HUP INT TERM
 
 "$task_repo/scripts/build-viewer.sh"
+task_bindir="$task_stage/usr/local/bin"
+# Replace binaries copied by an older installer with links to the build output.
+mkdir -p "$task_bindir"
+for task_binary in agtk agtk-session agtkctl agtk-mcp; do
+    install -m755 /bin/true "$task_bindir/$task_binary"
+done
 DESTDIR="$task_stage" PREFIX=/usr/local "$task_repo/scripts/install-local.sh"
 
-task_bindir="$task_stage/usr/local/bin"
 for task_binary in agtk agtk-session agtkctl agtk-mcp; do
     test -x "$task_bindir/$task_binary"
-done
-
-# Development installs follow the checkout's binaries after every rebuild.
-DESTDIR="$task_stage" PREFIX=/usr/local "$task_repo/scripts/install-local.sh" --dev
-for task_binary in agtk agtk-session agtkctl agtk-mcp; do
     test -L "$task_bindir/$task_binary"
     test "$(readlink -f "$task_bindir/$task_binary")" = "$(readlink -f "${CARGO_TARGET_DIR:-$task_repo/target}/debug/$task_binary")"
 done
 
-# A regular installation can replace the links with independent copies again.
+# Reinstalling must keep the links in place.
 DESTDIR="$task_stage" PREFIX=/usr/local "$task_repo/scripts/install-local.sh"
 for task_binary in agtk agtk-session agtkctl agtk-mcp; do
-    test ! -L "$task_bindir/$task_binary"
-    test -x "$task_bindir/$task_binary"
+    test -L "$task_bindir/$task_binary"
 done
 
 task_desktop="$task_stage/usr/local/share/applications/nl.rutger.Agtk.desktop"
@@ -52,6 +51,8 @@ DESTDIR="$task_stage" PREFIX=/usr/local "$task_repo/scripts/uninstall-local.sh"
 
 for task_binary in agtk agtk-session agtkctl agtk-mcp; do
     test ! -e "$task_bindir/$task_binary"
+    test ! -L "$task_bindir/$task_binary"
+    test -x "${CARGO_TARGET_DIR:-$task_repo/target}/debug/$task_binary"
 done
 test ! -e "$task_desktop"
 test ! -e "$task_icon"
