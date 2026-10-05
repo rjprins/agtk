@@ -126,6 +126,7 @@ impl Workspace {
                 .build();
             let row = adw::ActionRow::builder()
                 .title(&record.name)
+                .use_markup(false)
                 .activatable_widget(&check)
                 .build();
             if let Some(location) = session_location(record) {
@@ -196,7 +197,7 @@ impl Workspace {
         } else {
             format!("Resuming {count} sessions")
         };
-        self.overlay.add_toast(adw::Toast::new(&message));
+        self.overlay.add_toast(super::plain_toast(&message));
         if !agents.is_empty() {
             self.restart_agents(agents, false, None);
         }

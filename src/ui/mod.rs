@@ -1183,8 +1183,14 @@ impl Workspace {
     }
 
     fn show_error(&self, message: &str) {
-        self.overlay.add_toast(adw::Toast::new(message));
+        self.overlay.add_toast(plain_toast(message));
     }
+}
+
+/// Toasts parse markup by default. Messages carry paths, branch names and
+/// terminal output, which must show as written.
+pub(super) fn plain_toast(text: &str) -> adw::Toast {
+    adw::Toast::builder().title(text).use_markup(false).build()
 }
 
 fn widget_bounds(widget: &impl IsA<gtk::Widget>, window: &impl IsA<gtk::Widget>) -> Bounds {

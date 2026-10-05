@@ -1024,7 +1024,7 @@ impl Workspace {
                 working
             ),
         };
-        self.overlay.add_toast(adw::Toast::new(&message));
+        self.overlay.add_toast(super::plain_toast(&message));
         if !idle.is_empty() {
             self.restart_agents(idle, true, None);
         }

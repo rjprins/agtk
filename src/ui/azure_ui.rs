@@ -693,7 +693,10 @@ impl Workspace {
         while let Some(child) = self.prs.list.first_child() {
             self.prs.list.remove(&child);
         }
-        let row = adw::ActionRow::builder().title(text).build();
+        let row = adw::ActionRow::builder()
+            .title(text)
+            .use_markup(false)
+            .build();
         row.add_css_class("dim-label");
         self.prs.list.append(&row);
     }

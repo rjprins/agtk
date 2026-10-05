@@ -264,7 +264,10 @@ impl Workspace {
 
     fn render_worktree_message(&self, text: &str) {
         self.clear_worktree_list();
-        let row = adw::ActionRow::builder().title(text).build();
+        let row = adw::ActionRow::builder()
+            .title(text)
+            .use_markup(false)
+            .build();
         row.add_css_class("dim-label");
         self.worktrees.list.append(&row);
     }
@@ -277,12 +280,14 @@ impl Workspace {
 
     fn render_worktree_inventory(&self, inventory: WorktreeInventory) {
         self.clear_worktree_list();
-        self.worktrees.inventory.set_description(Some(&format!(
-            "{} on {}, default branch {}",
-            inventory.worktrees.len(),
-            project_label(&inventory.repo_root),
-            inventory.default_branch
-        )));
+        self.worktrees
+            .inventory
+            .set_description(Some(&glib::markup_escape_text(&format!(
+                "{} on {}, default branch {}",
+                inventory.worktrees.len(),
+                project_label(&inventory.repo_root),
+                inventory.default_branch
+            ))));
         for worktree in inventory.worktrees {
             self.worktrees
                 .list
@@ -298,6 +303,7 @@ impl Workspace {
         let branch = worktree.branch.as_deref().unwrap_or("(detached)");
         let row = adw::ActionRow::builder()
             .title(branch)
+            .use_markup(false)
             .subtitle(format!(
                 "{} · {}",
                 worktree.path.display(),
