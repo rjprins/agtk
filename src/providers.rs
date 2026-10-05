@@ -1033,7 +1033,10 @@ fn conversation_messages(content: &str) -> Vec<ConversationMessage> {
             Some(ConversationMessage {
                 role,
                 text: truncate_chars(text, MAX_MESSAGE_CHARS),
-                timestamp: entry.get("timestamp").and_then(Value::as_u64),
+                timestamp: entry
+                    .get("timestamp")
+                    .and_then(Value::as_str)
+                    .and_then(|stamp| parse_utc_millis(stamp.as_bytes())),
             })
         })
         .collect()

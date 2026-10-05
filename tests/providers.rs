@@ -100,7 +100,7 @@ fn preview_is_bounded_and_restore_uses_provider_specific_direct_arguments() {
     fs::write(
         &log,
         format!(
-            "{{\"type\":\"user\",\"sessionId\":\"session-42\",\"cwd\":{:?},\"message\":{{\"content\":\"first question\"}}}}\n{{\"type\":\"assistant\",\"sessionId\":\"session-42\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"first answer\"}}]}}}}\n{{\"type\":\"user\",\"sessionId\":\"session-42\",\"message\":{{\"content\":\"second question\"}}}}\n",
+            "{{\"type\":\"user\",\"sessionId\":\"session-42\",\"cwd\":{:?},\"message\":{{\"content\":\"first question\"}}}}\n{{\"type\":\"assistant\",\"sessionId\":\"session-42\",\"timestamp\":\"2026-09-15T10:00:00.000Z\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"first answer\"}}]}}}}\n{{\"type\":\"user\",\"sessionId\":\"session-42\",\"message\":{{\"content\":\"second question\"}}}}\n",
             original.to_string_lossy()
         ),
     )
@@ -126,6 +126,7 @@ fn preview_is_bounded_and_restore_uses_provider_specific_direct_arguments() {
         .unwrap();
     assert_eq!(preview.messages.len(), 2);
     assert_eq!(preview.messages[0].text, "first answer");
+    assert_eq!(preview.messages[0].timestamp, Some(1789466400000));
     assert_eq!(preview.messages[1].text, "second question");
     assert!(preview.is_truncated);
 
