@@ -14,10 +14,8 @@ use crate::emacs::EmacsIntegration;
 use crate::instance::ensure_private_dir;
 use crate::session_names::next_worktree_session_name;
 
-// Temper Claude's own wheel acceleration when translating touchpad movement.
+// Temper agent TUIs' own wheel acceleration when translating touchpad movement.
 const TOUCHPAD_LINE_HEIGHTS_PER_EVENT: f64 = 4.0;
-const SGR_WHEEL_UP: &str = "\x1b[<64;1;1M";
-const SGR_WHEEL_DOWN: &str = "\x1b[<65;1;1M";
 
 // Stops before trailing punctuation so "see https://x.y." opens https://x.y.
 const URL_PATTERN: &str = r#"\b(?:https?|file)://[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]"#;
@@ -1035,9 +1033,7 @@ impl Workspace {
         terminal.set_scroll_on_keystroke(true);
         self.apply_current_terminal_appearance(&terminal);
         self.enable_terminal_links(&terminal);
-        if runs_claude(&record) {
-            route_wheel_to_fullscreen_app(&terminal);
-        }
+        configure_terminal_scroll(&terminal, &record);
         self.install_terminal_shortcuts(&terminal);
         // Capture, because VTE takes keys itself even without a child.
         let resume_keys = gtk::EventControllerKey::new();
@@ -1121,8 +1117,8 @@ impl Workspace {
             }
         });
 
-        let scroll = gtk::ScrolledWindow::builder().child(&terminal).build();
-        self.stack.add_named(&scroll, Some(&id));
+        let page = terminal_page(&terminal);
+        self.stack.add_named(&page, Some(&id));
 
         let name = if record.state == SessionState::Exited {
             format!("{} (exited)", record.name)
@@ -1263,7 +1259,7 @@ impl Workspace {
             SessionView {
                 record,
                 terminal,
-                page: scroll,
+                page,
                 row: row.clone(),
                 label,
                 worktree_label,
@@ -1354,17 +1350,59 @@ fn is_click(press: (f64, f64), release: (f64, f64)) -> bool {
     (press.0 - release.0).hypot(press.1 - release.1) <= CLICK_SLOP
 }
 
-fn runs_claude(record: &SessionRecord) -> bool {
-    record.kind == SessionKind::Claude
+fn terminal_page(terminal: &vte::Terminal) -> gtk::Widget {
+    // VTE and GtkScrolledWindow have incompatible scrolling. Let VTE own its
+    // buffer and share its adjustment with a sibling scrollbar instead.
+    let page = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let adjustment = terminal.vadjustment().expect("terminal adjustment");
+    let scrollbar = gtk::Scrollbar::new(gtk::Orientation::Vertical, Some(&adjustment));
+    scrollbar.set_visible(adjustment.upper() - adjustment.lower() > adjustment.page_size());
+    let weak_scrollbar = scrollbar.downgrade();
+    adjustment.connect_changed(move |adjustment| {
+        if let Some(scrollbar) = weak_scrollbar.upgrade() {
+            scrollbar.set_visible(adjustment.upper() - adjustment.lower() > adjustment.page_size());
+        }
+    });
+    page.append(terminal);
+    page.append(&scrollbar);
+    page.upcast()
+}
+
+fn configure_terminal_scroll(terminal: &vte::Terminal, record: &SessionRecord) {
+    // VTE's GTK 4 controller treats surface pixels as wheel clicks. Normalize
+    // its fallback path too, for shells and TUIs other than Claude and Codex.
+    let controllers = terminal.observe_controllers();
+    for index in 0..controllers.n_items() {
+        if let Some(scroll) = controllers
+            .item(index)
+            .and_downcast::<gtk::EventControllerScroll>()
+        {
+            scroll.set_flags(scroll.flags() | gtk::EventControllerScrollFlags::DISCRETE);
+        }
+    }
+    route_wheel_to_fullscreen_app(terminal, runs_sgr_tui(record));
+}
+
+fn runs_sgr_tui(record: &SessionRecord) -> bool {
+    matches!(record.kind, SessionKind::Claude | SessionKind::Codex)
         || record
             .program
             .file_name()
-            .is_some_and(|name| name == "claude")
+            .is_some_and(|name| name == "claude" || name == "codex")
 }
 
-/// Fullscreen Claude never enables mouse tracking, so VTE would turn the wheel into
-/// arrow keys, which recall prompt history. Claude reads SGR wheel events instead.
-fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
+/// Send normalized SGR wheel events to agent TUIs even after reattachment loses
+/// their mouse-reporting setup. Ordinary scrollback follows touchpad pixels.
+fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal, sgr_tui: bool) {
+    // Wayland scroll events have no position; retain terminal-relative motion
+    // coordinates so Codex can target the transcript beneath the pointer.
+    let position = Rc::new(Cell::new((0.0_f64, 0.0_f64)));
+    let motion = gtk::EventControllerMotion::new();
+    let enter_position = position.clone();
+    motion.connect_enter(move |_, x, y| enter_position.set((x, y)));
+    let motion_position = position.clone();
+    motion.connect_motion(move |_, x, y| motion_position.set((x, y)));
+    terminal.add_controller(motion);
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
     let pending = Rc::new(Cell::new(0.0_f64));
@@ -1379,18 +1417,48 @@ fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
         let zooming = controller
             .current_event_state()
             .contains(gtk::gdk::ModifierType::CONTROL_MASK);
-        if zooming || !on_alternate_screen(&terminal) {
+        if zooming {
+            pending.set(0.0);
+            return glib::Propagation::Proceed;
+        }
+        if has_scrollback(&terminal) {
+            pending.set(0.0);
+            if controller.unit() == gtk::gdk::ScrollUnit::Surface {
+                let adjustment = terminal.vadjustment().expect("terminal adjustment");
+                let next = adjustment.value() + dy / terminal.char_height().max(1) as f64;
+                adjustment.set_value(next.clamp(
+                    adjustment.lower(),
+                    (adjustment.upper() - adjustment.page_size()).max(adjustment.lower()),
+                ));
+                return glib::Propagation::Stop;
+            }
+            return glib::Propagation::Proceed;
+        }
+        if !sgr_tui {
             pending.set(0.0);
             return glib::Propagation::Proceed;
         }
         let events = wheel_events(&pending, dy, controller.unit(), terminal.char_height());
-        let sequence = if events < 0.0 {
-            SGR_WHEEL_UP
-        } else {
-            SGR_WHEEL_DOWN
-        };
         let count = events.abs() as usize;
         if count > 0 {
+            let (x, y) = position.get();
+            let column = ((x / terminal.char_width().max(1) as f64) as libc::c_long + 1)
+                .clamp(1, terminal.column_count().max(1));
+            let row = ((y / terminal.char_height().max(1) as f64) as libc::c_long + 1)
+                .clamp(1, terminal.row_count().max(1));
+            let modifiers = controller.current_event_state();
+            let button = if events < 0.0 { 64 } else { 65 }
+                + if modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK) {
+                    4
+                } else {
+                    0
+                }
+                + if modifiers.contains(gtk::gdk::ModifierType::ALT_MASK) {
+                    8
+                } else {
+                    0
+                };
+            let sequence = format!("\x1b[<{button};{column};{row}M");
             terminal.feed_child(sequence.repeat(count).as_bytes());
         }
         glib::Propagation::Stop
@@ -1405,7 +1473,7 @@ fn wheel_events(
     line_height: libc::c_long,
 ) -> f64 {
     // Wheel deltas count clicks; touchpad deltas count logical pixels.
-    // Claude applies its own scroll step to each event, so send each only once.
+    // Agent TUIs apply their own scroll step to each event, so send each only once.
     let delta = match unit {
         gtk::gdk::ScrollUnit::Surface => {
             dy / (line_height.max(1) as f64 * TOUCHPAD_LINE_HEIGHTS_PER_EVENT)
@@ -1464,10 +1532,11 @@ fn warn_unscoped_session(id: &str, reason: &dyn std::fmt::Display) {
     );
 }
 
-/// The alternate screen keeps no scrollback, so its scroll range is one screen tall.
-fn on_alternate_screen(terminal: &vte::Terminal) -> bool {
+/// A fullscreen redraw has no scrollback, including after reattachment loses
+/// the original alternate-screen setup.
+fn has_scrollback(terminal: &vte::Terminal) -> bool {
     terminal.vadjustment().is_some_and(|adjustment| {
-        (adjustment.upper() - adjustment.lower()) as libc::c_long <= terminal.row_count()
+        (adjustment.upper() - adjustment.lower()) as libc::c_long > terminal.row_count()
     })
 }
 
@@ -1523,6 +1592,170 @@ fn focus_terminal_on_row_activation(row: &gtk::ListBoxRow, terminal: &vte::Termi
 #[cfg(test)]
 mod tests {
     #[test]
+    #[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
+    fn real_touchpad_input_scrolls_history_and_reattached_agent_tuis() {
+        use glib::variant::ToVariant;
+        use nix::fcntl::{FcntlArg, OFlag, fcntl};
+        use nix::sys::termios::{SetArg, cfmakeraw, tcgetattr, tcsetattr};
+        use std::io::{ErrorKind, Read};
+        use vte::prelude::*;
+
+        let display = std::env::var("AGTK_TEST_DISPLAY").expect("private display required");
+        let test_bus = std::env::var("AGTK_TEST_BUS").expect("private session bus required");
+        assert!(display.contains("agtk-scroll-"));
+        assert_eq!(std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap(), test_bus);
+        // SAFETY: run this GTK test alone with --test-threads=1.
+        unsafe {
+            std::env::set_var("WAYLAND_DISPLAY", display);
+            std::env::set_var("GDK_BACKEND", "wayland");
+        }
+        gtk::init().unwrap();
+        let bus = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>).unwrap();
+        let destination = "org.gnome.Mutter.RemoteDesktop";
+        let session = bus
+            .call_sync(
+                Some(destination),
+                "/org/gnome/Mutter/RemoteDesktop",
+                destination,
+                "CreateSession",
+                None,
+                None,
+                gio::DBusCallFlags::NONE,
+                5000,
+                None::<&gio::Cancellable>,
+            )
+            .unwrap();
+        let session_path = session.child_value(0).str().unwrap().to_owned();
+        let call = |method: &str, parameters: Option<glib::Variant>| {
+            bus.call_sync(
+                Some(destination),
+                &session_path,
+                "org.gnome.Mutter.RemoteDesktop.Session",
+                method,
+                parameters.as_ref(),
+                None,
+                gio::DBusCallFlags::NONE,
+                5000,
+                None::<&gio::Cancellable>,
+            )
+            .unwrap();
+        };
+        call("Start", None);
+        let pump = |milliseconds| {
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_millis(milliseconds);
+            while std::time::Instant::now() < deadline {
+                glib::MainContext::default().iteration(false);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        };
+        let scroll = |dy| {
+            call("NotifyPointerAxis", Some((0.0_f64, dy, 4_u32).to_variant()));
+            pump(100);
+            call(
+                "NotifyPointerAxis",
+                Some((0.0_f64, 0.0_f64, 5_u32).to_variant()),
+            );
+            pump(100);
+        };
+        let window = gtk::Window::new();
+        window.set_decorated(false);
+        window.set_default_size(1000, 700);
+        window.present();
+        pump(300);
+        call(
+            "NotifyPointerMotionRelative",
+            Some((-10000.0_f64, -10000.0_f64).to_variant()),
+        );
+        pump(100);
+        call(
+            "NotifyPointerMotionRelative",
+            Some((300.0_f64, 200.0_f64).to_variant()),
+        );
+        pump(100);
+
+        for kind in [SessionKind::Codex, SessionKind::Claude] {
+            let terminal = vte::Terminal::new();
+            terminal.set_hexpand(true);
+            terminal.set_vexpand(true);
+            terminal.set_scrollback_lines(50_000);
+            let record = SessionRecord {
+                kind,
+                ..SessionRecord::discovered("scroll-test", "/unused".into())
+            };
+            super::configure_terminal_scroll(&terminal, &record);
+            let descriptors = nix::pty::openpty(None, None).unwrap();
+            let mut termios = tcgetattr(&descriptors.slave).unwrap();
+            cfmakeraw(&mut termios);
+            tcsetattr(&descriptors.slave, SetArg::TCSANOW, &termios).unwrap();
+            fcntl(&descriptors.slave, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).unwrap();
+            let mut slave = std::fs::File::from(descriptors.slave);
+            let pty =
+                vte::Pty::foreign_sync(descriptors.master, None::<&gio::Cancellable>).unwrap();
+            terminal.set_pty(Some(&pty));
+            let read_input = |slave: &mut std::fs::File| {
+                let mut input = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                loop {
+                    match slave.read(&mut buffer) {
+                        Ok(0) => panic!("PTY closed before the test finished"),
+                        Ok(count) => input.extend_from_slice(&buffer[..count]),
+                        Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                        result => panic!("unexpected PTY result: {result:?}"),
+                    }
+                }
+                String::from_utf8(input).unwrap()
+            };
+            window.set_child(Some(&super::terminal_page(&terminal)));
+            terminal.feed("line\r\n".repeat(150).as_bytes());
+            pump(200);
+            let adjustment = terminal.vadjustment().unwrap();
+            let before = adjustment.value();
+            let height = terminal.char_height() as f64;
+            scroll(-height);
+            assert!(read_input(&mut slave).is_empty());
+            assert!(
+                (before - adjustment.value() - 1.0).abs() < 0.01,
+                "{kind:?}: one line of pixels must scroll one line, got {}",
+                before - adjustment.value()
+            );
+
+            // A reattached TUI redraws without re-sending mouse or alternate-screen setup.
+            terminal.reset(true, true);
+            terminal.feed(b"\x1b[2J\x1b[Hreattached agent");
+            pump(100);
+            assert!(!super::has_scrollback(&terminal));
+            read_input(&mut slave);
+            scroll(-height * 4.0);
+            let input = read_input(&mut slave);
+            assert_eq!(
+                input.matches("\x1b[<64;").count(),
+                1,
+                "{kind:?}: one normalized wheel event must reach a reattached TUI: {input:?}"
+            );
+            assert!(
+                !input.contains("\x1b[<64;1;1M"),
+                "wheel events must retain pointer coordinates"
+            );
+
+            // A fresh TUI enables these modes, but must receive the same normalized input.
+            terminal.feed(b"\x1b[?1049h\x1b[?1000h\x1b[?1003h\x1b[?1006h\x1b[?1007l");
+            pump(100);
+            read_input(&mut slave);
+            scroll(-height * 4.0);
+            let input = read_input(&mut slave);
+            assert_eq!(
+                input.matches("\x1b[<64;").count(),
+                1,
+                "{kind:?}: fresh TUI must not amplify touchpad pixels: {input:?}"
+            );
+            window.set_child(None::<&gtk::Widget>);
+        }
+        call("Stop", None);
+        window.close();
+    }
+
+    #[test]
     #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
     fn fullscreen_wheel_input_is_forwarded_once() {
         use std::cell::RefCell;
@@ -1551,8 +1784,8 @@ mod tests {
             }
         };
         terminal.feed("line\r\n".repeat(100).as_bytes());
-        pump_until(&|| !super::on_alternate_screen(&terminal));
-        super::route_wheel_to_fullscreen_app(&terminal);
+        pump_until(&|| super::has_scrollback(&terminal));
+        super::route_wheel_to_fullscreen_app(&terminal, true);
         let controllers = terminal.observe_controllers();
         let controller = (0..controllers.n_items())
             .filter_map(|index| controllers.item(index))
@@ -1567,13 +1800,13 @@ mod tests {
         assert!(!emit(1.0), "normal scrollback belongs to VTE");
         assert!(input.borrow().is_empty());
         terminal.feed(b"\x1b[?1049h");
-        pump_until(&|| super::on_alternate_screen(&terminal));
+        pump_until(&|| !super::has_scrollback(&terminal));
 
         assert!(emit(1.0));
-        assert_eq!(&*input.borrow(), super::SGR_WHEEL_DOWN);
+        assert_eq!(&*input.borrow(), "\x1b[<65;1;1M");
         input.borrow_mut().clear();
         assert!(emit(-2.0));
-        assert_eq!(&*input.borrow(), &super::SGR_WHEEL_UP.repeat(2));
+        assert_eq!(&*input.borrow(), &"\x1b[<64;1;1M".repeat(2));
         input.borrow_mut().clear();
 
         assert!(emit(0.5));
@@ -1588,7 +1821,7 @@ mod tests {
         assert!(emit(0.5));
         assert!(input.borrow().is_empty(), "a new gesture starts from zero");
         assert!(emit(0.5));
-        assert_eq!(&*input.borrow(), super::SGR_WHEEL_DOWN);
+        assert_eq!(&*input.borrow(), "\x1b[<65;1;1M");
         window.close();
     }
 

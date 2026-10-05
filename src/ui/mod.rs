@@ -215,7 +215,7 @@ struct SelectedPrContext {
 struct SessionView {
     record: SessionRecord,
     terminal: vte::Terminal,
-    page: gtk::ScrolledWindow,
+    page: gtk::Widget,
     row: gtk::ListBoxRow,
     label: gtk::Label,
     /// The worktree caption under the title; hidden when the session has no directory.
