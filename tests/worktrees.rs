@@ -185,7 +185,7 @@ fn branch_for_path_in_repo_resolves_a_file_in_another_worktree() {
 }
 
 #[test]
-fn create_records_purpose_and_groups_worktrees_by_repository_under_home() {
+fn create_records_purpose_and_base_and_groups_worktrees_by_repository_under_home() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
 
@@ -209,6 +209,14 @@ fn create_records_purpose_and_groups_worktrees_by_repository_under_home() {
         )
         .trim(),
         "test native worktree creation"
+    );
+    assert_eq!(
+        git(
+            fixture.root(),
+            &["config", "--get", "branch.native-feature.agtk-base-branch"]
+        )
+        .trim(),
+        "main"
     );
     assert_eq!(created.branch.as_deref(), Some("native-feature"));
 }

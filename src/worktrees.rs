@@ -11,6 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::command_runner::BoundedByteOutput;
+use crate::git;
+
 pub type WorktreeResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -365,9 +368,20 @@ impl WorktreeManager {
         } else {
             arguments.extend([OsString::from("-b"), branch.into()]);
             arguments.push(path.as_os_str().to_owned());
-            arguments.push(base.into());
+            arguments.push(base.clone().into());
         }
-        run_git(&repo_root, arguments)?;
+        run_slow_git(&repo_root, arguments)?;
+        if !branch_exists {
+            // The Changes panel and Emacs branch review compare against it.
+            git_text(
+                &repo_root,
+                [
+                    "config",
+                    &format!("branch.{branch}.agtk-base-branch"),
+                    &base,
+                ],
+            )?;
+        }
         git_text(
             &repo_root,
             ["config", &format!("branch.{branch}.description"), purpose],
@@ -406,7 +420,7 @@ impl WorktreeManager {
         let no_hooks = || os_args(&["-c", "core.hooksPath=/dev/null"]);
         let mut fetch = no_hooks();
         fetch.extend(os_args(&["fetch", "origin", source_branch]));
-        run_git(&repo_root, fetch)?;
+        run_slow_git(&repo_root, fetch)?;
         let tip = format!("origin/{source_branch}");
         if path.exists() {
             if !self.linked_paths(&repo_root)?.contains(&path) {
@@ -418,7 +432,7 @@ impl WorktreeManager {
             if !edited {
                 let mut checkout = no_hooks();
                 checkout.extend(os_args(&["checkout", "--quiet", "--detach", &tip]));
-                run_git(&path, checkout)?;
+                run_slow_git(&path, checkout)?;
             }
             return Ok(path);
         }
@@ -426,7 +440,7 @@ impl WorktreeManager {
         arguments.extend(os_args(&["worktree", "add", "--detach"]));
         arguments.push(path.as_os_str().to_owned());
         arguments.push(tip.into());
-        run_git(&repo_root, arguments)?;
+        run_slow_git(&repo_root, arguments)?;
         Ok(path)
     }
 
@@ -971,26 +985,12 @@ fn common_repo_root(worktree: &Path) -> WorktreeResult<PathBuf> {
 }
 
 fn default_branch(repo_root: &Path) -> WorktreeResult<String> {
-    if let Ok(reference) = git_text(repo_root, ["symbolic-ref", "refs/remotes/origin/HEAD"])
-        && let Some(branch) = reference.trim().strip_prefix("refs/remotes/origin/")
-        && git_success(
-            repo_root,
-            ["rev-parse", "--verify", &format!("{branch}^{{commit}}")],
-        )
-    {
-        return Ok(branch.to_owned());
+    match git::default_branch(repo_root) {
+        Some(branch) => Ok(branch),
+        None => Ok(git_text(repo_root, ["symbolic-ref", "--short", "HEAD"])?
+            .trim()
+            .to_owned()),
     }
-    for candidate in ["main", "master"] {
-        if git_success(
-            repo_root,
-            ["rev-parse", "--verify", &format!("{candidate}^{{commit}}")],
-        ) {
-            return Ok(candidate.to_owned());
-        }
-    }
-    Ok(git_text(repo_root, ["symbolic-ref", "--short", "HEAD"])?
-        .trim()
-        .to_owned())
 }
 
 fn merged_into_default(repo_root: &Path, head: &str, default_branch: &str) -> bool {
@@ -1266,20 +1266,20 @@ fn git_text<'a>(cwd: &Path, args: impl IntoIterator<Item = &'a str>) -> Worktree
 }
 
 fn git_success<'a>(cwd: &Path, args: impl IntoIterator<Item = &'a str>) -> bool {
-    let mut command = Command::new("git");
-    command
-        .args(args)
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    command.status().is_ok_and(|status| status.success())
+    git::succeeds(cwd, args)
 }
 
-fn run_git(cwd: &Path, args: Vec<OsString>) -> WorktreeResult<Output> {
-    let mut command = Command::new("git");
-    command.args(args).current_dir(cwd).stdin(Stdio::null());
-    checked_output(command)
+fn run_git(cwd: &Path, args: Vec<OsString>) -> WorktreeResult<BoundedByteOutput> {
+    Ok(git::run_checked(cwd, args)?)
+}
+
+/// For git calls that wait on the network or run checkout hooks.
+fn run_slow_git(cwd: &Path, args: Vec<OsString>) -> WorktreeResult<BoundedByteOutput> {
+    Ok(git::checked(git::run_with_timeout(
+        cwd,
+        args,
+        git::LONG_TIMEOUT,
+    )?)?)
 }
 
 fn checked_output(mut command: Command) -> WorktreeResult<Output> {
