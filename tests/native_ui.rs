@@ -1178,26 +1178,44 @@ fn session_pr_attention_follows_comments_acknowledgement_and_restart() {
         );
     }
     let pr_file = app.directory.path().join("azure-prs.json");
+    let mut prs = json!([
+        {
+            "pullRequestId":42, "title":"Review feature",
+            "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main",
+            "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
+            "createdBy":{"displayName":"Colleague"}, "reviewers":[]
+        },
+        {
+            "pullRequestId":43, "title":"Review later",
+            "sourceRefName":"refs/heads/later", "targetRefName":"refs/heads/main",
+            "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
+            "createdBy":{"displayName":"Colleague"}, "reviewers":[]
+        }
+    ]);
+    std::fs::write(&pr_file, serde_json::to_vec(&json!([prs[0]])).unwrap()).unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    let threads_file = app.directory.path().join("azure-threads.json");
+    // PR #103630 had only system events, not review comments.
     std::fs::write(
-        &pr_file,
-        serde_json::to_vec(&json!([
-            {
-                "pullRequestId":42, "title":"Review feature",
-                "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main",
-                "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
-                "createdBy":{"displayName":"Colleague"}, "reviewers":[]
-            },
-            {
-                "pullRequestId":43, "title":"Review later",
-                "sourceRefName":"refs/heads/later", "targetRefName":"refs/heads/main",
-                "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
-                "createdBy":{"displayName":"Colleague"}, "reviewers":[]
-            }
-        ]))
+        &threads_file,
+        serde_json::to_vec(&json!({"value":[{
+            "status":null, "comments":[{
+                "commentType":"system", "content":"Branch updated",
+                "publishedDate":"2026-10-01T09:00:00Z"
+            }]
+        }]}))
         .unwrap(),
     )
     .unwrap();
-    app.request("pr.list", json!({"projectRoot":project}));
+    std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    let new = app.request("pr.list", json!({"projectRoot":project}));
+    assert!(
+        new["pullRequests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| { item["pullRequest"]["id"] == 43 && item["attention"] == "new" })
+    );
     let mut ids = Vec::new();
     for name in ["feature session", "review: PR #43"] {
         let session = app.request(
@@ -1238,7 +1256,21 @@ fn session_pr_attention_follows_comments_acknowledgement_and_restart() {
     assert_eq!(attention(&app, &ids[0])["isVisible"], false);
     assert_eq!(attention(&app, &ids[1])["isVisible"], false);
 
-    let threads_file = app.directory.path().join("azure-threads.json");
+    prs[1]["isDraft"] = json!(true);
+    std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    prs[1]["isDraft"] = json!(false);
+    std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    let published = app.request("pr.list", json!({"projectRoot":project}));
+    assert!(
+        published["pullRequests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| { item["pullRequest"]["id"] == 43 && item["attention"] == "published" })
+    );
+    assert_eq!(attention(&app, &ids[1])["isVisible"], false);
+
     for date in ["2026-10-01T10:00:00Z", "2026-10-01T11:00:00Z"] {
         std::fs::write(
             &threads_file,

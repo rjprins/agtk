@@ -119,7 +119,7 @@ impl Workspace {
                             children: vec![UiNode {
                                 id: format!("session-pr-attention-{id}"),
                                 role: "status".to_owned(),
-                                label: Some("New PR activity".to_owned()),
+                                label: Some("New PR comments".to_owned()),
                                 is_visible: session.pr_button.is_visible()
                                     && session.pr_attention_dot.is_visible(),
                                 is_enabled: true,

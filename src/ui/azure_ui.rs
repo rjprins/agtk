@@ -557,19 +557,20 @@ impl Workspace {
         }
         match pull_request {
             Some(pull_request) => {
-                let attention = record
+                let has_new_comments = record
                     .project_root
                     .as_deref()
-                    .and_then(|root| self.pr_attention(root, pull_request.id));
+                    .and_then(|root| self.pr_attention(root, pull_request.id))
+                    == Some(PrAttention::Review);
                 label.set_text(&format!("#{}", pull_request.id));
                 let mut description =
                     format!("Open PR #{}: {}", pull_request.id, pull_request.title);
-                if attention.is_some() {
-                    description.push_str("\nNew activity; open to mark viewed");
+                if has_new_comments {
+                    description.push_str("\nNew review comments; open to mark viewed");
                 }
                 button.set_tooltip_text(Some(&description));
                 button.update_property(&[gtk::accessible::Property::Label(&description)]);
-                dot.set_visible(attention.is_some());
+                dot.set_visible(has_new_comments);
                 button.set_visible(true);
             }
             None => {
