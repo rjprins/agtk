@@ -29,8 +29,9 @@ pub enum WorkspaceTabId {
 #[derive(Debug, Default)]
 struct ContextTabs {
     sessions: Vec<String>,
-    diffs: Vec<DiffTabKey>,
-    files: Vec<FileTabKey>,
+    /// Each context has one reusable diff buffer and one file buffer.
+    diff: Option<DiffTabKey>,
+    file: Option<FileTabKey>,
     active: Option<WorkspaceTabId>,
     recent: Vec<WorkspaceTabId>,
 }
@@ -76,52 +77,38 @@ impl WorkspaceTabs {
         Some(tab)
     }
 
+    /// Shows `key` in the context's reusable diff buffer.
     pub fn open_diff(&mut self, key: DiffTabKey, context_owner: &str) -> Option<WorkspaceTabId> {
-        let context = self.session_context.get(context_owner)?.clone();
-        if context != key.worktree_root {
-            return None;
-        }
-        let tabs = self.contexts.entry(context.clone()).or_default();
-        tabs.diffs.clear();
-        tabs.diffs.push(key.clone());
-        tabs.recent
-            .retain(|tab| !matches!(tab, WorkspaceTabId::Diff(_)));
-        self.selected_session = Some(context_owner.to_owned());
-        self.record_visit(context_owner);
-        self.active_context = Some(context.clone());
-        let tab = WorkspaceTabId::Diff(key);
-        self.activate(&context, tab.clone());
-        Some(tab)
+        let worktree_root = key.worktree_root.clone();
+        self.open_buffer(WorkspaceTabId::Diff(key), &worktree_root, context_owner)
     }
 
-    /// Shows `key` in the context's single reusable file buffer, like `open_diff`.
+    /// Shows `key` in the context's reusable file buffer.
     pub fn open_file(&mut self, key: FileTabKey, context_owner: &str) -> Option<WorkspaceTabId> {
+        let worktree_root = key.worktree_root.clone();
+        self.open_buffer(WorkspaceTabId::File(key), &worktree_root, context_owner)
+    }
+
+    fn open_buffer(
+        &mut self,
+        tab: WorkspaceTabId,
+        worktree_root: &str,
+        context_owner: &str,
+    ) -> Option<WorkspaceTabId> {
         let context = self.session_context.get(context_owner)?.clone();
-        if context != key.worktree_root {
+        if context != worktree_root {
             return None;
         }
         let tabs = self.contexts.entry(context.clone()).or_default();
-        tabs.files.clear();
-        tabs.files.push(key.clone());
+        match &tab {
+            WorkspaceTabId::Diff(key) => tabs.diff = Some(key.clone()),
+            WorkspaceTabId::File(key) => tabs.file = Some(key.clone()),
+            WorkspaceTabId::Session(_) => return None,
+        }
         tabs.recent
-            .retain(|tab| !matches!(tab, WorkspaceTabId::File(_)));
+            .retain(|open| std::mem::discriminant(open) != std::mem::discriminant(&tab));
         self.selected_session = Some(context_owner.to_owned());
         self.record_visit(context_owner);
-        self.active_context = Some(context.clone());
-        let tab = WorkspaceTabId::File(key);
-        self.activate(&context, tab.clone());
-        Some(tab)
-    }
-
-    pub fn select_diff(&mut self, key: &DiffTabKey) -> Option<WorkspaceTabId> {
-        let context = self
-            .session_context
-            .get(&self.selected_session.clone()?)?
-            .clone();
-        if context != key.worktree_root || !self.contexts.get(&context)?.diffs.contains(key) {
-            return None;
-        }
-        let tab = WorkspaceTabId::Diff(key.clone());
         self.active_context = Some(context.clone());
         self.activate(&context, tab.clone());
         Some(tab)
@@ -151,13 +138,17 @@ impl WorkspaceTabs {
 
     pub fn close_diff(&mut self, key: &DiffTabKey) -> Option<WorkspaceTabId> {
         let tabs = self.contexts.get_mut(&key.worktree_root)?;
-        tabs.diffs.retain(|open| open != key);
+        if tabs.diff.as_ref() == Some(key) {
+            tabs.diff = None;
+        }
         self.close_buffer(&key.worktree_root, WorkspaceTabId::Diff(key.clone()))
     }
 
     pub fn close_file(&mut self, key: &FileTabKey) -> Option<WorkspaceTabId> {
         let tabs = self.contexts.get_mut(&key.worktree_root)?;
-        tabs.files.retain(|open| open != key);
+        if tabs.file.as_ref() == Some(key) {
+            tabs.file = None;
+        }
         self.close_buffer(&key.worktree_root, WorkspaceTabId::File(key.clone()))
     }
 
@@ -180,8 +171,8 @@ impl WorkspaceTabs {
                         .or_else(|| tabs.sessions.first())
                         .map(|id| WorkspaceTabId::Session(id.clone()))
                 })
-                .or_else(|| tabs.diffs.last().cloned().map(WorkspaceTabId::Diff))
-                .or_else(|| tabs.files.last().cloned().map(WorkspaceTabId::File));
+                .or_else(|| tabs.diff.clone().map(WorkspaceTabId::Diff))
+                .or_else(|| tabs.file.clone().map(WorkspaceTabId::File));
         }
         self.visible_tab = tabs.active.clone();
         tabs.active.clone()
@@ -202,8 +193,8 @@ impl WorkspaceTabs {
                 .find(|tab| tab_exists(tabs, tab))
                 .cloned()
                 .or_else(|| tabs.sessions.first().cloned().map(WorkspaceTabId::Session))
-                .or_else(|| tabs.diffs.last().cloned().map(WorkspaceTabId::Diff))
-                .or_else(|| tabs.files.last().cloned().map(WorkspaceTabId::File));
+                .or_else(|| tabs.diff.clone().map(WorkspaceTabId::Diff))
+                .or_else(|| tabs.file.clone().map(WorkspaceTabId::File));
         }
         if self.selected_session.as_deref() == Some(session_id) {
             self.selected_session = tabs.sessions.first().cloned();
@@ -230,8 +221,8 @@ impl WorkspaceTabs {
             .iter()
             .cloned()
             .map(WorkspaceTabId::Session)
-            .chain(tabs.diffs.iter().cloned().map(WorkspaceTabId::Diff))
-            .chain(tabs.files.iter().cloned().map(WorkspaceTabId::File))
+            .chain(tabs.diff.clone().map(WorkspaceTabId::Diff))
+            .chain(tabs.file.clone().map(WorkspaceTabId::File))
             .collect()
     }
 
@@ -290,8 +281,8 @@ impl WorkspaceTabs {
 fn tab_exists(tabs: &ContextTabs, tab: &WorkspaceTabId) -> bool {
     match tab {
         WorkspaceTabId::Session(id) => tabs.sessions.contains(id),
-        WorkspaceTabId::Diff(key) => tabs.diffs.contains(key),
-        WorkspaceTabId::File(key) => tabs.files.contains(key),
+        WorkspaceTabId::Diff(key) => tabs.diff.as_ref() == Some(key),
+        WorkspaceTabId::File(key) => tabs.file.as_ref() == Some(key),
     }
 }
 
