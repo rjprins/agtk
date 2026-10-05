@@ -39,6 +39,7 @@ pub enum ControlCommand {
     AppearanceSet(AppearanceSetParams),
     ShortcutSet(ShortcutSetParams),
     ProjectSet(ProjectSetParams),
+    ProjectRemove(ProjectRemoveParams),
     WorktreeList(WorktreeListParams),
     WorktreeCreate(WorktreeCreateParams),
     WorktreeReap(WorktreeReapParams),
@@ -171,6 +172,12 @@ pub struct ProjectSetParams {
     pub root: PathBuf,
     pub is_pinned: Option<bool>,
     pub is_collapsed: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectRemoveParams {
+    pub root: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -490,6 +497,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             validate_project(&params)?;
             ControlCommand::ProjectSet(params)
         }
+        "project.remove" => {
+            let params: ProjectRemoveParams = decode_params(wire.params)?;
+            validate_absolute_path(&params.root, "project root")?;
+            ControlCommand::ProjectRemove(params)
+        }
         "worktree.list" => {
             let params: WorktreeListParams = decode_params(wire.params)?;
             validate_absolute_path(&params.project_root, "project root")?;
@@ -712,6 +724,7 @@ impl ControlCommand {
             Self::AppearanceSet(_) => "appearance.set",
             Self::ShortcutSet(_) => "shortcut.set",
             Self::ProjectSet(_) => "project.set",
+            Self::ProjectRemove(_) => "project.remove",
             Self::WorktreeList(_) => "worktree.list",
             Self::WorktreeCreate(_) => "worktree.create",
             Self::WorktreeReap(_) => "worktree.reap",
@@ -752,6 +765,7 @@ impl ControlCommand {
             Self::AppearanceSet(params) => Ok(("appearance.set", serde_json::to_value(params)?)),
             Self::ShortcutSet(params) => Ok(("shortcut.set", serde_json::to_value(params)?)),
             Self::ProjectSet(params) => Ok(("project.set", serde_json::to_value(params)?)),
+            Self::ProjectRemove(params) => Ok(("project.remove", serde_json::to_value(params)?)),
             Self::WorktreeList(params) => Ok(("worktree.list", serde_json::to_value(params)?)),
             Self::WorktreeCreate(params) => Ok(("worktree.create", serde_json::to_value(params)?)),
             Self::WorktreeReap(params) => Ok(("worktree.reap", serde_json::to_value(params)?)),

@@ -57,6 +57,11 @@ impl Workspace {
             );
             return;
         }
+        if let ControlCommand::ProjectRemove(params) = &pending.request.command {
+            let root = params.root.to_string_lossy().to_string();
+            self.remove_project(&root, Some(pending));
+            return;
+        }
         if matches!(
             &pending.request.command,
             ControlCommand::WorktreeList(_)
@@ -369,6 +374,7 @@ impl Workspace {
             | ControlCommand::AppearanceSet(_)
             | ControlCommand::ShortcutSet(_)
             | ControlCommand::ProjectSet(_)
+            | ControlCommand::ProjectRemove(_)
             | ControlCommand::WorktreeList(_)
             | ControlCommand::WorktreeCreate(_)
             | ControlCommand::WorktreeReap(_)

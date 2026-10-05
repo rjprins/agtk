@@ -56,6 +56,8 @@ pub struct ProjectSummary {
     pub name: String,
     pub is_pinned: bool,
     pub is_collapsed: bool,
+    /// Pinned or with sessions. Other projects wait under Inactive Projects.
+    pub is_active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

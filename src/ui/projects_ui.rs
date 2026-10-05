@@ -1,8 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use super::*;
 use crate::projects::ProjectSettings;
+
+pub(super) const INACTIVE_PROJECTS_PREFERENCE: &str = "inactiveProjectsExpanded";
 
 impl Workspace {
     pub(super) fn load_projects(&self, preferences: ProjectPreferences) {
@@ -17,18 +19,89 @@ impl Workspace {
         is_collapsed: Option<bool>,
         pending: Option<PendingRequest>,
     ) {
-        let Some(store) = self.store.borrow().clone() else {
-            self.report_failure(
-                pending,
-                ErrorCode::InternalError,
-                "Workspace is loading",
-                "project settings are not available yet".to_owned(),
-            );
+        // A change before the workspace loads would be replaced by the saved settings.
+        if self.store.borrow().is_none() {
+            self.report_projects_loading(pending);
+            return;
+        }
+        self.projects
+            .borrow_mut()
+            .set(&root, is_pinned, is_collapsed);
+        self.rebuild_sidebar();
+        self.save_projects(pending);
+    }
+
+    /// Lists the project a session runs in, so it stays listed once its sessions close.
+    pub(super) fn remember_project(&self, root: Option<&Path>) {
+        let Some(root) = root else {
             return;
         };
-        let mut preferences = self.projects.borrow().clone();
-        preferences.set(&root, is_pinned, is_collapsed);
-        let value = match serde_json::to_value(&preferences) {
+        if self
+            .projects
+            .borrow_mut()
+            .remember(root.to_string_lossy().as_ref())
+        {
+            self.save_projects(None);
+        }
+    }
+
+    /// Forgets a project without sessions, so Inactive Projects no longer lists it.
+    pub(super) fn remove_project(&self, root: &str, pending: Option<PendingRequest>) {
+        if self.store.borrow().is_none() {
+            self.report_projects_loading(pending);
+            return;
+        }
+        let has_sessions = self.sessions.borrow().values().any(|session| {
+            session
+                .record
+                .project_root
+                .as_ref()
+                .is_some_and(|project| project.to_string_lossy() == root)
+        });
+        if has_sessions {
+            self.report_failure(
+                pending,
+                ErrorCode::OperationRefused,
+                "Could not remove project",
+                format!("{root} still has sessions; close them first"),
+            );
+            return;
+        }
+        if !self.projects.borrow_mut().remove(root) {
+            self.report_failure(
+                pending,
+                ErrorCode::InvalidParams,
+                "No project is listed with that root",
+                root.to_owned(),
+            );
+            return;
+        }
+        self.rebuild_sidebar();
+        self.save_projects(pending);
+    }
+
+    fn set_inactive_projects_expanded(&self, expanded: bool) {
+        self.inactive_projects_expanded.set(expanded);
+        self.save_preference(INACTIVE_PROJECTS_PREFERENCE, serde_json::json!(expanded));
+        self.rebuild_sidebar();
+    }
+
+    fn report_projects_loading(&self, pending: Option<PendingRequest>) {
+        self.report_failure(
+            pending,
+            ErrorCode::InternalError,
+            "Workspace is loading",
+            "project settings are not available yet".to_owned(),
+        );
+    }
+
+    /// Saves the projects as they are now, then answers `pending` with all of them.
+    fn save_projects(&self, pending: Option<PendingRequest>) {
+        let Some(store) = self.store.borrow().clone() else {
+            self.report_projects_loading(pending);
+            return;
+        };
+        let value = match serde_json::to_value(&*self.projects.borrow()) {
             Ok(value) => value,
             Err(error) => {
                 self.report_launch_failure(
@@ -43,7 +116,6 @@ impl Workspace {
             move || store.set_preference("projects", &value),
             move |workspace, result| match result {
                 Ok(()) => {
-                    workspace.load_projects(preferences);
                     if let Some(pending) = pending {
                         let id = pending.request.id.clone();
                         match serde_json::to_value(workspace.project_summaries()) {
@@ -71,38 +143,43 @@ impl Workspace {
         );
     }
 
+    /// Every listed project and every project with sessions, the active ones first.
     pub(super) fn project_summaries(&self) -> Vec<crate::control::ProjectSummary> {
         let preferences = self.projects.borrow();
-        let mut roots = preferences.projects.keys().cloned().collect::<Vec<_>>();
-        for session in self.sessions.borrow().values() {
-            if let Some(root) = session.record.project_root.as_ref() {
-                let root = root.to_string_lossy().to_string();
-                if !roots.contains(&root) {
-                    roots.push(root);
-                }
-            }
-        }
-        roots.sort_by(|left, right| {
-            let left_settings = preferences.get(left);
-            let right_settings = preferences.get(right);
-            right_settings
-                .is_pinned
-                .cmp(&left_settings.is_pinned)
-                .then_with(|| project_name(left).cmp(&project_name(right)))
-                .then_with(|| left.cmp(right))
-        });
-        roots
+        let with_sessions = self
+            .sessions
+            .borrow()
+            .values()
+            .filter_map(|session| session.record.project_root.as_ref())
+            .map(|root| root.to_string_lossy().to_string())
+            .collect::<BTreeSet<_>>();
+        let roots = preferences
+            .projects
+            .keys()
+            .chain(&with_sessions)
+            .collect::<BTreeSet<_>>();
+        let mut projects = roots
             .into_iter()
             .map(|root| {
-                let settings = preferences.get(&root);
+                let settings = preferences.get(root);
                 crate::control::ProjectSummary {
-                    name: project_name(&root),
-                    root,
+                    name: project_name(root),
+                    root: root.clone(),
                     is_pinned: settings.is_pinned,
                     is_collapsed: settings.is_collapsed,
+                    is_active: settings.is_pinned || with_sessions.contains(root),
                 }
             })
-            .collect()
+            .collect::<Vec<_>>();
+        projects.sort_by(|left, right| {
+            right
+                .is_active
+                .cmp(&left.is_active)
+                .then_with(|| right.is_pinned.cmp(&left.is_pinned))
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.root.cmp(&right.root))
+        });
+        projects
     }
 
     pub(super) fn worktree_group_summaries(&self) -> Vec<crate::control::WorktreeGroupSummary> {
@@ -163,6 +240,10 @@ impl Workspace {
                 settings,
                 pr_attention,
             }) => self.project_header(root, name, settings, pr_attention),
+            Some(SidebarKey::Inactive { count, is_expanded }) => {
+                self.inactive_projects_header(count, is_expanded)
+            }
+            Some(SidebarKey::InactiveProject(root)) => self.inactive_project_row(root),
             Some(SidebarKey::Other) | None => group_label("Other"),
         }
     }
@@ -170,6 +251,8 @@ impl Workspace {
     pub(super) fn rebuild_sidebar(&self) {
         let projects = self.project_summaries();
         self.menus.worktrees.set_enabled(!projects.is_empty());
+        let (projects, inactive): (Vec<_>, Vec<_>) =
+            projects.into_iter().partition(|project| project.is_active);
         let roots = projects
             .iter()
             .map(|project| project.root.clone())
@@ -213,6 +296,17 @@ impl Workspace {
                     session.row.set_visible(true);
                     keys.push(SidebarKey::session_key(&session.record.id));
                 }
+            }
+        }
+        if !inactive.is_empty() {
+            let is_expanded = self.inactive_projects_expanded.get();
+            keys.push(SidebarKey::inactive_key(inactive.len(), is_expanded));
+            if is_expanded {
+                keys.extend(
+                    inactive
+                        .iter()
+                        .map(|project| SidebarKey::inactive_project_key(&project.root)),
+                );
             }
         }
         self.splice_sidebar(&keys);
@@ -427,6 +521,99 @@ impl Workspace {
         row.set_child(Some(&content));
         row
     }
+
+    /// Heads the projects without sessions; the list under it starts collapsed.
+    fn inactive_projects_header(&self, count: usize, is_expanded: bool) -> gtk::ListBoxRow {
+        let row = gtk::ListBoxRow::new();
+        row.set_selectable(false);
+        row.set_activatable(false);
+        let contents = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        contents.add_css_class("dim-label");
+        let icon = gtk::Image::from_icon_name(if is_expanded {
+            "pan-down-symbolic"
+        } else {
+            "pan-end-symbolic"
+        });
+        icon.set_pixel_size(14);
+        let label = gtk::Label::new(Some("Inactive Projects"));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.add_css_class("heading");
+        let count_label = gtk::Label::new(Some(&count.to_string()));
+        count_label.add_css_class("numeric");
+        contents.append(&icon);
+        contents.append(&label);
+        contents.append(&count_label);
+        let toggle = gtk::Button::builder()
+            .child(&contents)
+            .hexpand(true)
+            .tooltip_text(if is_expanded {
+                "Hide projects without sessions"
+            } else {
+                "Show projects without sessions"
+            })
+            .build();
+        toggle.add_css_class("flat");
+        toggle.update_state(&[gtk::accessible::State::Expanded(Some(is_expanded))]);
+        let workspace = self.clone();
+        toggle.connect_clicked(move |_| workspace.set_inactive_projects_expanded(!is_expanded));
+        row.set_child(Some(&toggle));
+        row
+    }
+
+    /// Opening an inactive project launches in it; pinning keeps it among the active ones.
+    fn inactive_project_row(&self, root: &str) -> gtk::ListBoxRow {
+        let row = gtk::ListBoxRow::new();
+        row.set_selectable(false);
+        row.set_activatable(false);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        let open_contents = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        let icon = gtk::Image::from_icon_name("folder-symbolic");
+        icon.add_css_class("dim-label");
+        let label = gtk::Label::new(Some(&project_name(root)));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        // Button labels are bold, which would make the project read as a header.
+        label.add_css_class("body");
+        open_contents.append(&icon);
+        open_contents.append(&label);
+        let open = gtk::Button::builder()
+            .child(&open_contents)
+            .hexpand(true)
+            .tooltip_text(format!("Launch in {root}"))
+            .build();
+        open.add_css_class("flat");
+        let workspace = self.clone();
+        let open_root = root.to_owned();
+        open.connect_clicked(move |_| workspace.open_launch_for_project(&open_root));
+        let pin = gtk::Button::builder()
+            .icon_name("non-starred-symbolic")
+            .valign(gtk::Align::Center)
+            .tooltip_text("Pin project")
+            .build();
+        pin.add_css_class("flat");
+        let workspace = self.clone();
+        let pin_root = root.to_owned();
+        pin.connect_clicked(move |_| {
+            workspace.set_project_preferences(pin_root.clone(), Some(true), None, None);
+        });
+        let remove = gtk::Button::builder()
+            .icon_name("user-trash-symbolic")
+            .valign(gtk::Align::Center)
+            .tooltip_text("Remove from list")
+            .build();
+        remove.add_css_class("flat");
+        let workspace = self.clone();
+        let remove_root = root.to_owned();
+        remove.connect_clicked(move |_| workspace.remove_project(&remove_root, None));
+        content.append(&open);
+        content.append(&pin);
+        content.append(&remove);
+        row.set_child(Some(&content));
+        row
+    }
 }
 
 impl Workspace {
@@ -491,6 +678,12 @@ enum SidebarKey<'a> {
     },
     Session(&'a str),
     Other,
+    /// The header above the projects without sessions.
+    Inactive {
+        count: usize,
+        is_expanded: bool,
+    },
+    InactiveProject(&'a str),
 }
 
 const KEY_SEPARATOR: char = '\u{1f}';
@@ -517,6 +710,18 @@ impl<'a> SidebarKey<'a> {
         format!("session{KEY_SEPARATOR}{id}")
     }
 
+    /// The count and expansion are part of the key, so changing them rebuilds the header.
+    fn inactive_key(count: usize, is_expanded: bool) -> String {
+        format!(
+            "inactive{KEY_SEPARATOR}{}{KEY_SEPARATOR}{count}",
+            u8::from(is_expanded)
+        )
+    }
+
+    fn inactive_project_key(root: &str) -> String {
+        format!("inactive-project{KEY_SEPARATOR}{root}")
+    }
+
     fn parse(key: &'a str) -> Option<Self> {
         if key == Self::OTHER {
             return Some(Self::Other);
@@ -524,6 +729,14 @@ impl<'a> SidebarKey<'a> {
         let mut parts = key.splitn(6, KEY_SEPARATOR);
         match parts.next()? {
             "session" => Some(Self::Session(parts.next()?)),
+            "inactive" => {
+                let is_expanded = parts.next()? == "1";
+                Some(Self::Inactive {
+                    is_expanded,
+                    count: parts.next()?.parse().ok()?,
+                })
+            }
+            "inactive-project" => Some(Self::InactiveProject(parts.next()?)),
             "project" => {
                 let is_pinned = parts.next()? == "1";
                 let is_collapsed = parts.next()? == "1";
@@ -614,5 +827,22 @@ mod sidebar_tests {
         assert_eq!((root, name), ("/work/agtk", "agtk"));
         assert!(settings.is_pinned && !settings.is_collapsed);
         assert_eq!(pr_attention, Some(2));
+    }
+
+    #[test]
+    fn inactive_project_keys_round_trip() {
+        let header = SidebarKey::inactive_key(3, true);
+        let Some(SidebarKey::Inactive { count, is_expanded }) = SidebarKey::parse(&header) else {
+            panic!("inactive header key did not parse");
+        };
+        assert_eq!((count, is_expanded), (3, true));
+        assert_ne!(header, SidebarKey::inactive_key(3, false));
+        assert_ne!(header, SidebarKey::inactive_key(4, true));
+
+        let row = SidebarKey::inactive_project_key("/work/old project");
+        let Some(SidebarKey::InactiveProject(root)) = SidebarKey::parse(&row) else {
+            panic!("inactive project key did not parse");
+        };
+        assert_eq!(root, "/work/old project");
     }
 }

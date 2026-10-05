@@ -35,6 +35,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
             name: "agtk".to_owned(),
             is_pinned: true,
             is_collapsed: false,
+            is_active: true,
         }],
         worktree_groups: vec![agtk::control::WorktreeGroupSummary {
             project_root: "/work/agtk".to_owned(),
@@ -88,7 +89,8 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 "root": "/work/agtk",
                 "name": "agtk",
                 "isPinned": true,
-                "isCollapsed": false
+                "isCollapsed": false,
+                "isActive": true
             }],
             "worktreeGroups": [{
                 "projectRoot": "/work/agtk",

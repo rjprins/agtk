@@ -1,10 +1,11 @@
 use agtk::appearance::ThemeKey;
 use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
-    ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, PrListParams, ProjectSetParams,
-    ResponseBody, SessionIdParams, SessionKind, SessionSetStateParams, ShortcutSetParams,
-    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams, control_timeout, decode_request,
-    decode_response, encode_request, encode_response,
+    ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, PrListParams,
+    ProjectRemoveParams, ProjectSetParams, ResponseBody, SessionIdParams, SessionKind,
+    SessionSetStateParams, ShortcutSetParams, WorktreeCreateParams, WorktreeListParams,
+    WorktreeReapParams, control_timeout, decode_request, decode_response, encode_request,
+    encode_response,
 };
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -121,6 +122,11 @@ fn every_core_method_decodes_to_a_typed_command() {
             "project.set",
             r#"{"root":"/work/agtk","isPinned":true}"#,
             "ProjectSet",
+        ),
+        (
+            "project.remove",
+            r#"{"root":"/work/agtk"}"#,
+            "ProjectRemove",
         ),
         (
             "worktree.list",
@@ -387,6 +393,31 @@ fn project_updates_require_an_absolute_root_and_one_change() {
     for invalid in [
         br#"{"version":1,"id":"project","method":"project.set","params":{"root":"relative","isPinned":true}}"#.as_slice(),
         br#"{"version":1,"id":"project","method":"project.set","params":{"root":"/work/agtk"}}"#.as_slice(),
+    ] {
+        assert_eq!(
+            decode_request(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams
+        );
+    }
+}
+
+#[test]
+fn project_removal_requires_an_absolute_root() {
+    let request = decode_request(
+        br#"{"version":1,"id":"project","method":"project.remove","params":{"root":"/work/agtk"}}"#,
+    )
+    .expect("decode project removal");
+    assert_eq!(
+        request.command,
+        ControlCommand::ProjectRemove(ProjectRemoveParams {
+            root: "/work/agtk".into(),
+        })
+    );
+
+    for invalid in [
+        br#"{"version":1,"id":"project","method":"project.remove","params":{"root":"relative"}}"#
+            .as_slice(),
+        br#"{"version":1,"id":"project","method":"project.remove","params":{}}"#.as_slice(),
     ] {
         assert_eq!(
             decode_request(invalid).unwrap_err().code,

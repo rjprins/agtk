@@ -181,6 +181,8 @@ struct Workspace {
     style_manager: adw::StyleManager,
     shortcuts: Rc<RefCell<ShortcutPreferences>>,
     projects: Rc<RefCell<ProjectPreferences>>,
+    /// Whether the sidebar lists the projects under Inactive Projects.
+    inactive_projects_expanded: Rc<Cell<bool>>,
     quick_launch: Rc<RefCell<QuickLaunchPreferences>>,
     pr_preferences: Rc<RefCell<PrPreferences>>,
     pr_context_cache: Rc<RefCell<HashMap<String, PrContext>>>,
@@ -668,6 +670,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         style_manager: style_manager.clone(),
         shortcuts: Rc::new(RefCell::new(ShortcutPreferences::default())),
         projects: Rc::new(RefCell::new(ProjectPreferences::default())),
+        inactive_projects_expanded: Rc::new(Cell::new(false)),
         quick_launch: Rc::new(RefCell::new(QuickLaunchPreferences::default())),
         pr_preferences: Rc::new(RefCell::new(PrPreferences::default())),
         pr_context_cache: Rc::new(RefCell::new(HashMap::new())),

@@ -11,6 +11,8 @@ pub struct ProjectSettings {
     pub is_collapsed: bool,
 }
 
+/// Every project a session ran in, with its settings. A project stays listed
+/// after its sessions close, until it is removed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectPreferences {
@@ -31,8 +33,20 @@ impl ProjectPreferences {
         if let Some(is_collapsed) = is_collapsed {
             settings.is_collapsed = is_collapsed;
         }
-        if *settings == ProjectSettings::default() {
-            self.projects.remove(root);
+    }
+
+    /// Lists a project a session runs in. True when it was not listed yet.
+    pub fn remember(&mut self, root: &str) -> bool {
+        if self.projects.contains_key(root) {
+            return false;
         }
+        self.projects
+            .insert(root.to_owned(), ProjectSettings::default());
+        true
+    }
+
+    /// Forgets a project and its settings. False when it was not listed.
+    pub fn remove(&mut self, root: &str) -> bool {
+        self.projects.remove(root).is_some()
     }
 }

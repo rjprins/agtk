@@ -159,6 +159,10 @@ ctl session create --kind claude --cwd "$project" --project-root "$project" --wo
 ctl session create --kind codex --cwd "$feature" --project-root "$project" --worktree-path "$feature" --name "cursor pagination" >/dev/null
 ctl session create --kind shell --cwd "$feature" --project-root "$project" --worktree-path "$feature" --name "test shell" >/dev/null
 ctl session create --kind shell --cwd "$HOME" --name "home" >/dev/null
+# A project whose last session closed, so the sidebar lists it under Inactive Projects.
+mkdir -p "$work/billing-prototype"
+ctl session create --kind shell --cwd "$work/billing-prototype" --project-root "$work/billing-prototype" --name "billing" >/dev/null
+ctl session close "$(id_of billing)" >/dev/null
 sleep 1
 ctl session state "$(id_of 'cursor pagination')" waiting >/dev/null
 main_id=$(id_of demo-service)

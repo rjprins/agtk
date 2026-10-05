@@ -78,6 +78,8 @@ Without Claude Code or Codex, or when the source directory agtk was built from i
 ### Sessions
 
 - Sessions are grouped by project in the sidebar. Each project has buttons to launch, pin, resume, and manage worktrees and pull requests.
+- When the last session in a project closes, the project moves to Inactive Projects at the bottom of the sidebar. Click it to launch a session there. Use the star to pin it, or the trash button to remove it from the list. This does not delete any files.
+- A pinned project stays at the top of the sidebar, even without sessions. Pin or unpin a project from its menu.
 - Launch Claude, Codex, Gemini, a shell, or a custom command in an exact directory and worktree.
 - Sessions keep running when the window closes, crashes, or is rebuilt. Start agtk again and it attaches to them.
 - Each agent row shows a state: busy, waiting, ready, or idle. See [Agent states](#agent-states).

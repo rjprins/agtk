@@ -1506,6 +1506,68 @@ fn sessions_group_by_project_and_worktree_with_durable_project_state() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn a_project_without_sessions_stays_listed_as_inactive_until_removed() {
+    let mut app = App::new();
+    let project = app.directory.path().join("old-project");
+    std::fs::create_dir(&project).unwrap();
+    let root = project.to_string_lossy().to_string();
+    let listed = |app: &App| {
+        app.request("app.get_state", json!({}))["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|listed| listed["root"] == root.as_str())
+            .cloned()
+    };
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c", "exec sleep 30"],
+            "cwd":project,
+            "projectRoot":project
+        }),
+    );
+    assert_eq!(listed(&app).unwrap()["isActive"], true);
+    match app.request_body("project.remove", json!({"root":root})) {
+        ResponseBody::Failure(error) => assert_eq!(error.code, ErrorCode::OperationRefused),
+        body => panic!("removed a project that has sessions: {body:?}"),
+    }
+
+    app.request(
+        "session.close",
+        json!({"sessionId":session["id"].as_str().unwrap()}),
+    );
+    assert_eq!(listed(&app).unwrap()["isActive"], false);
+    app.stop();
+    app.start();
+    assert_eq!(listed(&app).unwrap()["isActive"], false);
+
+    app.request("project.set", json!({"root":root,"isPinned":true}));
+    assert_eq!(listed(&app).unwrap()["isActive"], true);
+    app.request("project.set", json!({"root":root,"isPinned":false}));
+    assert_eq!(listed(&app).unwrap()["isActive"], false);
+
+    let removed = app.request("project.remove", json!({"root":root}));
+    assert!(
+        removed["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|listed| listed["root"] != root.as_str())
+    );
+    match app.request_body("project.remove", json!({"root":root})) {
+        ResponseBody::Failure(error) => assert_eq!(error.code, ErrorCode::InvalidParams),
+        body => panic!("removed a project twice: {body:?}"),
+    }
+    app.stop();
+    app.start();
+    assert!(listed(&app).is_none());
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn a_session_can_move_to_another_worktree_and_keeps_it_across_restart() {
     let mut app = App::new();
     let repo = app.directory.path().join("repo");

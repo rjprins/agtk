@@ -185,6 +185,10 @@ impl Workspace {
                     .map(serde_json::from_value::<ProjectPreferences>)
                     .transpose()?
                     .unwrap_or_default();
+                let inactive_projects_expanded = store
+                    .preference(projects_ui::INACTIVE_PROJECTS_PREFERENCE)?
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
                 let quick_launch = store
                     .preference("quickLaunch")?
                     .map(serde_json::from_value::<QuickLaunchPreferences>)
@@ -282,6 +286,7 @@ impl Workspace {
                     loaded_changes_width,
                     shortcuts,
                     projects,
+                    inactive_projects_expanded,
                     quick_launch,
                     pr_preferences,
                     session_pr_cache,
@@ -303,6 +308,7 @@ impl Workspace {
                     changes_width,
                     shortcuts,
                     projects,
+                    inactive_projects_expanded,
                     quick_launch,
                     pr_preferences,
                     session_pr_cache,
@@ -323,6 +329,9 @@ impl Workspace {
                         .set_max_sidebar_width(f64::from(changes_width));
                     workspace.load_appearance(appearance);
                     workspace.load_shortcuts(shortcuts);
+                    workspace
+                        .inactive_projects_expanded
+                        .set(inactive_projects_expanded);
                     workspace.load_projects(projects);
                     workspace.load_quick_launch(quick_launch);
                     *workspace.pr_preferences.borrow_mut() = pr_preferences;
@@ -1020,6 +1029,7 @@ impl Workspace {
         if self.sessions.borrow().contains_key(&id) {
             return Ok(());
         }
+        let project_root = record.project_root.clone();
         let terminal = vte::Terminal::new();
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
@@ -1266,6 +1276,7 @@ impl Workspace {
         self.attach_workspace_session(&id);
         self.apply_session_state(&id);
         self.refresh_session_pr_button(&id);
+        self.remember_project(project_root.as_deref());
         self.rebuild_sidebar();
         if select {
             self.list.select_row(Some(&row));

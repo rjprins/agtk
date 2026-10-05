@@ -90,6 +90,7 @@ impl Workspace {
 
     fn apply_session_worktree(&self, record: SessionRecord) {
         let id = record.id.clone();
+        let project_root = record.project_root.clone();
         let name_changed = {
             let mut sessions = self.sessions.borrow_mut();
             let Some(session) = sessions.get_mut(&id) else {
@@ -116,6 +117,7 @@ impl Workspace {
         }
         // Tabs follow the worktree, so the session leaves its old context.
         self.attach_workspace_session(&id);
+        self.remember_project(project_root.as_deref());
         self.rebuild_sidebar();
         if self.selected_session_id().as_deref() == Some(id.as_str()) {
             self.workspace_tabs.borrow_mut().select_session(&id);

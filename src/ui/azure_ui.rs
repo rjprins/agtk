@@ -1056,6 +1056,7 @@ impl Workspace {
     }
 
     /// Finds the Azure DevOps projects in the sidebar and refreshes their PR attention.
+    /// Inactive projects show no PR button, so they are not polled.
     pub(super) fn poll_pull_requests(&self) {
         if self.store.borrow().is_none() || self.pr_polls.get() > 0 {
             return;
@@ -1064,6 +1065,7 @@ impl Workspace {
         let roots = self
             .project_summaries()
             .into_iter()
+            .filter(|project| project.is_active)
             .map(|project| project.root)
             .collect::<Vec<_>>();
         if roots.is_empty() {

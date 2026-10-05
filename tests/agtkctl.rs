@@ -9,9 +9,9 @@ use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, GetTextParams, PrAcknowledgeParams,
-    ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams, SessionKind,
-    SessionSetStateParams, SetSessionWorktreeParams, ShortcutSetParams, UiShowParams, UiSurface,
-    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
+    ProjectRemoveParams, ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams,
+    SessionKind, SessionSetStateParams, SetSessionWorktreeParams, ShortcutSetParams, UiShowParams,
+    UiSurface, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -412,6 +412,12 @@ fn project_set_command_has_a_typed_protocol_mapping() {
             root: "/work/agtk".into(),
             is_pinned: Some(true),
             is_collapsed: Some(false),
+        }),
+    );
+    assert_fixture_command(
+        &["project", "remove", "/work/agtk"],
+        ControlCommand::ProjectRemove(ProjectRemoveParams {
+            root: "/work/agtk".into(),
         }),
     );
 }

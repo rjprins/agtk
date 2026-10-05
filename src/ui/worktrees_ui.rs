@@ -110,8 +110,8 @@ impl Workspace {
         }
         self.project_summaries()
             .into_iter()
+            .find(|project| project.is_active)
             .map(|project| project.root)
-            .next()
     }
 
     pub(super) fn prepare_worktree_panel(&self) {
