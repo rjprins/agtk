@@ -279,6 +279,44 @@ fn review_checkout_is_a_detached_pr_sibling_that_follows_the_source_tip() {
 }
 
 #[test]
+fn review_checkout_runs_no_hooks_from_the_pull_request() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic());
+    let marker = fixture.root().parent().unwrap().join("hook-ran");
+    git(fixture.root(), &["checkout", "-q", "-b", "feature/hook"]);
+    fs::create_dir(fixture.root().join(".hooks")).unwrap();
+    let hook = fixture.root().join(".hooks/post-checkout");
+    fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    git(fixture.root(), &["add", ".hooks"]);
+    git(fixture.root(), &["commit", "-q", "-m", "add hook"]);
+    let clone = fixture.root().parent().unwrap().join("clone");
+    git(
+        fixture.root(),
+        &[
+            "clone",
+            "-q",
+            "--no-checkout",
+            fixture.root().to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    // Like husky: hooks live in the tree, and git finds them relative to the checkout.
+    git(&clone, &["config", "core.hooksPath", ".hooks"]);
+    let clone = clone.canonicalize().unwrap();
+
+    manager
+        .review_checkout(&clone, 7, "feature/hook")
+        .expect("create review checkout");
+    assert!(!marker.exists(), "post-checkout hook ran on worktree add");
+
+    manager
+        .review_checkout(&clone, 7, "feature/hook")
+        .expect("move review checkout");
+    assert!(!marker.exists(), "post-checkout hook ran on checkout");
+}
+
+#[test]
 fn inventory_distinguishes_live_upstream_and_gone_upstream() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic());

@@ -3,7 +3,7 @@ use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::{DirBuilderExt, symlink};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::thread;
@@ -358,7 +358,15 @@ impl WorktreeManager {
         }
         let parent = repo_root.parent().ok_or("repository root has no parent")?;
         let path = parent.join(format!("pr-{pull_request_id}"));
-        run_git(&repo_root, os_args(&["fetch", "origin", source_branch]))?;
+        if path == repo_root {
+            return Err("review target is the primary checkout".into());
+        }
+        // The PR author controls the checked-out tree, and a repo-relative
+        // core.hooksPath (husky) would run a post-checkout hook from it.
+        let no_hooks = || os_args(&["-c", "core.hooksPath=/dev/null"]);
+        let mut fetch = no_hooks();
+        fetch.extend(os_args(&["fetch", "origin", source_branch]));
+        run_git(&repo_root, fetch)?;
         let tip = format!("origin/{source_branch}");
         if path.exists() {
             if !self.linked_paths(&repo_root)?.contains(&path) {
@@ -368,11 +376,14 @@ impl WorktreeManager {
                 .trim()
                 .is_empty();
             if !edited {
-                run_git(&path, os_args(&["checkout", "--quiet", "--detach", &tip]))?;
+                let mut checkout = no_hooks();
+                checkout.extend(os_args(&["checkout", "--quiet", "--detach", &tip]));
+                run_git(&path, checkout)?;
             }
             return Ok(path);
         }
-        let mut arguments = os_args(&["worktree", "add", "--detach"]);
+        let mut arguments = no_hooks();
+        arguments.extend(os_args(&["worktree", "add", "--detach"]));
         arguments.push(path.as_os_str().to_owned());
         arguments.push(tip.into());
         run_git(&repo_root, arguments)?;
@@ -502,7 +513,8 @@ impl WorktreeManager {
         let nonce = now_millis();
         let stage =
             std::env::temp_dir().join(format!("agtk-salvage-{}-{nonce}", std::process::id()));
-        fs::create_dir(&stage)?;
+        // Copies keep their mode, so a 0644 .env must not sit in a readable /tmp dir.
+        fs::DirBuilder::new().mode(0o700).create(&stage)?;
         let result = (|| {
             for path in &paths {
                 stage_path(worktree, &stage, path)?;
@@ -1094,14 +1106,14 @@ fn salvageable_paths(worktree: &Path, raw_status: &str) -> WorktreeResult<Vec<Pa
         // A staged deletion has no content to salvage; status already records it.
         vec!["diff", "--name-only", "--cached", "--diff-filter=d", "-z"],
     ] {
-        if let Ok(output) = run_git(worktree, os_args(&args)) {
-            for path in output
-                .stdout
-                .split(|byte| *byte == 0)
-                .filter(|path| !path.is_empty())
-            {
-                paths.insert(PathBuf::from(OsStr::from_bytes(path)));
-            }
+        // Without this list the archive would miss files that removal then deletes.
+        let output = run_git(worktree, os_args(&args))?;
+        for path in output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+        {
+            paths.insert(PathBuf::from(OsStr::from_bytes(path)));
         }
     }
     for line in raw_status
