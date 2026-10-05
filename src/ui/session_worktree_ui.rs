@@ -11,12 +11,61 @@ impl Workspace {
         path: PathBuf,
         pending: Option<PendingRequest>,
     ) {
+        if !self.sessions.borrow().contains_key(id) {
+            self.report_failure(
+                pending,
+                ErrorCode::SessionNotFound,
+                "No session exists with that ID",
+                id.to_owned(),
+            );
+            return;
+        }
+        let known_roots = self
+            .project_summaries()
+            .into_iter()
+            .map(|project| PathBuf::from(project.root))
+            .collect::<Vec<_>>();
+        let manager = WorktreeManager::new(self.paths.attic_dir());
+        let id = id.to_owned();
+        self.run_slow(
+            move || {
+                if !path.is_dir() {
+                    return Err(format!("{} is not a directory", path.display()).into());
+                }
+                let location = manager.resolve_session_location(&path, &known_roots);
+                let Some(worktree) = location.worktree_path else {
+                    return Err(format!("{} is not inside a Git worktree", path.display()).into());
+                };
+                Ok((worktree, location.project_root))
+            },
+            move |workspace, result| match result {
+                Ok((worktree, project_root)) => {
+                    workspace.save_session_worktree(&id, worktree, project_root, pending)
+                }
+                Err(error) => workspace.report_failure(
+                    pending,
+                    ErrorCode::OperationRefused,
+                    "Could not change worktree",
+                    error.to_string(),
+                ),
+            },
+        );
+    }
+
+    fn save_session_worktree(
+        &self,
+        id: &str,
+        worktree: PathBuf,
+        project_root: PathBuf,
+        pending: Option<PendingRequest>,
+    ) {
+        // A rename or state hook may have arrived while git was resolving the path.
         let record = self.sessions.borrow().get(id).map(|s| s.record.clone());
         let Some(mut record) = record else {
             self.report_failure(
                 pending,
                 ErrorCode::SessionNotFound,
-                "No session exists with that ID",
+                "Session closed before its worktree could be changed",
                 id.to_owned(),
             );
             return;
@@ -29,21 +78,8 @@ impl Workspace {
             );
             return;
         };
-        let known_roots = self
-            .project_summaries()
-            .into_iter()
-            .map(|project| PathBuf::from(project.root))
-            .collect::<Vec<_>>();
-        let manager = WorktreeManager::new(self.paths.attic_dir());
         self.run_io(
             move || {
-                if !path.is_dir() {
-                    return Err(format!("{} is not a directory", path.display()).into());
-                }
-                let location = manager.resolve_session_location(&path, &known_roots);
-                let Some(worktree) = location.worktree_path else {
-                    return Err(format!("{} is not inside a Git worktree", path.display()).into());
-                };
                 // A name taken from the old worktree follows the session to the new one.
                 let old_worktree = record.worktree_path.as_deref().or(record.cwd.as_deref());
                 if !record.renamed && follows_worktree_name(&record.name, old_worktree) {
@@ -54,7 +90,7 @@ impl Workspace {
                     );
                 }
                 record.worktree_path = Some(worktree);
-                record.project_root = Some(location.project_root);
+                record.project_root = Some(project_root);
                 store.save_session(&record)?;
                 Ok(record)
             },
@@ -143,7 +179,7 @@ impl Workspace {
         let manager = WorktreeManager::new(self.paths.attic_dir());
         let repo = record.project_root.clone();
         let id = id.to_owned();
-        self.run_io(
+        self.run_slow(
             move || {
                 let repo = match repo {
                     Some(repo) => repo,

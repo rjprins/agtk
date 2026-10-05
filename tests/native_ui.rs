@@ -116,6 +116,13 @@ impl App {
             .env("AGTK_INSTANCE", self.paths.name().as_str())
             .env("AGTK_RUNTIME_ROOT", self.directory.path())
             .env("AGTK_STATE_ROOT", self.directory.path())
+            .env(
+                "PATH",
+                std::env::join_paths(std::iter::once(self.directory.path().join("bin")).chain(
+                    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+                ))
+                .unwrap(),
+            )
             // Worktrees land in the test directory instead of ~/worktrees.
             .env("GIT_CONFIG_GLOBAL", self.directory.path().join("gitconfig"))
             .env("CLAUDE_CONFIG_DIR", self.directory.path().join("claude"))
@@ -1740,6 +1747,85 @@ fn a_project_without_sessions_stays_listed_as_inactive_until_removed() {
     app.stop();
     app.start();
     assert!(listed(&app).is_none());
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn slow_worktree_lookup_does_not_delay_or_overwrite_a_session_rename() {
+    let app = App::new();
+    let repo = app.directory.path().join("repo");
+    let target = app.directory.path().join("target");
+    for root in [&repo, &target] {
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .arg(root)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom", "command":"/bin/sh", "args":["-c", "exec sleep 30"],
+            "cwd":repo, "projectRoot":repo, "worktreePath":repo
+        }),
+    );
+    let id = session["id"].as_str().unwrap().to_owned();
+    let bin = app.directory.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let git = bin.join("git");
+    std::fs::write(
+        &git,
+        r#"#!/bin/sh
+case "$*" in
+  *'rev-parse --show-toplevel'*)
+    if [ -e "$PWD/.slow-git" ]; then
+      : > "$PWD/.slow-git-started"
+      while [ -e "$PWD/.slow-git" ]; do sleep 0.02; done
+    fi ;;
+esac
+exec /usr/bin/git "$@"
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(target.join(".slow-git"), "").unwrap();
+    let request = decode_request(
+        &serde_json::to_vec(&json!({
+            "version":1, "id":"move", "method":"session.set_worktree",
+            "params":{"sessionId":id, "worktreePath":target}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let client = ControlClient::new(app.paths.control_socket());
+    let moving = thread::spawn(move || client.send(&request));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !target.join(".slow-git-started").exists() {
+        assert!(Instant::now() < deadline, "worktree lookup did not start");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let rename = decode_request(
+        &serde_json::to_vec(&json!({
+            "version":1, "id":"rename", "method":"session.rename",
+            "params":{"sessionId":id, "name":"chosen name"}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let renamed = ControlClient::new(app.paths.control_socket())
+        .send_with_timeout(&rename, Duration::from_secs(1));
+    std::fs::remove_file(target.join(".slow-git")).unwrap();
+    let moved = moving.join().unwrap().unwrap();
+
+    assert!(matches!(renamed.unwrap().body, ResponseBody::Success(_)));
+    let ResponseBody::Success(moved) = moved.body else {
+        panic!("move failed");
+    };
+    assert_eq!(moved["name"], "chosen name");
+    assert_eq!(moved["worktreePath"], target.to_string_lossy().as_ref());
 }
 
 #[test]

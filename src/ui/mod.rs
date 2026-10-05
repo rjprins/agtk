@@ -1032,14 +1032,7 @@ impl Workspace {
         work: impl FnOnce() -> PersistResult<T> + Send + 'static,
         done: impl FnOnce(&Self, PersistResult<T>) + 'static,
     ) {
-        let result = self.io.submit(work);
-        let workspace = self.clone();
-        glib::spawn_future_local(async move {
-            let result = result
-                .await
-                .unwrap_or_else(|_| Err("I/O worker stopped".into()));
-            done(&workspace, result);
-        });
+        self.run_on(&self.io, work, done);
     }
 
     /// Like `run_io`, but for slow external work that must not delay durable writes.
