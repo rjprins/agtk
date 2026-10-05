@@ -224,6 +224,8 @@ struct SessionView {
     elapsed_label: gtk::Label,
     /// Opens the session's pull request; hidden until one is linked.
     pr_button: gtk::Button,
+    pr_label: gtk::Label,
+    pr_attention_dot: gtk::Box,
     history: Vec<String>,
     /// How many trailing history entries came from keystrokes and still await
     /// the agent's own version.

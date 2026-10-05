@@ -111,18 +111,22 @@ impl Workspace {
                         UiNode {
                             id: format!("session-pr-{id}"),
                             role: "button".to_owned(),
-                            label: Some(
-                                session
-                                    .pr_button
-                                    .label()
-                                    .map(String::from)
-                                    .unwrap_or_default(),
-                            ),
+                            label: Some(session.pr_label.text().to_string()),
                             is_visible: session.pr_button.is_visible(),
                             is_enabled: session.pr_button.is_sensitive(),
                             is_selected: false,
                             bounds: widget_bounds(&session.pr_button, &self.window),
-                            children: Vec::new(),
+                            children: vec![UiNode {
+                                id: format!("session-pr-attention-{id}"),
+                                role: "status".to_owned(),
+                                label: Some("New PR activity".to_owned()),
+                                is_visible: session.pr_button.is_visible()
+                                    && session.pr_attention_dot.is_visible(),
+                                is_enabled: true,
+                                is_selected: false,
+                                bounds: widget_bounds(&session.pr_attention_dot, &self.window),
+                                children: Vec::new(),
+                            }],
                         },
                     ],
                 })

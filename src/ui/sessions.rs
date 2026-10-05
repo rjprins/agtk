@@ -1186,7 +1186,16 @@ impl Workspace {
         mainline.append(&worktree_label);
         content.append(&mainline);
         // Just the number: the sidebar is narrow and the tooltip carries the title.
-        let pr_button = gtk::Button::with_label("#");
+        let pr_label = gtk::Label::new(Some("#"));
+        let pr_contents = gtk::Overlay::new();
+        pr_contents.set_child(Some(&pr_label));
+        let pr_attention_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        pr_attention_dot.add_css_class("attention-dot");
+        pr_attention_dot.set_halign(gtk::Align::End);
+        pr_attention_dot.set_valign(gtk::Align::Start);
+        pr_attention_dot.set_visible(false);
+        pr_contents.add_overlay(&pr_attention_dot);
+        let pr_button = gtk::Button::builder().child(&pr_contents).build();
         pr_button.add_css_class("flat");
         pr_button.add_css_class("accent");
         pr_button.add_css_class("caption");
@@ -1279,6 +1288,8 @@ impl Workspace {
                 state_label,
                 elapsed_label,
                 pr_button,
+                pr_label,
+                pr_attention_dot,
                 history: Vec::new(),
                 typed_history_pending: 0,
                 prompt_log: prompt_log_ui::PromptLogFollower::default(),

@@ -533,12 +533,14 @@ impl Workspace {
     /// Shows the row's PR button when the session has a PR, matching it from
     /// the project's PR list if it was not linked yet.
     pub(super) fn refresh_session_pr_button(&self, id: &str) {
-        let Some((record, button)) = self
-            .sessions
-            .borrow()
-            .get(id)
-            .map(|session| (session.record.clone(), session.pr_button.clone()))
-        else {
+        let Some((record, button, label, dot)) = self.sessions.borrow().get(id).map(|session| {
+            (
+                session.record.clone(),
+                session.pr_button.clone(),
+                session.pr_label.clone(),
+                session.pr_attention_dot.clone(),
+            )
+        }) else {
             return;
         };
         let mut pull_request = self.session_pr_cache.borrow().get(id).cloned();
@@ -555,25 +557,51 @@ impl Workspace {
         }
         match pull_request {
             Some(pull_request) => {
-                button.set_label(&format!("#{}", pull_request.id));
-                button.set_tooltip_text(Some(&format!(
-                    "Open PR #{}: {}",
-                    pull_request.id, pull_request.title
-                )));
+                let attention = record
+                    .project_root
+                    .as_deref()
+                    .and_then(|root| self.pr_attention(root, pull_request.id));
+                label.set_text(&format!("#{}", pull_request.id));
+                let mut description =
+                    format!("Open PR #{}: {}", pull_request.id, pull_request.title);
+                if attention.is_some() {
+                    description.push_str("\nNew activity; open to mark viewed");
+                }
+                button.set_tooltip_text(Some(&description));
+                button.update_property(&[gtk::accessible::Property::Label(&description)]);
+                dot.set_visible(attention.is_some());
                 button.set_visible(true);
             }
-            None => button.set_visible(false),
+            None => {
+                dot.set_visible(false);
+                button.set_visible(false);
+            }
         }
     }
 
     pub(super) fn open_session_pr(&self, id: &str) {
-        let url = self
-            .session_pr_cache
-            .borrow()
-            .get(id)
-            .map(|pull_request| pull_request.url.clone());
-        match url {
-            Some(url) => self.open_pr_link(&url),
+        let pull_request = self.session_pr_cache.borrow().get(id).cloned();
+        match pull_request {
+            Some(pull_request) => {
+                self.open_pr_link(&pull_request.url);
+                let project_root = self
+                    .sessions
+                    .borrow()
+                    .get(id)
+                    .and_then(|session| session.record.project_root.clone());
+                if let Some(project_root) = project_root
+                    && let Some(marker) = self.pr_attention(&project_root, pull_request.id)
+                {
+                    self.acknowledge_pr(
+                        PrAcknowledgeParams {
+                            project_root: PathBuf::from(pr_cache_key(&project_root)),
+                            pull_request_id: pull_request.id,
+                            marker,
+                        },
+                        None,
+                    );
+                }
+            }
             None => self
                 .overlay
                 .add_toast(adw::Toast::new("No pull request is linked to this session")),
@@ -1193,8 +1221,22 @@ impl Workspace {
     pub(super) fn update_pr_indicator(&self) {
         let count = self.pr_attention_count();
         self.menus.set_pull_request_attention(count);
-        // The project headers carry the attention dot.
+        let session_ids = self.sessions.borrow().keys().cloned().collect::<Vec<_>>();
+        for id in session_ids {
+            self.refresh_session_pr_button(&id);
+        }
+        // The project headers also carry the attention dot.
         self.rebuild_sidebar();
+    }
+
+    fn pr_attention(&self, root: &Path, id: u64) -> Option<PrAttention> {
+        self.pr_preferences
+            .borrow()
+            .projects
+            .get(&pr_cache_key(root))?
+            .attention
+            .get(&id)
+            .copied()
     }
 
     /// `None` for a project without Azure DevOps, else how many PRs have unseen activity.

@@ -1155,6 +1155,134 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn session_pr_attention_follows_comments_acknowledgement_and_restart() {
+    let mut app = App::new();
+    let project = app.directory.path().join("azure-project");
+    std::fs::create_dir(&project).unwrap();
+    for args in [
+        &["init", "-q", "-b", "feature"][..],
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://dev.azure.com/org/project/_git/repo",
+        ][..],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let pr_file = app.directory.path().join("azure-prs.json");
+    std::fs::write(
+        &pr_file,
+        serde_json::to_vec(&json!([
+            {
+                "pullRequestId":42, "title":"Review feature",
+                "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main",
+                "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
+                "createdBy":{"displayName":"Colleague"}, "reviewers":[]
+            },
+            {
+                "pullRequestId":43, "title":"Review later",
+                "sourceRefName":"refs/heads/later", "targetRefName":"refs/heads/main",
+                "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
+                "createdBy":{"displayName":"Colleague"}, "reviewers":[]
+            }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    let mut ids = Vec::new();
+    for name in ["feature session", "review: PR #43"] {
+        let session = app.request(
+            "session.create",
+            json!({"kind":"shell","cwd":project,"projectRoot":project,"name":name}),
+        );
+        ids.push(session["id"].as_str().unwrap().to_owned());
+    }
+    // Both linked sessions remain in the background as their comments arrive.
+    let other = app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":app.directory.path()}),
+    );
+    app.request("session.select", json!({"sessionId":other["id"]}));
+    let attention = |app: &App, id: &str| -> Value {
+        let inspection = app.request("ui.inspect", json!({}));
+        let sessions = &inspection["root"]["children"][0]["children"][1]["children"];
+        let session = sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == format!("session-{id}"))
+            .unwrap();
+        let pr = session["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == format!("session-pr-{id}"))
+            .unwrap();
+        pr["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == format!("session-pr-attention-{id}"))
+            .expect("session PR button exposes its activity marker")
+            .clone()
+    };
+    assert_eq!(attention(&app, &ids[0])["isVisible"], false);
+    assert_eq!(attention(&app, &ids[1])["isVisible"], false);
+
+    let threads_file = app.directory.path().join("azure-threads.json");
+    for date in ["2026-10-01T10:00:00Z", "2026-10-01T11:00:00Z"] {
+        std::fs::write(
+            &threads_file,
+            serde_json::to_vec(&json!({"value":[{
+                "status":"active", "comments":[{
+                    "commentType":"text", "content":"Please fix this",
+                    "publishedDate":date
+                }]
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        app.request("pr.list", json!({"projectRoot":project}));
+        assert_eq!(attention(&app, &ids[0])["isVisible"], true);
+        assert_eq!(attention(&app, &ids[1])["isVisible"], true);
+        if date == "2026-10-01T11:00:00Z"
+            && let Ok(target) = std::env::var("AGTK_TEST_CAPTURE_DIR")
+        {
+            let capture = app.request("ui.capture", json!({}));
+            std::fs::copy(
+                capture["path"].as_str().unwrap(),
+                std::path::Path::new(&target).join("session-pr-attention.png"),
+            )
+            .unwrap();
+        }
+        app.request(
+            "pr.acknowledge",
+            json!({"projectRoot":project,"pullRequestId":42,"marker":"review"}),
+        );
+        assert_eq!(attention(&app, &ids[0])["isVisible"], false);
+        // Acknowledging one PR leaves the other session's marker visible.
+        assert_eq!(attention(&app, &ids[1])["isVisible"], true);
+    }
+    app.stop();
+    app.start();
+    assert_eq!(attention(&app, &ids[0])["isVisible"], false);
+    assert_eq!(attention(&app, &ids[1])["isVisible"], true);
+    std::fs::write(&pr_file, "[]").unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    assert_eq!(attention(&app, &ids[1])["isVisible"], false);
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn session_pr_bar_uses_cache_during_refresh_and_after_restart() {
     let mut app = App::new();
     let project = app.directory.path().join("azure-project");
