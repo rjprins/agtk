@@ -197,14 +197,20 @@ To add it to another MCP client, use it as a local stdio server:
 }
 ```
 
-An agent can open a shell with `spawn_shell` and give it an `initialCommand`, such as a `sudo` command. Type the password in that shell, and the agent reads the result with `snapshot`.
+An agent can open a shell with `spawn_shell` and give it an `initialCommand`, such as a `sudo` command. Type the password in that shell, and the agent reads the result with `snapshot`. agtk itself never runs anything as root.
+
+Sessions that agtk starts run outside any sandbox the agent has. An agent with the `agtk` tools can therefore run commands beyond its own sandbox, through `spawn_shell`, `send_input`, or `launch_agent`. Give the tools only to agents you would let run commands. PR reviews start Codex without the `agtk` tools, because they read code from someone else.
 
 The tools cover sessions, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, and screenshots of the agtk window. The server never captures the rest of the desktop.
 
 ## Where things are stored
 
 - Settings and session data: `$XDG_STATE_HOME/agtk/default`, or `~/.local/state/agtk/default`
-- Sockets: `$XDG_RUNTIME_DIR/agtk/default`
+- Sockets and Claude hook settings: `$XDG_RUNTIME_DIR/agtk/default`, or `/tmp/agtk-UID/agtk/default` without `XDG_RUNTIME_DIR`. agtk makes these directories private to you and refuses one that someone else can change.
+- Worktrees: next to the project, as `../REPO-BRANCH`, or where `git config agtk.worktreeTemplate` says. PR reviews: `../pr-ID`.
+- Work saved before a worktree is removed: `attic` in the settings directory. agtk stages it in a private directory under `/tmp` first.
+
+agtk makes no network requests itself. Pull requests go through the Azure CLI, and a PR review fetches the branch with `git fetch`. Building agtk downloads the crates in `Cargo.lock` and the npm packages in `viewer/package-lock.json`, without running their install scripts.
 
 To use another program for a tool, set `AGTK_CLAUDE_BIN`, `AGTK_CODEX_BIN`, `AGTK_EMACSCLIENT`, or `AGTK_AZURE_BIN`.
 
