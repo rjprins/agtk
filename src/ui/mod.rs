@@ -98,6 +98,9 @@ struct Workspace {
     diff_heading: gtk::Label,
     /// Previous and next change buttons; hidden while a whole file shows.
     diff_navigation: gtk::Box,
+    /// Source or Preview, shown for Markdown files.
+    markdown_presentation: adw::ToggleGroup,
+    markdown_preview: Rc<Cell<file_tabs_ui::MarkdownPreview>>,
     open_in_emacs_button: gtk::Button,
     diff_stale_banner: gtk::Box,
     diff_stale_label: gtk::Label,
@@ -306,8 +309,16 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .tooltip_text("Open this file in Emacs")
         .build();
     open_in_emacs_button.add_css_class("flat");
+    let markdown_presentation = adw::ToggleGroup::new();
+    markdown_presentation.add_css_class("flat");
+    markdown_presentation.set_tooltip_text(Some("Show the Markdown source or rendered"));
+    for (name, label) in [("source", "Source"), ("preview", "Preview")] {
+        markdown_presentation.add(adw::Toggle::builder().name(name).label(label).build());
+    }
+    markdown_presentation.set_visible(false);
     diff_toolbar.append(&diff_navigation);
     diff_toolbar.append(&diff_heading);
+    diff_toolbar.append(&markdown_presentation);
     diff_toolbar.append(&open_in_emacs_button);
     diff_page.append(&diff_toolbar);
     let diff_stale_banner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -595,6 +606,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         diff_placeholder: diff_placeholder.clone(),
         diff_heading: diff_heading.clone(),
         diff_navigation: diff_navigation.clone(),
+        markdown_presentation: markdown_presentation.clone(),
+        markdown_preview: Rc::new(Cell::new(file_tabs_ui::MarkdownPreview::default())),
         open_in_emacs_button: open_in_emacs_button.clone(),
         diff_stale_banner: diff_stale_banner.clone(),
         diff_stale_label: diff_stale_label.clone(),
@@ -798,6 +811,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         if let Some(viewer) = diff_workspace.code_viewer.borrow().as_ref() {
             viewer.move_to_change(false);
         }
+    });
+    let presentation_workspace = workspace.clone();
+    markdown_presentation.connect_active_name_notify(move |group| {
+        presentation_workspace
+            .set_markdown_preview(group.active_name().as_deref() == Some("preview"));
     });
     let diff_workspace = workspace.clone();
     diff_next.connect_clicked(move |_| {

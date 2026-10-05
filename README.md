@@ -103,6 +103,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 - The Changes sidebar shows staged, unstaged, untracked, branch, and commit diffs. It is read only.
 - Choose what to compare with: a branch, or a number of commits back.
 - The Files page lists every file in the worktree, with a filter. Files open read only in the same viewer.
+- Markdown files show rendered, with a switch between Source and Preview. File tabs start in Preview and diffs in Source, and agtk remembers your choice for each. Links to other files open them in the viewer, at the line for links like `main.rs#L12`. Web links open in the browser. Images show as placeholders, because the viewer cannot read files or reach the network.
 
 ### Worktrees
 

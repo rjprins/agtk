@@ -2,7 +2,27 @@
 
 use super::*;
 use crate::changes::{FileDocument, FileDocumentResult};
+use crate::file_links::MarkdownLink;
 use crate::workspace_tabs::{FileTabKey, WorkspaceTabId, WorkspaceTabs};
+
+pub(super) const MARKDOWN_PREVIEW_PREFERENCE: &str = "markdownPreview";
+
+/// Whether Markdown shows rendered, remembered apart for file tabs and diff tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct MarkdownPreview {
+    pub files: bool,
+    pub diffs: bool,
+}
+
+impl Default for MarkdownPreview {
+    fn default() -> Self {
+        Self {
+            files: true,
+            diffs: false,
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct FileTabState {
@@ -193,6 +213,7 @@ impl Workspace {
         self.diff_heading.set_text(&title);
         self.content_title.set_title(&title);
         self.diff_navigation.set_visible(false);
+        self.show_markdown_presentation(&key.path, false);
         self.open_in_emacs_button.set_visible(true);
         self.diff_placeholder.set_text("Loading file…");
         self.diff_placeholder.set_visible(true);
@@ -314,6 +335,7 @@ impl Workspace {
             "viewState": state,
             "line": position.map(|(line, _)| line),
             "column": position.and_then(|(_, column)| column),
+            "presentation": self.markdown_presentation_for(&key.path, false),
         });
         if let Err(error) = viewer.show_file(&payload) {
             self.show_viewer_placeholder(&document.path, &error, None, &[]);
@@ -405,16 +427,133 @@ impl Workspace {
 
     /// The file behind the visible diff or file tab, if it exists on disk.
     fn visible_document_path(&self) -> Option<PathBuf> {
+        self.visible_document()
+            .map(|(path, _, _)| path)
+            .filter(|path| path.is_file())
+    }
+
+    /// The path, worktree root and tab ID of the visible diff or file tab.
+    fn visible_document(&self) -> Option<(PathBuf, PathBuf, String)> {
         match self.workspace_tabs.borrow().visible_tab()? {
-            WorkspaceTabId::File(key) => Some(key.path.clone()),
+            WorkspaceTabId::File(key) => Some((
+                key.path.clone(),
+                PathBuf::from(&key.worktree_root),
+                WorkspaceTabs::file_tab_id(key),
+            )),
             WorkspaceTabId::Diff(key) => {
                 use std::os::unix::ffi::OsStrExt;
                 let relative = key.new_path.as_deref().or(key.old_path.as_deref())?;
-                Some(Path::new(&key.worktree_root).join(std::ffi::OsStr::from_bytes(relative)))
+                let root = PathBuf::from(&key.worktree_root);
+                Some((
+                    root.join(std::ffi::OsStr::from_bytes(relative)),
+                    root,
+                    WorkspaceTabs::diff_tab_id(key),
+                ))
             }
             WorkspaceTabId::Session(_) => None,
         }
-        .filter(|path| path.is_file())
+    }
+
+    fn markdown_preview_for(&self, diff: bool) -> bool {
+        let preview = self.markdown_preview.get();
+        if diff { preview.diffs } else { preview.files }
+    }
+
+    /// What the viewer shows first for `path`: rendered Markdown or its source.
+    pub(super) fn markdown_presentation_for(&self, path: &Path, diff: bool) -> &'static str {
+        if crate::file_links::is_markdown_path(path) && self.markdown_preview_for(diff) {
+            "preview"
+        } else {
+            "source"
+        }
+    }
+
+    /// Shows the Source and Preview switch for Markdown, set to how this kind of tab shows it.
+    pub(super) fn show_markdown_presentation(&self, path: &Path, diff: bool) {
+        let markdown = crate::file_links::is_markdown_path(path);
+        let preview = markdown && self.markdown_preview_for(diff);
+        // Hide first, so setting the switch is not taken as the user's choice.
+        self.markdown_presentation.set_visible(false);
+        self.markdown_presentation.set_active_name(Some(if preview {
+            "preview"
+        } else {
+            "source"
+        }));
+        self.markdown_presentation.set_visible(markdown);
+        self.diff_navigation.set_sensitive(!preview);
+    }
+
+    /// The user switched the visible Markdown between source and rendered.
+    pub(super) fn set_markdown_preview(&self, preview: bool) {
+        if !self.markdown_presentation.is_visible() {
+            return;
+        }
+        let diff = match self.workspace_tabs.borrow().visible_tab() {
+            Some(WorkspaceTabId::Diff(_)) => true,
+            Some(WorkspaceTabId::File(_)) => false,
+            _ => return,
+        };
+        let mut preference = self.markdown_preview.get();
+        let slot = if diff {
+            &mut preference.diffs
+        } else {
+            &mut preference.files
+        };
+        if *slot == preview {
+            return;
+        }
+        *slot = preview;
+        self.markdown_preview.set(preference);
+        if let Ok(value) = serde_json::to_value(preference) {
+            self.save_preference(MARKDOWN_PREVIEW_PREFERENCE, value);
+        }
+        self.diff_navigation.set_sensitive(!preview);
+        if let Some(viewer) = self.code_viewer.borrow().as_ref() {
+            viewer.set_presentation(preview);
+            viewer.focus();
+        }
+    }
+
+    /// Follows a link clicked in rendered Markdown: files open in the file tab, web links in the browser.
+    pub(super) fn open_markdown_link(&self, tab_id: &str, href: &str) {
+        let Some((document, root, visible_tab_id)) = self.visible_document() else {
+            return;
+        };
+        if visible_tab_id != tab_id {
+            return;
+        }
+        match crate::file_links::resolve_markdown_link(href, &document, &root) {
+            Some(MarkdownLink::Web(url)) => {
+                let workspace = self.clone();
+                gtk::UriLauncher::new(&url).launch(
+                    Some(&self.window),
+                    None::<&gio::Cancellable>,
+                    move |result| {
+                        if let Err(error) = result {
+                            workspace.show_error(&format!("Could not open link: {error}"));
+                        }
+                    },
+                );
+            }
+            Some(MarkdownLink::File { path, line }) => {
+                // A folder link opens its README, as GitHub shows it below the listing.
+                let path = if path.is_dir() {
+                    ["README.md", "readme.md", "Readme.md"]
+                        .iter()
+                        .map(|name| path.join(name))
+                        .find(|readme| readme.is_file())
+                        .unwrap_or(path)
+                } else {
+                    path
+                };
+                if path.is_file() {
+                    self.open_file_from_session(None, path, line, None);
+                } else {
+                    self.show_error(&format!("No file at {}", path.display()));
+                }
+            }
+            None => self.show_error(&format!("This link does not open in agtk: {href}")),
+        }
     }
 
     pub(super) fn open_visible_document_in_emacs(&self) {

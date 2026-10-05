@@ -221,6 +221,10 @@ impl Workspace {
                     .map(serde_json::from_value::<std::collections::HashMap<String, String>>)
                     .transpose()?
                     .unwrap_or_default();
+                let markdown_preview = store
+                    .preference(file_tabs_ui::MARKDOWN_PREVIEW_PREFERENCE)?
+                    .and_then(|value| serde_json::from_value(value).ok())
+                    .unwrap_or_default();
                 let changes_commits_ago = store
                     .preference("changesCommitsAgo")?
                     .and_then(|value| value.as_i64())
@@ -296,6 +300,7 @@ impl Workspace {
                     changes_sidebar_page,
                     changes_base_refs,
                     changes_commits_ago,
+                    markdown_preview,
                     recovered,
                     lost,
                 ))
@@ -318,6 +323,7 @@ impl Workspace {
                     changes_sidebar_page,
                     changes_base_refs,
                     changes_commits_ago,
+                    markdown_preview,
                     recovered,
                     lost,
                 )) => {
@@ -346,6 +352,7 @@ impl Workspace {
                         .commits_ago
                         .set_value(changes_commits_ago as f64);
                     workspace.changes.updating_base.set(false);
+                    workspace.markdown_preview.set(markdown_preview);
                     if changes_sidebar_page.as_deref() == Some(explorer_ui::FILES_PAGE) {
                         workspace
                             .changes

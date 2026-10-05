@@ -660,6 +660,10 @@ impl Workspace {
         self.diff_heading.set_text(&path);
         self.content_title.set_title(&path);
         self.diff_navigation.set_visible(true);
+        if let Some(relative) = key.new_path.as_deref().or(key.old_path.as_deref()) {
+            use std::os::unix::ffi::OsStrExt;
+            self.show_markdown_presentation(Path::new(std::ffi::OsStr::from_bytes(relative)), true);
+        }
         self.open_in_emacs_button.set_visible(true);
         self.diff_placeholder.set_text("Loading diff…");
         self.diff_placeholder.set_visible(true);
@@ -888,6 +892,7 @@ impl Workspace {
                 "language": document.language,
                 "metadata": document.metadata,
                 "viewState": state,
+                "presentation": self.markdown_presentation_for(Path::new(&document.path), true),
             });
             if let Err(error) = viewer.show_diff(&payload) {
                 self.show_diff_placeholder(key, &document.path, &error, None, &[]);
@@ -909,7 +914,13 @@ impl Workspace {
         let rendered = self.diff_rendered.clone();
         let file_rendered = self.file_rendered.clone();
         let error_state = self.diff_error.clone();
+        let link_workspace = self.clone();
         let viewer = code_viewer::CodeViewer::new(move |event| match event {
+            code_viewer::ViewerEvent::OpenLink { tab_id, href } => {
+                // Leave the WebKit signal before opening tabs, which call back into the viewer.
+                let workspace = link_workspace.clone();
+                glib::idle_add_local_once(move || workspace.open_markdown_link(&tab_id, &href));
+            }
             code_viewer::ViewerEvent::ViewState { tab_id, state } => {
                 view_states.borrow_mut().insert(tab_id, state);
             }

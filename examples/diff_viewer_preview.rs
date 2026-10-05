@@ -36,6 +36,7 @@ fn main() -> glib::ExitCode {
                 println!("File rendered with {line_count} lines")
             }
             ViewerEvent::ViewState { .. } => {}
+            ViewerEvent::OpenLink { href, .. } => println!("Link clicked: {href}"),
             ViewerEvent::Error { message, .. } => eprintln!("Viewer error: {message}"),
         }));
         let window = adw::ApplicationWindow::builder()
@@ -45,19 +46,33 @@ fn main() -> glib::ExitCode {
             .default_height(760)
             .content(&viewer.widget())
             .build();
-        viewer.set_appearance("light", "Monospace", 13);
-        viewer
-            .show_diff(&serde_json::json!({
-                "requestId": "preview-request",
-                "tabId": "preview-tab",
-                "path": "src/lib.rs",
-                "originalLabel": "commit 0123456",
-                "modifiedLabel": "Working tree",
-                "language": "rust",
-                "original": "pub fn greet(name: &str) -> String {\n    format!(\"Hello, {name}!\")\n}\n",
-                "modified": "pub fn greet(name: &str) -> String {\n    let note = \"</script> `quoted` <img src=x>\";\n    format!(\"Hi, {name}! {note}\")\n}\n",
-            }))
-            .expect("preview fixture should fit in the bridge limit");
+        let theme = std::env::var("AGTK_DIFF_THEME").unwrap_or_else(|_| "light".to_owned());
+        viewer.set_appearance(&theme, "Monospace", 13);
+        if std::env::var_os("AGTK_DIFF_MARKDOWN").is_some() {
+            viewer
+                .show_file(&serde_json::json!({
+                    "requestId": "preview-request",
+                    "tabId": "preview-tab",
+                    "path": "docs/guide.md",
+                    "label": "Working tree",
+                    "presentation": "preview",
+                    "text": MARKDOWN_FIXTURE,
+                }))
+                .expect("preview fixture should fit in the bridge limit");
+        } else {
+            viewer
+                .show_diff(&serde_json::json!({
+                    "requestId": "preview-request",
+                    "tabId": "preview-tab",
+                    "path": "src/lib.rs",
+                    "originalLabel": "commit 0123456",
+                    "modifiedLabel": "Working tree",
+                    "language": "rust",
+                    "original": "pub fn greet(name: &str) -> String {\n    format!(\"Hello, {name}!\")\n}\n",
+                    "modified": "pub fn greet(name: &str) -> String {\n    let note = \"</script> `quoted` <img src=x>\";\n    format!(\"Hi, {name}! {note}\")\n}\n",
+                }))
+                .expect("preview fixture should fit in the bridge limit");
+        }
         window.present();
 
         let viewer = viewer.clone();
@@ -94,3 +109,31 @@ fn main() -> glib::ExitCode {
     });
     app.run()
 }
+
+const MARKDOWN_FIXTURE: &str = r#"# Guide
+
+Read the [setup notes](setup.md#L3), jump to [Usage](#usage) or visit https://example.com.
+
+<p align="center"><b>Raw HTML</b> <img src=x onerror="alert(1)"><script>alert(1)</script></p>
+
+## Usage
+
+- [x] Install
+- [ ] Configure `agtk`
+  - nested item
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+F` | Find |
+| `Ctrl+C` | Copy |
+
+> A quoted note.
+
+```rust
+fn main() {
+    println!("hello {}", 42);
+}
+```
+
+![Screenshot](screenshot.png)
+"#;

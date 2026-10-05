@@ -27,7 +27,10 @@ import 'monaco-editor/languages/features/json/register';
 // The diff markers use the icon font. Without this it only loads with the JSON chunk.
 import 'monaco-editor/features/codicon/register';
 
-import { languageForPath } from './language.js';
+import DOMPurify from 'dompurify';
+
+import { languageForFence, languageForPath } from './language.js';
+import { headingSlug, renderMarkdown } from './markdown.js';
 import './style.css';
 
 self.MonacoEnvironment = {
@@ -47,6 +50,8 @@ const fileNameElement = document.querySelector('#file-name');
 const versionLabelsElement = document.querySelector('#version-labels');
 const metadataElement = document.querySelector('#metadata');
 const emptyStateElement = document.querySelector('#empty-state');
+const markdownElement = document.querySelector('#markdown');
+const markdownBodyElement = document.querySelector('#markdown-body');
 
 const sharedOptions = {
   automaticLayout: true,
@@ -81,6 +86,13 @@ let currentTabId = null;
 let currentRequestId = null;
 let activeChangeIndex = -1;
 let findState = { query: '', index: -1 };
+// 'source' shows the text in Monaco, 'preview' renders it as Markdown.
+let presentation = 'source';
+// The Markdown text that preview renders, and whether it is rendered yet.
+let previewText = null;
+let previewIsOriginal = false;
+let previewRendered = false;
+let renderGeneration = 0;
 
 function sendEvent(event) {
   window.webkit?.messageHandlers?.agtk?.postMessage(event);
@@ -122,11 +134,18 @@ function clear() {
   currentRequestId = null;
   activeChangeIndex = -1;
   findState = { query: '', index: -1 };
+  presentation = 'source';
+  previewText = null;
+  previewIsOriginal = false;
+  previewRendered = false;
+  renderGeneration += 1;
+  markdownBodyElement.replaceChildren();
   fileNameElement.textContent = 'No file selected';
   versionLabelsElement.textContent = '';
   metadataElement.textContent = '';
   editorElement.classList.remove('visible');
   fileEditorElement.classList.remove('visible');
+  markdownElement.classList.remove('visible');
   emptyStateElement.hidden = false;
 }
 
@@ -141,6 +160,7 @@ function showDiff({
   language,
   metadata,
   viewState,
+  presentation: requestedPresentation,
 }) {
   if (
     typeof tabId !== 'string'
@@ -175,10 +195,17 @@ function showDiff({
   fileNameElement.textContent = path;
   versionLabelsElement.textContent = `${originalLabel || 'Original'} → ${modifiedLabel || 'Current'}`;
   metadataElement.textContent = Array.isArray(metadata) ? metadata.join(' · ') : '';
-  editorElement.classList.add('visible');
   emptyStateElement.hidden = true;
   if (viewState) diffEditor.restoreViewState(viewState);
-  diffEditor.getModifiedEditor().focus();
+  // A deleted file has only its old text to preview.
+  previewIsOriginal = modified.length === 0 && original.length > 0;
+  previewText = previewIsOriginal ? original : modified;
+  if (requestedPresentation === 'preview') {
+    showPreview(viewState?.agtkPreviewScroll);
+  } else {
+    editorElement.classList.add('visible');
+    diffEditor.getModifiedEditor().focus();
+  }
 }
 
 function showFile({
@@ -192,6 +219,7 @@ function showFile({
   viewState,
   line,
   column,
+  presentation: requestedPresentation,
 }) {
   if (typeof tabId !== 'string' || typeof path !== 'string' || typeof text !== 'string') {
     throw new TypeError('File data must include text, a path, and a tab ID');
@@ -215,11 +243,16 @@ function showFile({
   fileNameElement.textContent = path;
   versionLabelsElement.textContent = typeof label === 'string' ? label : '';
   metadataElement.textContent = Array.isArray(metadata) ? metadata.join(' · ') : '';
-  fileEditorElement.classList.add('visible');
   emptyStateElement.hidden = true;
   if (viewState) editor.restoreViewState(viewState);
+  previewText = text;
+  if (requestedPresentation === 'preview') {
+    showPreview(viewState?.agtkPreviewScroll);
+  } else {
+    fileEditorElement.classList.add('visible');
+    editor.focus();
+  }
   if (Number.isFinite(line) && line > 0) reveal(line, column);
-  editor.focus();
   sendEvent({
     type: 'fileRendered',
     requestId: currentRequestId,
@@ -230,6 +263,10 @@ function showFile({
 
 // Puts the cursor at a line and optional column and centers it.
 function reveal(line, column) {
+  if (presentation === 'preview') {
+    scrollPreviewToLine(line);
+    return;
+  }
   const editor = activeEditor();
   const model = editor?.getModel();
   if (!editor || !model || !Number.isFinite(line) || line < 1) return;
@@ -245,13 +282,16 @@ function reveal(line, column) {
 
 function sendViewState() {
   if (!currentTabId) return null;
-  const state = mode === 'diff' ? diffEditor.saveViewState() : fileEditor?.saveViewState();
+  let state = mode === 'diff' ? diffEditor.saveViewState() : fileEditor?.saveViewState();
+  if (state && presentation === 'preview') {
+    state = { ...state, agtkPreviewScroll: markdownElement.scrollTop };
+  }
   sendEvent({ type: 'viewState', tabId: currentTabId, state: state ?? null });
   return state;
 }
 
 function moveToChange(next) {
-  if (mode !== 'diff') return;
+  if (mode !== 'diff' || presentation === 'preview') return;
   const changes = diffEditor.getLineChanges() || [];
   if (changes.length === 0) return;
 
@@ -271,6 +311,11 @@ function moveToChange(next) {
 
 function find(query, next) {
   if (typeof query !== 'string' || query.length === 0) return;
+  if (presentation === 'preview') {
+    // WebKit's find selects the match and scrolls to it.
+    window.find(query, false, !next, true, false, false, false);
+    return;
+  }
   const editor = activeEditor();
   const model = editor?.getModel();
   if (!editor || !model) return;
@@ -300,6 +345,8 @@ function find(query, next) {
 }
 
 function copySelection() {
+  // The host copies a preview selection with WebKit's own copy command.
+  if (presentation === 'preview') return;
   activeEditor()?.getAction('editor.action.clipboardCopyAction')?.run();
 }
 
@@ -313,6 +360,12 @@ function applyAppearance(editor) {
 function setAppearance(theme, fontFamily, fontSize) {
   const isDark = theme === 'dark';
   document.body.dataset.theme = isDark ? 'dark' : 'light';
+  if (typeof fontFamily === 'string' && fontFamily.length > 0) {
+    document.body.style.setProperty('--code-font-family', `"${fontFamily.replaceAll('"', '')}", monospace`);
+  }
+  if (Number.isFinite(fontSize) && fontSize >= 8 && fontSize <= 48) {
+    document.body.style.setProperty('--code-font-size', `${Math.round(fontSize)}px`);
+  }
   appearance.theme = isDark ? 'vs-dark' : 'vs';
   monaco.editor.setTheme(appearance.theme);
   if (typeof fontFamily === 'string' && fontFamily.length > 0) {
@@ -325,6 +378,141 @@ function setAppearance(theme, fontFamily, fontSize) {
   if (fileEditor) applyAppearance(fileEditor);
 }
 
+// Markdown preview
+
+// Switches between Monaco and the rendered Markdown, keeping roughly the same place.
+function setPresentation(next) {
+  if (mode === null || previewText === null) return;
+  const wanted = next === 'preview' ? 'preview' : 'source';
+  if (wanted === presentation) return;
+  if (wanted === 'preview') {
+    const line = previewEditor()?.getVisibleRanges()[0]?.startLineNumber;
+    showPreview();
+    if (line > 1) scrollPreviewToLine(line, 'start');
+    return;
+  }
+  const line = firstVisiblePreviewLine();
+  presentation = 'source';
+  markdownElement.classList.remove('visible');
+  (mode === 'diff' ? editorElement : fileEditorElement).classList.add('visible');
+  const editor = previewEditor();
+  if (editor) {
+    editor.layout();
+    if (line) editor.setScrollTop(editor.getTopForLineNumber(line));
+    activeEditor()?.focus();
+  }
+}
+
+// The Monaco editor whose lines the preview's source lines refer to.
+function previewEditor() {
+  if (mode === 'diff') {
+    return previewIsOriginal ? diffEditor.getOriginalEditor() : diffEditor.getModifiedEditor();
+  }
+  return fileEditor;
+}
+
+function showPreview(scrollTop) {
+  presentation = 'preview';
+  editorElement.classList.remove('visible');
+  fileEditorElement.classList.remove('visible');
+  if (!previewRendered) renderPreview();
+  markdownElement.classList.add('visible');
+  markdownElement.scrollTop = Number.isFinite(scrollTop) ? scrollTop : 0;
+  markdownElement.focus({ preventScroll: true });
+}
+
+function renderPreview() {
+  renderGeneration += 1;
+  const generation = renderGeneration;
+  markdownBodyElement.innerHTML = DOMPurify.sanitize(renderMarkdown(previewText), {
+    FORBID_TAGS: ['style', 'form'],
+    FORBID_ATTR: ['style'],
+  });
+  previewRendered = true;
+
+  const slugCounts = new Map();
+  for (const heading of markdownBodyElement.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    const slug = headingSlug(heading.textContent);
+    const count = slugCounts.get(slug) ?? 0;
+    slugCounts.set(slug, count + 1);
+    heading.dataset.anchor = count === 0 ? slug : `${slug}-${count}`;
+  }
+  for (const link of markdownBodyElement.querySelectorAll('a[href]')) {
+    if (!link.title) link.title = link.getAttribute('href');
+  }
+  // Only embedded images can load: the page has no access to files or the network.
+  for (const image of markdownBodyElement.querySelectorAll('img')) {
+    if (image.getAttribute('src')?.startsWith('data:')) continue;
+    const placeholder = document.createElement('span');
+    placeholder.className = 'image-placeholder';
+    placeholder.textContent = image.alt || image.getAttribute('src') || 'image';
+    placeholder.title = image.getAttribute('src') || '';
+    image.replaceWith(placeholder);
+  }
+  for (const code of markdownBodyElement.querySelectorAll('pre > code')) {
+    const languageClass = [...code.classList].find((name) => name.startsWith('language-'));
+    const language = languageClass ? languageForFence(languageClass.slice('language-'.length)) : null;
+    if (!language) continue;
+    monaco.editor
+      .colorize(code.textContent.replace(/\n$/, ''), language, { tabSize: 4 })
+      .then((html) => {
+        if (generation === renderGeneration && code.isConnected) code.innerHTML = html;
+      })
+      .catch(() => {});
+  }
+}
+
+// The block that starts at or before a source line.
+function blockForLine(line) {
+  let found = null;
+  for (const element of markdownBodyElement.querySelectorAll('[data-source-line]')) {
+    if (Number(element.dataset.sourceLine) > line) break;
+    found = element;
+  }
+  return found;
+}
+
+function scrollPreviewToLine(line, position = 'center') {
+  if (!Number.isFinite(line) || line < 1) return;
+  const block = blockForLine(Math.trunc(line));
+  if (block) block.scrollIntoView({ block: position });
+  else markdownElement.scrollTop = 0;
+}
+
+function firstVisiblePreviewLine() {
+  const top = markdownElement.getBoundingClientRect().top;
+  for (const element of markdownBodyElement.querySelectorAll('[data-source-line]')) {
+    if (element.getBoundingClientRect().bottom > top) return Number(element.dataset.sourceLine);
+  }
+  return null;
+}
+
+function scrollToAnchor(anchor) {
+  const target = [...markdownBodyElement.querySelectorAll('[data-anchor]')]
+    .find((heading) => heading.dataset.anchor === anchor.toLowerCase());
+  target?.scrollIntoView({ block: 'start' });
+}
+
+markdownElement.addEventListener('click', (event) => {
+  const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+  if (!link || !markdownElement.contains(link)) return;
+  event.preventDefault();
+  const href = link.getAttribute('href');
+  if (href.startsWith('#')) {
+    let anchor = href.slice(1);
+    try {
+      anchor = decodeURIComponent(anchor);
+    } catch {
+      // Keep the raw fragment.
+    }
+    scrollToAnchor(anchor);
+    return;
+  }
+  if (currentTabId && href.length <= 4096) {
+    sendEvent({ type: 'openLink', tabId: currentTabId, href });
+  }
+});
+
 window.agtkViewer = Object.freeze({
   clear,
   copySelection,
@@ -333,6 +521,7 @@ window.agtkViewer = Object.freeze({
   reveal,
   saveViewState: sendViewState,
   setAppearance,
+  setPresentation,
   showDiff,
   showFile,
 });
@@ -375,6 +564,37 @@ if (demo === '1') {
       '        user: Annotated[User, Depends(get_current_user)]',
       '        if action in ("create", "update", "delete") and not self.current_user.is_staff:',
       '            raise fr.Forbidden()',
+    ].join('\n'),
+  });
+} else if (demo === 'markdown') {
+  showFile({
+    tabId: 'demo-markdown',
+    path: 'docs/guide.md',
+    label: 'Working tree',
+    presentation: 'preview',
+    text: [
+      '# Guide',
+      '',
+      'Read the [setup notes](setup.md#L3), see [Usage](#usage) or visit https://example.com.',
+      '',
+      '## Usage',
+      '',
+      '- [x] Install',
+      '- [ ] Configure `agtk`',
+      '',
+      '| Key | Action |',
+      '| --- | --- |',
+      '| `Ctrl+F` | Find |',
+      '',
+      '> A quoted note.',
+      '',
+      '```rust',
+      'fn main() {',
+      '    println!("hello");',
+      '}',
+      '```',
+      '',
+      '![Screenshot](screenshot.png)',
     ].join('\n'),
   });
 } else if (demo === 'file') {

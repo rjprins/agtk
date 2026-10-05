@@ -47,6 +47,11 @@ pub(super) enum ViewerEvent {
         tab_id: String,
         state: Value,
     },
+    /// A link clicked in rendered Markdown, as written in the document.
+    OpenLink {
+        tab_id: String,
+        href: String,
+    },
     Error {
         #[serde(default)]
         request_id: Option<String>,
@@ -57,6 +62,8 @@ pub(super) enum ViewerEvent {
 struct ViewerState {
     ready: bool,
     queued: VecDeque<ViewerCommand>,
+    /// Whether rendered Markdown shows instead of Monaco.
+    preview: bool,
 }
 
 enum ViewerCommand {
@@ -75,6 +82,9 @@ enum ViewerCommand {
     PreviousChange,
     NextChange,
     SaveViewState,
+    SetPresentation {
+        preview: bool,
+    },
     SetAppearance {
         theme: String,
         font_family: String,
@@ -126,6 +136,7 @@ impl CodeViewer {
         let state = Rc::new(RefCell::new(ViewerState {
             ready: false,
             queued: VecDeque::new(),
+            preview: false,
         }));
         let message_state = state.clone();
         let message_view = web_view.clone();
@@ -192,6 +203,7 @@ impl CodeViewer {
         if json.len() > MAX_DIFF_BYTES {
             return Err("diff viewer payload is too large".to_owned());
         }
+        self.state.borrow_mut().preview = wants_preview(diff);
         self.enqueue(ViewerCommand::ShowDiff(json));
         Ok(())
     }
@@ -201,6 +213,7 @@ impl CodeViewer {
         if json.len() > MAX_DIFF_BYTES {
             return Err("file viewer payload is too large".to_owned());
         }
+        self.state.borrow_mut().preview = wants_preview(file);
         self.enqueue(ViewerCommand::ShowFile(json));
         Ok(())
     }
@@ -222,7 +235,17 @@ impl CodeViewer {
     }
 
     pub(super) fn copy(&self) {
-        self.enqueue(ViewerCommand::Copy);
+        if self.state.borrow().preview {
+            self.web_view.execute_editing_command("Copy");
+        } else {
+            self.enqueue(ViewerCommand::Copy);
+        }
+    }
+
+    /// Shows the shown Markdown rendered, or its source.
+    pub(super) fn set_presentation(&self, preview: bool) {
+        self.state.borrow_mut().preview = preview;
+        self.enqueue(ViewerCommand::SetPresentation { preview });
     }
 
     pub(super) fn move_to_change(&self, next: bool) {
@@ -270,6 +293,12 @@ impl CodeViewer {
                 state
                     .queued
                     .retain(|queued| !matches!(queued, ViewerCommand::SetAppearance { .. }));
+                state.queued.push_back(command);
+            }
+            ViewerCommand::SetPresentation { .. } => {
+                state
+                    .queued
+                    .retain(|queued| !matches!(queued, ViewerCommand::SetPresentation { .. }));
                 state.queued.push_back(command);
             }
             ViewerCommand::Find { .. }
@@ -320,6 +349,13 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
         ViewerCommand::PreviousChange => ("window.agtkViewer.moveToChange(false)".to_owned(), None),
         ViewerCommand::NextChange => ("window.agtkViewer.moveToChange(true)".to_owned(), None),
         ViewerCommand::SaveViewState => ("window.agtkViewer.saveViewState()".to_owned(), None),
+        ViewerCommand::SetPresentation { preview } => (
+            format!(
+                "window.agtkViewer.setPresentation('{}')",
+                if preview { "preview" } else { "source" }
+            ),
+            None,
+        ),
         ViewerCommand::SetAppearance {
             theme,
             font_family,
@@ -347,6 +383,10 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             }
         },
     );
+}
+
+fn wants_preview(document: &Value) -> bool {
+    document.get("presentation").and_then(Value::as_str) == Some("preview")
 }
 
 fn document_args(json: String) -> glib::Variant {
@@ -395,6 +435,9 @@ fn valid_event(event: &ViewerEvent) -> bool {
         }
         ViewerEvent::ViewState { tab_id, state } => {
             !tab_id.is_empty() && tab_id.len() <= 128 && state.to_string().len() <= 24 * 1024
+        }
+        ViewerEvent::OpenLink { tab_id, href } => {
+            !tab_id.is_empty() && tab_id.len() <= 128 && !href.is_empty() && href.len() <= 4096
         }
         ViewerEvent::Error {
             request_id,
