@@ -1,6 +1,7 @@
 use adw::prelude::*;
 use agtk::instance::{InstanceName, InstancePaths};
 use agtk::ui;
+use std::os::unix::process::CommandExt;
 
 fn main() -> glib::ExitCode {
     let instance = match InstanceName::from_environment() {
@@ -40,5 +41,14 @@ fn main() -> glib::ExitCode {
             ui::build(app, paths.clone());
         }
     });
-    app.run()
+    let exit_code = app.run();
+    if let Some(executable) = ui::take_restart_executable() {
+        // exec keeps the environment and PID; independent session hosts keep running.
+        let error = std::process::Command::new(executable)
+            .args(std::env::args_os().skip(1))
+            .exec();
+        eprintln!("Could not restart agtk: {error}");
+        return glib::ExitCode::FAILURE;
+    }
+    exit_code
 }

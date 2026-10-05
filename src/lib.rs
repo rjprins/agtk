@@ -21,6 +21,7 @@ pub mod mcp;
 pub mod persist;
 pub mod projects;
 pub mod providers;
+pub mod rebuild;
 pub mod session;
 mod session_names;
 pub mod shortcuts;

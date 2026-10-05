@@ -11,6 +11,7 @@ pub(super) struct Menus {
     pub(super) magit: gio::SimpleAction,
     pub(super) branch_review: gio::SimpleAction,
     pub(super) restart_agents: gio::SimpleAction,
+    pub(super) rebuild: gio::SimpleAction,
     /// The section whose Pull Requests label carries the attention count.
     surfaces: gio::Menu,
     pub(super) main_button: gtk::MenuButton,
@@ -33,6 +34,10 @@ impl Menus {
         let settings = gio::Menu::new();
         settings.append(Some("Preferences"), Some("win.preferences"));
         settings.append(Some("Keyboard Shortcuts"), Some("win.show-shortcuts"));
+        settings.append(
+            Some("Rebuild and restart agtk"),
+            Some("win.rebuild-and-restart"),
+        );
         let main = gio::Menu::new();
         main.append_section(None, &surfaces);
         main.append_section(None, &agents);
@@ -63,6 +68,7 @@ impl Menus {
             magit: action("magit"),
             branch_review: action("branch-review"),
             restart_agents: action("restart-idle-agents"),
+            rebuild: action("rebuild-and-restart"),
             surfaces,
             main_button,
             git_button,
@@ -87,6 +93,7 @@ impl Menus {
             &self.preferences,
             &self.shortcuts,
             &self.restart_agents,
+            &self.rebuild,
         ] {
             action.set_enabled(true);
         }
@@ -142,6 +149,10 @@ impl Workspace {
             workspace.preferences.open(preferences_ui::SHORTCUTS_PAGE);
         });
         let workspace = self.clone();
+        menus.rebuild.connect_activate(move |_, _| {
+            workspace.rebuild_and_restart();
+        });
+        let workspace = self.clone();
         menus.restart_agents.connect_activate(move |_, _| {
             workspace.restart_idle_agents();
         });
@@ -166,6 +177,7 @@ impl Workspace {
             &menus.magit,
             &menus.branch_review,
             &menus.restart_agents,
+            &menus.rebuild,
         ] {
             self.window.add_action(action);
         }

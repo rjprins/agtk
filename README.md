@@ -225,7 +225,7 @@ agtk has four binaries:
 - `agtkctl` is the command line tool.
 - `agtk-mcp` is the MCP server.
 
-Run `./scripts/install-local.sh` once. This links the installed commands to this checkout's build output. After a change, run `./scripts/build-viewer.sh` and `cargo build --locked --bins`, then restart agtk. Sessions keep running while agtk restarts. Keep the checkout and its build output in place.
+Run `./scripts/install-local.sh` once. This links the installed commands to this checkout's build output. After a change, choose **Rebuild and restart agtk** in the main menu. The window stays open during the build and shows the build output if it fails. To rebuild from a terminal, run `./scripts/build-viewer.sh` and `cargo build --locked --bins`, then restart agtk. Sessions keep running while agtk restarts. Keep the checkout and its build output in place.
 
 Run the checks:
 
