@@ -14,8 +14,6 @@ use crate::emacs::EmacsIntegration;
 use crate::instance::ensure_private_dir;
 use crate::session_names::next_worktree_session_name;
 
-// Matches the original agmux, which sent 3 events for a browser wheel notch.
-const WHEEL_EVENTS_PER_NOTCH: f64 = 3.0;
 const SGR_WHEEL_UP: &str = "\x1b[<64;1;1M";
 const SGR_WHEEL_DOWN: &str = "\x1b[<65;1;1M";
 
@@ -1379,10 +1377,7 @@ fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
             pending.set(0.0);
             return glib::Propagation::Proceed;
         }
-        // Touchpads send fractions of a notch, so carry the remainder over.
-        let total = pending.get() + dy * WHEEL_EVENTS_PER_NOTCH;
-        let events = total.trunc();
-        pending.set(total - events);
+        let events = wheel_events(&pending, dy, controller.unit(), terminal.char_height());
         let sequence = if events < 0.0 {
             SGR_WHEEL_UP
         } else {
@@ -1395,6 +1390,25 @@ fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
         glib::Propagation::Stop
     });
     terminal.add_controller(scroll);
+}
+
+fn wheel_events(
+    pending: &Cell<f64>,
+    dy: f64,
+    unit: gtk::gdk::ScrollUnit,
+    line_height: libc::c_long,
+) -> f64 {
+    // Wheel deltas count clicks; touchpad deltas count logical pixels.
+    // Claude applies its own scroll step to each event, so send each only once.
+    let delta = match unit {
+        gtk::gdk::ScrollUnit::Surface => dy / line_height.max(1) as f64,
+        _ => dy,
+    };
+    // Preserve sub-line movement instead of dropping small touchpad deltas.
+    let total = pending.get() + delta;
+    let events = total.trunc();
+    pending.set(total - events);
+    events
 }
 
 /// Where a new session goes and whether it takes the selection. A relaunch
@@ -1500,6 +1514,107 @@ fn focus_terminal_on_row_activation(row: &gtk::ListBoxRow, terminal: &vte::Termi
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+    fn fullscreen_wheel_input_is_forwarded_once() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use std::time::{Duration, Instant};
+        use vte::prelude::*;
+
+        let display = std::env::var("AGTK_TEST_DISPLAY").expect("private display required");
+        assert!(std::path::Path::new(&display).is_absolute());
+        // SAFETY: run this GTK test by itself with --test-threads=1.
+        unsafe {
+            std::env::set_var("WAYLAND_DISPLAY", display);
+            std::env::set_var("GDK_BACKEND", "wayland");
+        }
+        gtk::init().unwrap();
+        let terminal = vte::Terminal::new();
+        let window = gtk::Window::new();
+        window.set_default_size(800, 480);
+        window.set_child(Some(&terminal));
+        window.present();
+        let pump_until = |condition: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !condition() {
+                assert!(Instant::now() < deadline, "timed out waiting for VTE");
+                glib::MainContext::default().iteration(false);
+            }
+        };
+        terminal.feed("line\r\n".repeat(100).as_bytes());
+        pump_until(&|| !super::on_alternate_screen(&terminal));
+        super::route_wheel_to_fullscreen_app(&terminal);
+        let controllers = terminal.observe_controllers();
+        let controller = (0..controllers.n_items())
+            .filter_map(|index| controllers.item(index))
+            .filter_map(|object| object.downcast::<gtk::EventControllerScroll>().ok())
+            .find(|controller| controller.propagation_phase() == gtk::PropagationPhase::Capture)
+            .expect("Claude scroll controller");
+        let input = Rc::new(RefCell::new(String::new()));
+        let sent = input.clone();
+        terminal.connect_commit(move |_, text, _| sent.borrow_mut().push_str(text));
+        let emit = |dy: f64| controller.emit_by_name::<bool>("scroll", &[&0.0_f64, &dy]);
+
+        assert!(!emit(1.0), "normal scrollback belongs to VTE");
+        assert!(input.borrow().is_empty());
+        terminal.feed(b"\x1b[?1049h");
+        pump_until(&|| super::on_alternate_screen(&terminal));
+
+        assert!(emit(1.0));
+        assert_eq!(&*input.borrow(), super::SGR_WHEEL_DOWN);
+        input.borrow_mut().clear();
+        assert!(emit(-2.0));
+        assert_eq!(&*input.borrow(), &super::SGR_WHEEL_UP.repeat(2));
+        window.close();
+    }
+
+    #[test]
+    fn a_wheel_click_sends_one_event_to_claude() {
+        let pending = std::cell::Cell::new(0.0);
+        for dy in [1.0, -1.0, 2.0, -2.0] {
+            assert_eq!(
+                super::wheel_events(&pending, dy, gtk::gdk::ScrollUnit::Wheel, 24),
+                dy
+            );
+        }
+    }
+
+    #[test]
+    fn touchpad_pixels_accumulate_into_terminal_lines() {
+        let pending = std::cell::Cell::new(0.0);
+        for expected in [0.0, 0.0, 1.0] {
+            assert_eq!(
+                super::wheel_events(&pending, 8.0, gtk::gdk::ScrollUnit::Surface, 24),
+                expected
+            );
+        }
+        assert_eq!(
+            super::wheel_events(&pending, -96.0, gtk::gdk::ScrollUnit::Surface, 24),
+            -4.0
+        );
+        // Doubling the font height doubles the movement needed for an event.
+        assert_eq!(
+            super::wheel_events(&pending, 24.0, gtk::gdk::ScrollUnit::Surface, 48),
+            0.0
+        );
+        assert_eq!(
+            super::wheel_events(&pending, 24.0, gtk::gdk::ScrollUnit::Surface, 48),
+            1.0
+        );
+    }
+
+    #[test]
+    fn fractional_wheel_clicks_are_preserved() {
+        let pending = std::cell::Cell::new(0.0);
+        for expected in [0.0, 0.0, 0.0, -1.0] {
+            assert_eq!(
+                super::wheel_events(&pending, -0.25, gtk::gdk::ScrollUnit::Wheel, 24),
+                expected
+            );
+        }
+    }
+
     #[test]
     fn only_a_nearly_still_press_counts_as_a_link_click() {
         assert!(super::is_click((10.0, 10.0), (10.0, 10.0)));
