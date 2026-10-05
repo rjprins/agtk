@@ -215,11 +215,12 @@ pub(super) fn commit_page(
             git_argument(range),
         ],
     )?;
-    let fields = output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|field| !field.is_empty())
-        .collect::<Vec<_>>();
+    // Each commit ends in NUL. Fields can be empty, such as a commit without a
+    // message, so only the empty piece after the last NUL is dropped.
+    let mut fields = output.stdout.split(|byte| *byte == 0).collect::<Vec<_>>();
+    if fields.last().is_some_and(|field| field.is_empty()) {
+        fields.pop();
+    }
     if fields.len() % 4 != 0 {
         return Err("Git returned a malformed commit page".to_owned());
     }

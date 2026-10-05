@@ -162,3 +162,28 @@ fn file_documents_report_text_binary_and_missing_files() {
     };
     assert_eq!(directory.reason, "This path is a directory");
 }
+
+#[test]
+fn a_commit_without_a_message_still_lists_every_commit() {
+    let dir = repository();
+    let root = dir.path();
+    git(
+        root,
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "--allow-empty-message",
+            "-m",
+            "",
+        ],
+    );
+    let snapshot = read_changes_snapshot(root, Some("HEAD~2"), 1, 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.commits.len(), 2);
+    assert_eq!(snapshot.commits[0].subject, "");
+    assert_eq!(snapshot.commits[1].subject, "Change");
+}
