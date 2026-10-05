@@ -381,16 +381,36 @@ impl<B: ControlBackend> McpServer<B> {
     }
 }
 
+fn skip_rest_of_line<R: BufRead>(input: &mut R) -> io::Result<()> {
+    loop {
+        let buffer = input.fill_buf()?;
+        if buffer.is_empty() {
+            return Ok(());
+        }
+        if let Some(end) = memchr::memchr(b'\n', buffer) {
+            input.consume(end + 1);
+            return Ok(());
+        }
+        let length = buffer.len();
+        input.consume(length);
+    }
+}
+
 impl<B: ControlBackend> McpServer<B> {
     pub fn serve<R: BufRead, W: Write>(&mut self, mut input: R, mut output: W) -> io::Result<()> {
         let mut bytes = Vec::new();
         loop {
             bytes.clear();
-            let read = input.read_until(b'\n', &mut bytes)?;
+            // Bounded, so a line without an end cannot grow without limit.
+            let read = io::Read::take(&mut input, MAX_MCP_MESSAGE_BYTES as u64 + 1)
+                .read_until(b'\n', &mut bytes)?;
             if read == 0 {
                 return Ok(());
             }
             if bytes.len() > MAX_MCP_MESSAGE_BYTES {
+                if !bytes.ends_with(b"\n") {
+                    skip_rest_of_line(&mut input)?;
+                }
                 write_message(
                     &mut output,
                     &rpc_error(

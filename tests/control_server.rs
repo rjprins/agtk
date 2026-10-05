@@ -183,3 +183,28 @@ fn exchange(socket: &std::path::Path, request: &str) -> String {
         .expect("read control response");
     response
 }
+
+#[test]
+fn a_client_that_trickles_bytes_is_dropped_at_the_request_deadline() {
+    let directory = tempfile::tempdir().expect("create temporary directory");
+    let socket = directory.path().join("control.sock");
+    let (_server, _requests) = ControlServer::bind(&socket).expect("bind control server");
+    let mut stream = UnixStream::connect(&socket).expect("connect");
+    let started = std::time::Instant::now();
+    // Each byte arrives well within the per-read timeout, but the request never ends.
+    while stream.write_all(b" ").is_ok() && started.elapsed() < Duration::from_secs(12) {
+        thread::sleep(Duration::from_millis(500));
+        let mut probe = [0u8; 1];
+        stream.set_nonblocking(true).unwrap();
+        let closed = matches!(stream.read(&mut probe), Ok(_));
+        stream.set_nonblocking(false).unwrap();
+        if closed {
+            break;
+        }
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(8),
+        "server kept a trickling client for {elapsed:?}"
+    );
+}

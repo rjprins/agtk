@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, mpsc::RecvTimeoutError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -192,6 +192,10 @@ fn handle_client(mut stream: UnixStream, requests: &Sender<PendingRequest>) -> i
 
 fn read_request(stream: &UnixStream) -> io::Result<(Vec<u8>, bool)> {
     let mut bytes = Vec::new();
+    let stream = DeadlineReader {
+        stream,
+        deadline: Instant::now() + REQUEST_TIMEOUT,
+    };
     let mut reader = BufReader::new(stream).take((MAX_REQUEST_BYTES + 2) as u64);
     reader.read_until(b'\n', &mut bytes)?;
     let newline_terminated = bytes.ends_with(b"\n");
@@ -199,6 +203,24 @@ fn read_request(stream: &UnixStream) -> io::Result<(Vec<u8>, bool)> {
         bytes.pop();
     }
     Ok((bytes, newline_terminated))
+}
+
+/// Each read waits only for what is left of the request deadline, so a client
+/// that trickles bytes cannot hold its slot past `REQUEST_TIMEOUT`.
+struct DeadlineReader<'a> {
+    stream: &'a UnixStream,
+    deadline: Instant,
+}
+
+impl Read for DeadlineReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        self.stream.set_read_timeout(Some(left))?;
+        (&mut &*self.stream).read(buffer)
+    }
 }
 
 fn request_id_hint(bytes: &[u8]) -> String {

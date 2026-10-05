@@ -406,3 +406,24 @@ fn backend_failures_are_reported_as_tool_errors_not_json_rpc_failures() {
             .contains("unavailable")
     );
 }
+
+#[test]
+fn an_oversized_line_is_rejected_and_the_next_message_still_served() {
+    let mut input = vec![b'x'; 3 * 1024 * 1024];
+    input.push(b'\n');
+    input.extend(request(2, "tools/list", json!({})).to_string().bytes());
+    input.push(b'\n');
+    let mut output = Vec::new();
+    McpServer::new(MockBackend::default())
+        .serve(std::io::BufReader::new(input.as_slice()), &mut output)
+        .unwrap();
+
+    let replies = String::from_utf8(output).unwrap();
+    let replies = replies
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(replies.len(), 2);
+    assert_eq!(replies[0]["error"]["code"], -32600);
+    assert_eq!(replies[1]["id"], 2);
+}
