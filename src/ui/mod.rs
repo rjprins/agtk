@@ -843,10 +843,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         button.connect_clicked(move |_| launch_agent_workspace.set_launch_agent(kind));
     }
     let launch_workspace = workspace.clone();
-    workspace
-        .launch
-        .modal
-        .connect_show(move || launch_workspace.prepare_launch_panel());
+    workspace.launch.modal.connect_show(move || {
+        launch_workspace.prepare_launch_panel();
+        launch_workspace.launch.project.grab_focus();
+    });
 
     let launch_workspace = workspace.clone();
     new_shell.connect_clicked(move |_| launch_workspace.launch_shell());

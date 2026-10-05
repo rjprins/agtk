@@ -617,7 +617,7 @@ impl Workspace {
     /// refresh the choices themselves.
     fn set_launch_location(&self, project_root: &str, worktree: &str) {
         self.launch.updating_choices.set(true);
-        self.launch.project.set_text(project_root);
+        set_text_without_suggestions(&self.launch.project, project_root);
         self.launch.worktree.set_text(worktree);
         self.launch.cwd.set_text(worktree);
         self.launch.updating_choices.set(false);
@@ -1333,6 +1333,20 @@ fn install_choice_completion(
             changed_completion.complete();
         }
     });
+}
+
+/// GTK opens the suggestions shortly after any change while the entry has
+/// focus. The project entry takes focus as the dialog opens, so a project
+/// filled in on opening would show its suggestions unasked.
+fn set_text_without_suggestions(entry: &gtk::Entry, text: &str) {
+    let completion = entry.completion();
+    if let Some(completion) = &completion {
+        completion.set_popup_completion(false);
+    }
+    entry.set_text(text);
+    if let Some(completion) = &completion {
+        completion.set_popup_completion(true);
+    }
 }
 
 /// The completion's popup, which GTK parents to the entry without exposing it.
