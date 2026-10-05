@@ -63,9 +63,12 @@ impl ControlClient {
                     "control response is not newline terminated",
                 )));
             }
+            // Only the new bytes can hold the newline, so a large response
+            // is not rescanned from the start on every chunk.
+            let newline = chunk[..count].iter().position(|byte| *byte == b'\n');
             response.extend_from_slice(&chunk[..count]);
-            if let Some(newline) = response.iter().position(|byte| *byte == b'\n') {
-                response.truncate(newline);
+            if let Some(newline) = newline {
+                response.truncate(response.len() - count + newline);
                 break;
             }
             if response.len() > MAX_RESPONSE_BYTES {
