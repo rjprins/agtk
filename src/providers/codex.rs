@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use super::conversation::{message, skip_user_text, string_field};
-use super::facts::{contains, entry_cwd, entry_session_id, parse_utc_millis};
+use super::facts::{contains, entry_cwd, entry_session_id};
 use super::{ConversationRole, LOG_HEAD_BYTES, LOG_PREVIEW_BYTES};
 use crate::history::submitted_prompt;
 use crate::persist::PersistResult;
+use crate::timestamps::parse_utc_millis;
 
 pub(super) struct CodexSessionMeta {
     pub(super) session_id: String,

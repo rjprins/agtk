@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use super::facts::parse_utc_millis;
 use super::{ConversationMessage, ConversationRole, LOG_PREVIEW_BYTES, MAX_MESSAGE_CHARS};
 use crate::persist::PersistResult;
+use crate::timestamps::parse_utc_millis;
 
 pub fn recent_mutated_paths(path: &Path, limit: usize) -> PersistResult<Vec<PathBuf>> {
     let content = read_tail(path, LOG_PREVIEW_BYTES)?;

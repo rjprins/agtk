@@ -222,7 +222,7 @@ impl DiscoveryRoots {
 
 #[cfg(test)]
 mod tests {
-    use super::facts::parse_utc_millis;
+    use crate::timestamps::parse_utc_millis;
 
     #[test]
     fn provider_times_parse_as_utc_milliseconds() {
@@ -236,5 +236,20 @@ mod tests {
             Some(1_709_164_800_000)
         );
         assert_eq!(parse_utc_millis(b"2026-09-29T14:46:47+02:00"), None);
+    }
+
+    #[test]
+    fn provider_times_reject_invalid_dates_clocks_and_fraction_digits() {
+        for invalid in [
+            "2026-09-29T24:00:00Z",
+            "2026-02-29T00:00:00Z",
+            "2026-09-31T00:00:00Z",
+            "2026-09-29T00:60:00Z",
+            "2026-09-29T00:00:61Z",
+            "2026-09-29T00:00:00.123junkZ",
+            "9223372036854775807-01-01T00:00:00Z",
+        ] {
+            assert_eq!(parse_utc_millis(invalid.as_bytes()), None, "{invalid}");
+        }
     }
 }

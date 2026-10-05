@@ -16,6 +16,7 @@ use super::conversation::{
 use super::discovery::LogCandidate;
 use super::{AgentProvider, ConversationRole, LOG_HEAD_BYTES, MAX_TITLE_CHARS, ProviderSession};
 use crate::persist::PersistResult;
+use crate::timestamps::parse_utc_millis;
 
 /// What one log says about its session. Cached, so keep it small.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -214,33 +215,6 @@ fn scan_line(provider: AgentProvider, line: &[u8], facts: &mut LogFacts) {
 }
 
 /// Parses the `2026-09-29T14:46:47.853Z` times both providers write.
-pub(super) fn parse_utc_millis(value: &[u8]) -> Option<u64> {
-    let text = std::str::from_utf8(value).ok()?.strip_suffix('Z')?;
-    let (date, time) = text.split_once('T')?;
-    let mut date = date.splitn(3, '-').map(str::parse::<i64>);
-    let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
-    let (clock, fraction) = time.split_once('.').unwrap_or((time, "0"));
-    let mut clock = clock.splitn(3, ':').map(str::parse::<i64>);
-    let (hour, minute, second) = (
-        clock.next()?.ok()?,
-        clock.next()?.ok()?,
-        clock.next()?.ok()?,
-    );
-    let millis = format!("{fraction:0<3}").get(..3)?.parse::<i64>().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    // Days from the civil date, after Howard Hinnant's algorithm.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second;
-    u64::try_from(seconds * 1_000 + millis).ok()
-}
-
 /// Reads the log head line by line and stops once every fact is known, which
 /// is usually within the first few lines. None for empty or ancillary logs.
 fn read_head_facts(candidate: &LogCandidate) -> PersistResult<Option<LogFacts>> {

@@ -28,6 +28,7 @@ mod session_names;
 pub mod shortcuts;
 pub mod terminal_text;
 mod text;
+mod timestamps;
 pub mod ui;
 pub mod welcome;
 pub mod workspace_tabs;

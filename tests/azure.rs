@@ -61,6 +61,17 @@ fn azure_remotes_and_active_pr_payloads_are_strictly_normalized() {
 }
 
 #[test]
+fn azure_dates_reject_invalid_calendar_days_and_fraction_digits() {
+    let reference = parse_azure_remote("https://dev.azure.com/demo/Project/_git/app").unwrap();
+    for invalid in ["2026-02-29T00:00:00Z", "2026-09-29T00:00:00.123junkZ"] {
+        assert!(normalize_active_prs(&reference, json!([{
+            "pullRequestId":1, "title":"Review", "creationDate":invalid,
+            "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main", "isDraft":false
+        }])).is_empty(), "{invalid}");
+    }
+}
+
+#[test]
 fn attention_baselines_then_tracks_new_published_and_review_events_with_cas_acknowledgement() {
     let draft = pr(1, true, 0, 100);
     let initial = reconcile_attention(None, std::slice::from_ref(&draft));
