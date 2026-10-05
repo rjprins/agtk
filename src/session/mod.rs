@@ -1,9 +1,11 @@
 use std::collections::VecDeque;
 
+mod kind;
 mod launch;
 mod protocol;
 mod session_host;
 
+pub use kind::{SessionKind, SessionState};
 pub use launch::{
     LaunchPlanError, SessionHostLaunchPlan, SessionLaunchPlan, is_installed, warm_shell_path,
 };

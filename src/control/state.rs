@@ -1,10 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
 
 use crate::appearance::ThemeKey;
+use crate::session::{SessionKind, SessionState};
 use crate::shortcuts::ShortcutAction;
-
-use super::SessionKind;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,19 +66,6 @@ pub struct WorktreeGroupSummary {
     pub path: String,
     pub branch: String,
     pub session_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SessionState {
-    Running,
-    Busy,
-    Ready,
-    Waiting,
-    /// Nothing is running, or the finished turn has been viewed.
-    Idle,
-    Exited,
-    Reconnecting,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

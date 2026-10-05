@@ -6,8 +6,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::control::{CreateSessionParams, SessionKind};
+use crate::control::CreateSessionParams;
+
 use crate::persist::PersistResult;
+use crate::session::SessionKind;
 
 mod codex;
 mod conversation;
@@ -42,6 +44,15 @@ impl AgentProvider {
         match self {
             Self::Codex => SessionKind::Codex,
             Self::Claude => SessionKind::Claude,
+        }
+    }
+
+    /// The provider whose conversations a session of this kind resumes, if any.
+    pub const fn from_kind(kind: SessionKind) -> Option<Self> {
+        match kind {
+            SessionKind::Codex => Some(Self::Codex),
+            SessionKind::Claude => Some(Self::Claude),
+            _ => None,
         }
     }
 

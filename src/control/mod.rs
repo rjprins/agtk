@@ -11,7 +11,7 @@ pub use protocol::{
     ControlError, ControlRequest, ControlResponse, CreateSessionParams, ErrorCode, GetTextParams,
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectRemoveParams, ProjectSetParams, RenameSessionParams,
-    ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionSetStateParams,
+    ResponseBody, SendInputParams, SessionIdParams, SessionSetStateParams,
     SetSessionWorktreeParams, ShortcutSetParams, UiDiffScope, UiOpenDiffParams, UiOpenFileParams,
     UiShowParams, UiSurface, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
     control_timeout, decode_request, decode_response, encode_request, encode_response,
@@ -19,7 +19,9 @@ pub use protocol::{
 pub use server::{ControlServer, PendingRequest};
 pub use state::{
     AppState, AppearanceSummary, AttentionSummary, Bounds, CaptureResult, ProjectSummary,
-    SessionState, SessionSummary, ShortcutSummary, TextSnapshot, UiInspection, UiNode, WindowState,
+    SessionSummary, ShortcutSummary, TextSnapshot, UiInspection, UiNode, WindowState,
     WorktreeGroupSummary,
 };
 pub use wait::WaitCondition;
+
+pub use crate::session::{SessionKind, SessionState};

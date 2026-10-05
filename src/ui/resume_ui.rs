@@ -186,9 +186,9 @@ impl Workspace {
             ids.into_iter()
                 .filter(|id| sessions.contains_key(id))
                 .partition(|id| {
-                    sessions
-                        .get(id)
-                        .is_some_and(|s| agents_ui::agent_provider(s.record.kind).is_some())
+                    sessions.get(id).is_some_and(|s| {
+                        crate::providers::AgentProvider::from_kind(s.record.kind).is_some()
+                    })
                 })
         };
         let count = agents.len() + others.len();
@@ -225,8 +225,8 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::{lost_its_host, prompt_body, relaunch_params, session_location};
-    use crate::control::{SessionKind, SessionState};
     use crate::persist::SessionRecord;
+    use crate::session::{SessionKind, SessionState};
     use std::path::PathBuf;
 
     fn record(kind: SessionKind) -> SessionRecord {

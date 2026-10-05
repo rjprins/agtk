@@ -599,14 +599,7 @@ fn parse_session_input(arguments: &[String]) -> Result<ControlCommand, Failure> 
 }
 
 fn parse_session_kind(value: &str) -> Result<SessionKind, Failure> {
-    match value {
-        "shell" => Ok(SessionKind::Shell),
-        "codex" => Ok(SessionKind::Codex),
-        "claude" => Ok(SessionKind::Claude),
-        "gemini" => Ok(SessionKind::Gemini),
-        "custom" => Ok(SessionKind::Custom),
-        _ => Err(Failure::Usage(format!("unknown session kind: {value}"))),
-    }
+    value.parse().map_err(Failure::Usage)
 }
 
 fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure> {

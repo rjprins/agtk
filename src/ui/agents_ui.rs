@@ -928,11 +928,7 @@ impl Workspace {
             .values()
             .filter(|session| session.record.state != SessionState::Exited)
             .filter_map(|session| {
-                let provider = match session.record.kind {
-                    SessionKind::Codex => AgentProvider::Codex,
-                    SessionKind::Claude => AgentProvider::Claude,
-                    _ => return None,
-                };
+                let provider = AgentProvider::from_kind(session.record.kind)?;
                 Some((provider, session.record.conversation_id.clone()?))
             })
             .collect()
@@ -947,7 +943,7 @@ impl Workspace {
             self.show_error("This session is still running");
             return;
         }
-        if agent_provider(record.kind).is_none() {
+        if AgentProvider::from_kind(record.kind).is_none() {
             return;
         }
         let Some(conversation_id) = record.conversation_id.clone() else {
@@ -965,7 +961,7 @@ impl Workspace {
         let Some(record) = self.sessions.borrow().get(id).map(|s| s.record.clone()) else {
             return;
         };
-        if agent_provider(record.kind).is_none() {
+        if AgentProvider::from_kind(record.kind).is_none() {
             self.report_failure(
                 pending,
                 ErrorCode::OperationRefused,
@@ -1006,7 +1002,8 @@ impl Workspace {
             .borrow()
             .values()
             .filter(|s| {
-                agent_provider(s.record.kind).is_some() && s.record.state != SessionState::Exited
+                AgentProvider::from_kind(s.record.kind).is_some()
+                    && s.record.state != SessionState::Exited
             })
             .map(|s| (s.record.id.clone(), s.record.state))
             .partition(|(_, state)| is_between_turns(*state));
@@ -1055,7 +1052,7 @@ impl Workspace {
         let Some(kind) = self.sessions.borrow().get(id).map(|s| s.record.kind) else {
             return;
         };
-        if agent_provider(kind).is_none() {
+        if AgentProvider::from_kind(kind).is_none() {
             self.report_failure(
                 pending,
                 ErrorCode::OperationRefused,
@@ -1088,7 +1085,7 @@ impl Workspace {
             );
             return;
         };
-        let Some(provider) = agent_provider(record.kind) else {
+        let Some(provider) = AgentProvider::from_kind(record.kind) else {
             return;
         };
         let nothing_to_copy = "it has no conversation to copy yet";
@@ -1222,7 +1219,7 @@ impl Workspace {
                     let record = &sessions.get(id)?.record;
                     Some((
                         id.clone(),
-                        agent_provider(record.kind)?,
+                        AgentProvider::from_kind(record.kind)?,
                         record.conversation_id.clone(),
                     ))
                 })
@@ -1291,7 +1288,7 @@ impl Workspace {
         let Some(record) = self.sessions.borrow().get(id).map(|s| s.record.clone()) else {
             return;
         };
-        let Some(provider) = agent_provider(record.kind) else {
+        let Some(provider) = AgentProvider::from_kind(record.kind) else {
             return;
         };
         let mut args = conversation_id
@@ -1338,11 +1335,7 @@ impl Workspace {
             .filter_map(|session| {
                 Some(UnclaimedAgent {
                     session_id: session.record.id.clone(),
-                    provider: match session.record.kind {
-                        SessionKind::Codex => AgentProvider::Codex,
-                        SessionKind::Claude => AgentProvider::Claude,
-                        _ => return None,
-                    },
+                    provider: AgentProvider::from_kind(session.record.kind)?,
                     cwd: session.record.cwd.clone()?,
                     launched_at: session.record.created_at,
                 })
@@ -1615,10 +1608,8 @@ impl Workspace {
 
     /// Remembers the name of an agent row that is closing, so the dialog shows it later.
     pub(super) fn remember_agent_name(&self, record: &SessionRecord) {
-        let provider = match record.kind {
-            SessionKind::Claude => AgentProvider::Claude,
-            SessionKind::Codex => AgentProvider::Codex,
-            _ => return,
+        let Some(provider) = AgentProvider::from_kind(record.kind) else {
+            return;
         };
         let Some(conversation_id) = record.conversation_id.as_deref() else {
             return;
@@ -2136,14 +2127,6 @@ fn compact_agent_path(path: &Path) -> String {
         .rev()
         .collect::<String>();
     format!("…{suffix}")
-}
-
-pub(super) fn agent_provider(kind: SessionKind) -> Option<AgentProvider> {
-    match kind {
-        SessionKind::Claude => Some(AgentProvider::Claude),
-        SessionKind::Codex => Some(AgentProvider::Codex),
-        _ => None,
-    }
 }
 
 /// An agent in these states has no turn in flight, so a restart loses nothing.

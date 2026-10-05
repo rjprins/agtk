@@ -8,6 +8,7 @@ use crate::azure::PrAttention;
 use crate::claude_presets::{ClaudeModelPreset, ClaudePresetPreferences};
 use crate::history::submitted_prompt;
 use crate::providers::AgentProvider;
+use crate::session::SessionKind;
 use crate::shortcuts::ShortcutAction;
 use crate::worktrees::DeleteBranch;
 
@@ -77,16 +78,6 @@ pub fn control_timeout(command: &ControlCommand) -> Duration {
         ControlCommand::UiOpenDiff(_) | ControlCommand::UiOpenFile(_) => DIFF_CONTROL_TIMEOUT,
         _ => DEFAULT_CONTROL_TIMEOUT,
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SessionKind {
-    Shell,
-    Codex,
-    Claude,
-    Gemini,
-    Custom,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

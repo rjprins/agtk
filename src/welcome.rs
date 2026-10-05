@@ -3,7 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::control::{CreateSessionParams, SessionKind};
+use crate::control::CreateSessionParams;
+
+use crate::session::SessionKind;
 
 /// The welcome agent's first prompt. The user reads it as their own first message.
 pub const PROMPT: &str = "\

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use regex::Regex;
 
-use crate::control::{SessionKind, SessionState};
+use crate::session::{SessionKind, SessionState};
 
 /// What a hook or the screen says about the current turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

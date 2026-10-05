@@ -385,8 +385,8 @@ pub(super) fn abandoned_worktree<'a>(
 #[cfg(test)]
 mod tests {
     use super::abandoned_worktree;
-    use crate::control::SessionState;
     use crate::persist::SessionRecord;
+    use crate::session::SessionState;
     use std::path::PathBuf;
 
     #[test]

@@ -9,7 +9,9 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::thread;
 
-use crate::control::{CreateSessionParams, SessionKind};
+use crate::control::CreateSessionParams;
+
+use super::SessionKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionLaunchPlan {

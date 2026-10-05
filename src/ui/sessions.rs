@@ -1554,8 +1554,8 @@ mod tests {
     }
 
     use super::{backfill_restored_session_context, focus_terminal_on_row_activation};
-    use crate::control::SessionKind;
     use crate::persist::SessionRecord;
+    use crate::session::SessionKind;
     use crate::worktrees::WorktreeManager;
     use gtk::prelude::*;
     use std::fs;

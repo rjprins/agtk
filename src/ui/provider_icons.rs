@@ -2,8 +2,8 @@ use std::path::Path;
 
 use gtk::prelude::*;
 
-use crate::control::SessionKind;
 use crate::providers::AgentProvider;
+use crate::session::SessionKind;
 
 #[derive(Clone, Copy)]
 enum ProviderIcon {

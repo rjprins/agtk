@@ -840,15 +840,13 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
                 .map(|item| item.string().to_string())
                 .as_deref()
             {
-                Some("codex") => SessionKind::Codex,
-                Some("claude") => SessionKind::Claude,
-                Some("gemini") => SessionKind::Gemini,
-                _ => SessionKind::Shell,
+                Some(name) => name.parse().unwrap_or(SessionKind::Shell),
+                None => SessionKind::Shell,
             };
             launch_agent_workspace
                 .launch
                 .agent_options
-                .set_visible_child_name(session_kind_name(kind));
+                .set_visible_child_name(kind.as_str());
         });
     let launch_submit_workspace = workspace.clone();
     workspace.launch.submit.connect_clicked(move |_| {
@@ -1173,7 +1171,7 @@ impl Workspace {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        format!("{}-{millis}-{sequence}", session_kind_name(kind))
+        format!("{}-{millis}-{sequence}", kind.as_str())
     }
 
     fn report_failure(
@@ -1224,16 +1222,6 @@ fn widget_bounds(widget: &impl IsA<gtk::Widget>, window: &impl IsA<gtk::Widget>)
         y: bounds.y(),
         width: bounds.width(),
         height: bounds.height(),
-    }
-}
-
-const fn session_kind_name(kind: SessionKind) -> &'static str {
-    match kind {
-        SessionKind::Shell => "shell",
-        SessionKind::Codex => "codex",
-        SessionKind::Claude => "claude",
-        SessionKind::Gemini => "gemini",
-        SessionKind::Custom => "custom",
     }
 }
 

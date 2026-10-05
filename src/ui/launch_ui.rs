@@ -985,7 +985,7 @@ impl Workspace {
     }
 
     pub(super) fn set_launch_agent(&self, kind: SessionKind) {
-        let name = session_kind_name(kind);
+        let name = kind.as_str();
         let selected = (0..self.launch.agent_choices.n_items())
             .find(|index| {
                 self.launch
@@ -1010,10 +1010,8 @@ impl Workspace {
             .map(|item| item.string().to_string())
             .as_deref()
         {
-            Some("codex") => SessionKind::Codex,
-            Some("claude") => SessionKind::Claude,
-            Some("gemini") => SessionKind::Gemini,
-            _ => SessionKind::Shell,
+            Some(name) => name.parse().unwrap_or(SessionKind::Shell),
+            None => SessionKind::Shell,
         }
     }
 
@@ -1066,12 +1064,7 @@ impl Workspace {
     fn all_launch_flags(&self) -> BTreeMap<String, BTreeMap<String, Value>> {
         [SessionKind::Claude, SessionKind::Codex, SessionKind::Gemini]
             .into_iter()
-            .map(|kind| {
-                (
-                    session_kind_name(kind).to_owned(),
-                    self.current_launch_flags(kind),
-                )
-            })
+            .map(|kind| (kind.as_str().to_owned(), self.current_launch_flags(kind)))
             .collect()
     }
 

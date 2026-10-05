@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::control::SessionKind;
+use crate::session::SessionKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Choice {

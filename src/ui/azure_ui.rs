@@ -389,42 +389,35 @@ impl Workspace {
                     pull_request: item.pull_request.clone(),
                 });
 
-                if selected.is_none() {
-                    let provider = match kind {
-                        SessionKind::Claude => Some(AgentProvider::Claude),
-                        SessionKind::Codex => Some(AgentProvider::Codex),
-                        _ => None,
-                    };
-                    if let Some(provider) = provider {
-                        let discovered = ProviderDiscovery::from_environment()
-                            .discover(now_millis(), &BTreeSet::new())?;
-                        let agent_session = discovered.into_iter().find(|candidate| {
-                            candidate.provider == provider
-                                && conversation_id.as_ref().map_or_else(
-                                    || paths_match(candidate.cwd.as_deref(), cwd.as_deref()),
-                                    |conversation_id| {
-                                        candidate.provider_session_id == *conversation_id
-                                    },
-                                )
-                        });
-                        if let Some(agent_session) = agent_session {
-                            for path in recent_mutated_paths(&agent_session.log_path, 20)? {
-                                let Some(edit_branch) = manager
-                                    .branch_for_path_in_repo(&context.project_root, &path)?
-                                else {
-                                    continue;
-                                };
-                                if let Some(item) = context
-                                    .pull_requests
-                                    .iter()
-                                    .find(|item| item.pull_request.source_branch == edit_branch)
-                                {
-                                    selected = Some(SelectedPrContext {
-                                        session_id: session_id.clone(),
-                                        pull_request: item.pull_request.clone(),
-                                    });
-                                    break;
-                                }
+                if selected.is_none()
+                    && let Some(provider) = AgentProvider::from_kind(kind)
+                {
+                    let discovered = ProviderDiscovery::from_environment()
+                        .discover(now_millis(), &BTreeSet::new())?;
+                    let agent_session = discovered.into_iter().find(|candidate| {
+                        candidate.provider == provider
+                            && conversation_id.as_ref().map_or_else(
+                                || paths_match(candidate.cwd.as_deref(), cwd.as_deref()),
+                                |conversation_id| candidate.provider_session_id == *conversation_id,
+                            )
+                    });
+                    if let Some(agent_session) = agent_session {
+                        for path in recent_mutated_paths(&agent_session.log_path, 20)? {
+                            let Some(edit_branch) =
+                                manager.branch_for_path_in_repo(&context.project_root, &path)?
+                            else {
+                                continue;
+                            };
+                            if let Some(item) = context
+                                .pull_requests
+                                .iter()
+                                .find(|item| item.pull_request.source_branch == edit_branch)
+                            {
+                                selected = Some(SelectedPrContext {
+                                    session_id: session_id.clone(),
+                                    pull_request: item.pull_request.clone(),
+                                });
+                                break;
                             }
                         }
                     }

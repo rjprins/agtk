@@ -207,7 +207,7 @@ impl Workspace {
                         .agent_buttons
                         .iter()
                         .map(|(kind, button)| UiNode {
-                            id: format!("launch-agent-{}", session_kind_name(*kind)),
+                            id: format!("launch-agent-{}", kind.as_str()),
                             role: "button".to_owned(),
                             label: button.label().map(|label| label.to_string()),
                             is_visible: button.is_visible(),
