@@ -113,6 +113,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 ### Integrations
 
 - Azure DevOps pull requests: see PRs that need your attention, and start a review in its own detached `pr-<id>` checkout next to the project. Review sessions open in the background and do not take the selection, and so do sessions started by `agtkctl` or an agent over MCP.
+- PR review settings: open the gear in Pull Requests to choose the Codex model, reasoning effort, approval policy, sandbox permissions, and prompt. These settings apply to new automatic and manual reviews across all projects; defaults inherit your Codex configuration. Use `{pr_id}` in the prompt for the PR number. Choose approval policy `never` to prevent permission prompts, and sandbox permissions appropriate for the commands the review needs.
 - A session that works on a PR, or reviews one, shows a PR button in its sidebar row and a PR bar above its terminal. Both open the PR in the browser.
 - Emacs: open Magit or a branch review for the selected session.
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.

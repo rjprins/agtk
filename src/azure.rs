@@ -127,7 +127,61 @@ pub struct AttentionReconciliation {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PrPreferences {
     #[serde(default)]
+    pub review: PrReviewSettings,
+    #[serde(default)]
     pub projects: BTreeMap<String, PrProjectState>,
+}
+
+/// Settings shared by automatic and manual PR reviews. Empty fields inherit Codex config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrReviewSettings {
+    pub model: String,
+    pub effort: String,
+    pub approval: String,
+    pub sandbox: String,
+    pub prompt: String,
+}
+
+impl Default for PrReviewSettings {
+    fn default() -> Self {
+        Self {
+            model: String::new(),
+            effort: String::new(),
+            approval: String::new(),
+            sandbox: String::new(),
+            prompt: "/review-pr {pr_id}".to_owned(),
+        }
+    }
+}
+
+impl PrReviewSettings {
+    pub fn args(&self) -> Vec<String> {
+        let mut args = crate::launch_model::codex_args_without_agtk_mcp();
+        for (flag, value) in [
+            ("--model", &self.model),
+            ("--ask-for-approval", &self.approval),
+            ("--sandbox", &self.sandbox),
+        ] {
+            if !value.trim().is_empty() {
+                args.extend([flag.to_owned(), value.trim().to_owned()]);
+            }
+        }
+        if !self.effort.is_empty() {
+            args.extend([
+                "-c".to_owned(),
+                format!(
+                    "model_reasoning_effort={}",
+                    serde_json::to_string(&self.effort).unwrap()
+                ),
+            ]);
+        }
+        args
+    }
+
+    pub fn prompt(&self, pr_id: u64) -> String {
+        self.prompt.replace("{pr_id}", &pr_id.to_string())
+    }
 }
 
 impl PrPreferences {

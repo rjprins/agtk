@@ -193,3 +193,41 @@ fn run_git(cwd: &std::path::Path, args: &[&str]) {
             .success()
     );
 }
+
+#[test]
+fn review_settings_preserve_legacy_defaults_and_customize_launch() {
+    let preferences: agtk::azure::PrPreferences =
+        serde_json::from_str(r#"{"projects":{}}"#).unwrap();
+    assert_eq!(preferences.review.prompt(42), "/review-pr 42");
+    assert_eq!(
+        preferences.review.args(),
+        agtk::launch_model::codex_args_without_agtk_mcp()
+    );
+    let mut settings = preferences.review;
+    settings.model = "custom-model".into();
+    settings.effort = "high".into();
+    settings.approval = "never".into();
+    settings.sandbox = "danger-full-access".into();
+    settings.prompt = "Review PR {pr_id} carefully".into();
+    assert_eq!(settings.prompt(42), "Review PR 42 carefully");
+    let args = settings.args();
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["--model", "custom-model"])
+    );
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["--ask-for-approval", "never"])
+    );
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["--sandbox", "danger-full-access"])
+    );
+    assert!(args.contains(&"model_reasoning_effort=\"high\"".to_owned()));
+    assert!(args.contains(&"mcp_servers.agtk.enabled=false".to_owned()));
+    let encoded = serde_json::to_string(&settings).unwrap();
+    assert_eq!(
+        serde_json::from_str::<agtk::azure::PrReviewSettings>(&encoded).unwrap(),
+        settings
+    );
+}

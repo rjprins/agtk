@@ -41,6 +41,8 @@ pub(super) struct PrDialog {
     pub(super) loading: gtk::Box,
     pub(super) updating_toggle: Rc<Cell<bool>>,
     refresh: gtk::Button,
+    settings: gtk::Button,
+    pub(super) review_settings: Rc<RefCell<Option<modal::Modal>>>,
 }
 
 impl PrDialog {
@@ -93,7 +95,12 @@ impl PrDialog {
             .icon_name("view-refresh-symbolic")
             .tooltip_text("Refresh active pull requests")
             .build();
+        let settings = gtk::Button::builder()
+            .icon_name("emblem-system-symbolic")
+            .tooltip_text("PR review settings")
+            .build();
         let modal = modal::Modal::new(parent, "Pull Requests", 1200, 720, &page);
+        modal.header().pack_end(&settings);
         modal.header().pack_start(&refresh);
         Self {
             modal,
@@ -103,12 +110,18 @@ impl PrDialog {
             loading,
             updating_toggle: Rc::new(Cell::new(false)),
             refresh,
+            settings,
+            review_settings: Rc::default(),
         }
     }
 }
 
 impl Workspace {
     pub(super) fn connect_prs(&self) {
+        let workspace = self.clone();
+        self.prs
+            .settings
+            .connect_clicked(move |_| workspace.show_review_settings());
         let workspace = self.clone();
         // Tick faster than the interval so a poll is never a whole round late.
         glib::timeout_add_local(PR_POLL_INTERVAL / 4, move || {
@@ -153,6 +166,158 @@ impl Workspace {
 }
 
 impl Workspace {
+    pub(super) fn show_review_settings(&self) {
+        if let Some(dialog) = self.prs.review_settings.borrow().as_ref()
+            && dialog.is_visible()
+        {
+            dialog.window().present();
+            return;
+        }
+        if let Some(previous) = self.prs.review_settings.borrow_mut().take() {
+            previous.window().destroy();
+        }
+        let current = self.pr_preferences.borrow().review.clone();
+        let group = adw::PreferencesGroup::builder()
+            .title("Codex PR Reviews")
+            .description("Applies to automatic and manual reviews across all projects. Changes affect new reviews.")
+            .build();
+        let model = adw::EntryRow::builder()
+            .title("Model (empty uses Codex default)")
+            .text(&current.model)
+            .build();
+        group.add(&model);
+        fn choice(
+            group: &adw::PreferencesGroup,
+            title: &str,
+            values: &[&str],
+            selected: &str,
+        ) -> adw::ComboRow {
+            let labels: Vec<&str> = values
+                .iter()
+                .map(|value| {
+                    if value.is_empty() {
+                        "Codex default"
+                    } else {
+                        value
+                    }
+                })
+                .collect();
+            let row = adw::ComboRow::builder()
+                .title(title)
+                .model(&gtk::StringList::new(&labels))
+                .selected(
+                    values
+                        .iter()
+                        .position(|value| *value == selected)
+                        .unwrap_or(0) as u32,
+                )
+                .build();
+            group.add(&row);
+            row
+        }
+        const EFFORTS: &[&str] = &[
+            "", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+        ];
+        const APPROVALS: &[&str] = &["", "on-request", "never"];
+        const SANDBOXES: &[&str] = &["", "read-only", "workspace-write", "danger-full-access"];
+        let effort = choice(&group, "Reasoning effort", EFFORTS, &current.effort);
+        let approval = choice(&group, "Approval policy", APPROVALS, &current.approval);
+        approval.set_subtitle(
+            "never prevents approval prompts; commands outside the sandbox will fail.",
+        );
+        let sandbox = choice(&group, "Sandbox permissions", SANDBOXES, &current.sandbox);
+        sandbox.set_subtitle("danger-full-access allows commands without sandbox restrictions.");
+        let prompt_group = adw::PreferencesGroup::builder()
+            .title("Review Prompt")
+            .description("Use {pr_id} for the PR number. Default: /review-pr {pr_id}")
+            .build();
+        let prompt = gtk::TextView::builder()
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .top_margin(12)
+            .bottom_margin(12)
+            .left_margin(12)
+            .right_margin(12)
+            .accessible_role(gtk::AccessibleRole::TextBox)
+            .build();
+        prompt.update_property(&[gtk::accessible::Property::Label("Review prompt")]);
+        prompt.buffer().set_text(&current.prompt);
+        let prompt_scroll = gtk::ScrolledWindow::builder()
+            .min_content_height(140)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&prompt)
+            .build();
+        prompt_scroll.add_css_class("card");
+        prompt_group.add(&prompt_scroll);
+        let page = gtk::Box::new(gtk::Orientation::Vertical, 24);
+        page.set_margin_top(24);
+        page.set_margin_bottom(24);
+        page.set_margin_start(24);
+        page.set_margin_end(24);
+        page.append(&group);
+        page.append(&prompt_group);
+        let scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&page)
+            .build();
+        let dialog = modal::Modal::new(&self.window, "PR Review Settings", 680, 640, &scroll);
+        let save = gtk::Button::with_label("Save");
+        save.add_css_class("suggested-action");
+        dialog.header().pack_end(&save);
+        let workspace = self.clone();
+        let closing = dialog.window().downgrade();
+        save.connect_clicked(move |save| {
+            let buffer = prompt.buffer();
+            let text = buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .to_string();
+            if text.trim().is_empty() {
+                workspace.show_error("Review prompt cannot be empty");
+                return;
+            }
+            let Some(store) = workspace.store.borrow().clone() else {
+                workspace.show_error("Workspace is loading");
+                return;
+            };
+            let settings = crate::azure::PrReviewSettings {
+                model: model.text().trim().to_owned(),
+                effort: EFFORTS[effort.selected() as usize].to_owned(),
+                approval: APPROVALS[approval.selected() as usize].to_owned(),
+                sandbox: SANDBOXES[sandbox.selected() as usize].to_owned(),
+                prompt: text,
+            };
+            let mut preferences = workspace.pr_preferences.borrow().clone();
+            preferences.review = settings.clone();
+            let value = match serde_json::to_value(&preferences) {
+                Ok(value) => value,
+                Err(error) => {
+                    workspace.show_error(&error.to_string());
+                    return;
+                }
+            };
+            save.set_sensitive(false);
+            let save = save.clone();
+            let closing = closing.clone();
+            workspace.run_io(
+                move || store.set_preference("pullRequests", &value),
+                move |workspace, result| {
+                    save.set_sensitive(true);
+                    match result {
+                        Ok(()) => {
+                            workspace.pr_preferences.borrow_mut().review = settings;
+                            if let Some(window) = closing.upgrade() {
+                                window.set_visible(false);
+                            }
+                        }
+                        Err(error) => workspace
+                            .show_error(&format!("Could not save review settings: {error}")),
+                    }
+                },
+            );
+        });
+        *self.prs.review_settings.borrow_mut() = Some(dialog.clone());
+        dialog.present();
+    }
+
     pub(super) fn refresh_selected_pr_context(&self, session_id: &str) {
         self.clear_selected_pr_context();
         let Some((project_root, worktree_path, kind, conversation_id, cwd, name)) =
@@ -971,6 +1136,7 @@ impl Workspace {
         let pull_request = item.pull_request.clone();
         let attic = self.paths.attic_dir();
         let checkout_root = project_root.clone();
+        let settings = self.pr_preferences.borrow().review.clone();
         // Each review gets its own detached checkout, so it never runs in a
         // worktree the user is editing and a repeat review reuses it.
         self.run_slow(
@@ -987,12 +1153,12 @@ impl Workspace {
                     CreateSessionParams {
                         kind: SessionKind::Codex,
                         command: None,
-                        args: crate::launch_model::codex_args_without_agtk_mcp(),
+                        args: settings.args(),
                         cwd: Some(worktree_path.clone()),
                         name: Some(format!("review: PR #{}", pull_request.id)),
                         project_root: Some(project_root),
                         worktree_path: Some(worktree_path),
-                        initial_input: Some(format!("/review-pr {}", pull_request.id)),
+                        initial_input: Some(settings.prompt(pull_request.id)),
                     },
                     None,
                     Some(super::sessions::Placement::in_background()),

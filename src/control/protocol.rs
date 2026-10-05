@@ -309,6 +309,7 @@ pub enum UiSurface {
     Worktrees,
     Agents,
     PullRequests,
+    ReviewSettings,
     ClaudeModels,
     /// The close prompt for the selected session, when its worktree could go with it.
     CloseSession,

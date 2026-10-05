@@ -80,6 +80,11 @@ pub(super) fn capture_workspace(workspace: &Workspace) -> Result<CaptureResult, 
 }
 
 fn active_surface(workspace: &Workspace) -> gtk::Widget {
+    if let Some(dialog) = workspace.prs.review_settings.borrow().as_ref()
+        && dialog.is_visible()
+    {
+        return dialog.window().clone().upcast();
+    }
     workspace
         .modals()
         .into_iter()

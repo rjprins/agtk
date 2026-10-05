@@ -229,6 +229,10 @@ impl Workspace {
                         self.agents.modal.present();
                         true
                     }
+                    UiSurface::ReviewSettings => {
+                        self.show_review_settings();
+                        true
+                    }
                     UiSurface::PullRequests => {
                         if let Some(root) = self.preferred_project_root() {
                             self.prs.root.set_text(&root);

@@ -4,7 +4,7 @@
 #
 # Usage: scripts/ui-preview.sh [--dark] [--keep] [--font-size N] [SURFACE...]
 #   SURFACE: main changes files launch appearance shortcuts history search worktrees agents
-#            pull-requests claude-models close-session (default: all)
+#            pull-requests review-settings claude-models close-session (default: all)
 #   --keep   leave the instance running and print how to drive it
 set -euo pipefail
 
@@ -21,7 +21,7 @@ while (($#)); do
   esac
   shift
 done
-((${#surfaces[@]})) || surfaces=(main changes files launch appearance shortcuts history search worktrees agents pull-requests claude-models close-session)
+((${#surfaces[@]})) || surfaces=(main changes files launch appearance shortcuts history search worktrees agents pull-requests review-settings claude-models close-session)
 
 command -v mutter >/dev/null || { echo "ui-preview needs mutter" >&2; exit 1; }
 "$repo/scripts/build-viewer.sh"
