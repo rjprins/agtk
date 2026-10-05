@@ -137,6 +137,8 @@ These work while the terminal has focus. Change them under Keyboard Shortcuts in
 | Search terminal | `Ctrl+Shift+F` |
 | Increase or decrease font size | `Ctrl++` or `Ctrl+-` |
 
+Session navigation shortcuts skip sessions in collapsed projects.
+
 The Claude preset shortcut opens a chooser for the selected Claude session. Press the shortcut again to move to the next preset, Enter to apply it, and Escape to cancel. Apply a preset only when Claude is at an empty prompt.
 
 ## Agent states

@@ -213,6 +213,32 @@ impl App {
             .body
     }
 
+    fn activate_action(&self, action: &str) {
+        let id = self.paths.name().application_id();
+        let path = format!("/{}/window/1", id.replace('.', "/"));
+        let output = Command::new("gdbus")
+            .args([
+                "call",
+                "--session",
+                "--dest",
+                &id,
+                "--object-path",
+                &path,
+                "--method",
+                "org.gtk.Actions.Activate",
+                action,
+                "[]",
+                "{}",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn wait_text(&self, id: &str, needle: &str) -> String {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
@@ -1626,6 +1652,141 @@ fn shortcut_overrides_are_validated_and_survive_ui_restart() {
     app.request(
         "shortcut.set",
         json!({"action":"toggle-sidebar","reset":true}),
+    );
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn ready_session_navigation_skips_collapsed_projects() {
+    let app = App::new();
+    let hidden_project = app.directory.path().join("hidden");
+    let hidden_worktree = app.directory.path().join("hidden-worktree");
+    std::fs::create_dir(&hidden_project).unwrap();
+    std::fs::create_dir(&hidden_worktree).unwrap();
+    let agent = |cwd: &std::path::Path, project: &std::path::Path, state: &str| {
+        let session = app.request(
+            "session.create",
+            json!({"kind":"codex","cwd":cwd,"projectRoot":project,"worktreePath":cwd}),
+        );
+        let id = session["id"].as_str().unwrap().to_owned();
+        if state == "ready" {
+            app.request("session.set_state", json!({"sessionId":id,"state":"busy"}));
+        }
+        assert_eq!(
+            app.request("session.set_state", json!({"sessionId":id,"state":state}))["state"],
+            state
+        );
+        id
+    };
+    let hidden_ready = agent(&hidden_project, &hidden_project, "ready");
+    agent(&hidden_worktree, &hidden_project, "waiting");
+    let visible_ready = agent(app.directory.path(), app.directory.path(), "ready");
+    let visible_waiting = agent(app.directory.path(), app.directory.path(), "waiting");
+    let idle = agent(app.directory.path(), app.directory.path(), "idle");
+    app.request(
+        "project.set",
+        json!({"root":hidden_project,"isCollapsed":true}),
+    );
+    app.request("session.select", json!({"sessionId":idle}));
+
+    for expected in [&visible_ready, &visible_waiting, &visible_ready] {
+        app.activate_action("next-ready-session");
+        assert_eq!(
+            app.request("app.get_state", json!({}))["selectedSessionId"],
+            expected.as_str()
+        );
+    }
+
+    app.request(
+        "project.set",
+        json!({"root":app.directory.path(),"isCollapsed":true}),
+    );
+    app.activate_action("next-ready-session");
+    assert_eq!(
+        app.request("app.get_state", json!({}))["selectedSessionId"],
+        visible_ready
+    );
+
+    app.request(
+        "project.set",
+        json!({"root":hidden_project,"isCollapsed":false}),
+    );
+    app.activate_action("next-ready-session");
+    assert_eq!(
+        app.request("app.get_state", json!({}))["selectedSessionId"],
+        hidden_ready
+    );
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn relative_and_recent_session_navigation_skip_collapsed_projects() {
+    let app = App::new();
+    let hidden_project = app.directory.path().join("hidden");
+    std::fs::create_dir(&hidden_project).unwrap();
+    let session = |project: &std::path::Path| {
+        app.request(
+            "session.create",
+            json!({"kind":"codex","cwd":project,"projectRoot":project}),
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let first = session(app.directory.path());
+    let hidden = session(&hidden_project);
+    let second = session(app.directory.path());
+    for id in [&first, &hidden, &second] {
+        app.request("session.select", json!({"sessionId":id}));
+    }
+    app.request(
+        "project.set",
+        json!({"root":hidden_project,"isCollapsed":true}),
+    );
+
+    for (action, expected) in [
+        ("last-session", &first),
+        ("last-session", &second),
+        ("next-session", &first),
+        ("previous-session", &second),
+    ] {
+        app.activate_action(action);
+        assert_eq!(
+            app.request("app.get_state", json!({}))["selectedSessionId"],
+            expected.as_str()
+        );
+    }
+
+    // A hidden current session starts navigation from the corresponding end.
+    for (action, expected) in [("next-session", &first), ("previous-session", &second)] {
+        app.request("session.select", json!({"sessionId":hidden}));
+        app.activate_action(action);
+        assert_eq!(
+            app.request("app.get_state", json!({}))["selectedSessionId"],
+            expected.as_str()
+        );
+    }
+
+    app.request(
+        "project.set",
+        json!({"root":app.directory.path(),"isCollapsed":true}),
+    );
+    for action in ["last-session", "next-session", "previous-session"] {
+        app.activate_action(action);
+        assert_eq!(
+            app.request("app.get_state", json!({}))["selectedSessionId"],
+            second
+        );
+    }
+
+    app.request(
+        "project.set",
+        json!({"root":hidden_project,"isCollapsed":false}),
+    );
+    app.activate_action("last-session");
+    assert_eq!(
+        app.request("app.get_state", json!({}))["selectedSessionId"],
+        hidden
     );
 }
 
