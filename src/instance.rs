@@ -1,4 +1,7 @@
 use std::fmt;
+use std::fs;
+use std::io;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 const MAX_INSTANCE_NAME_CHARS: usize = 48;
@@ -73,14 +76,14 @@ impl InstancePaths {
         let runtime_root = std::env::var_os("AGTK_RUNTIME_ROOT")
             .or_else(|| std::env::var_os("XDG_RUNTIME_DIR"))
             .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
+            .unwrap_or_else(private_temp_root);
         let state_root = std::env::var_os("AGTK_STATE_ROOT")
             .or_else(|| std::env::var_os("XDG_STATE_HOME"))
             .map(PathBuf::from)
             .or_else(|| {
                 std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
             })
-            .unwrap_or_else(std::env::temp_dir);
+            .unwrap_or_else(private_temp_root);
         Self::new(name, &runtime_root, &state_root)
     }
 
@@ -116,4 +119,55 @@ impl InstancePaths {
     pub fn attic_dir(&self) -> PathBuf {
         self.state_dir.join("attic")
     }
+}
+
+/// Without `XDG_RUNTIME_DIR` (ssh, cron) the runtime files go to a per-user
+/// directory in /tmp. `ensure_private_dir` refuses it when someone else made it.
+fn private_temp_root() -> PathBuf {
+    std::env::temp_dir().join(format!("agtk-{}", current_uid()))
+}
+
+fn current_uid() -> u32 {
+    // SAFETY: geteuid cannot fail and touches no memory.
+    unsafe { libc::geteuid() }
+}
+
+/// Creates `dir` with mode 0700 and checks that nobody else can replace it or
+/// what is in it: `dir` must be ours and not a symlink, and every parent must
+/// be ours or root's and not writable by others, unless sticky like /tmp.
+pub fn ensure_private_dir(dir: &Path) -> io::Result<()> {
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+    let uid = current_uid();
+    let metadata = fs::symlink_metadata(dir)?;
+    if !metadata.is_dir() || metadata.uid() != uid {
+        return Err(not_private(dir));
+    }
+    if metadata.mode() & 0o077 != 0 {
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+    }
+    for parent in dir.ancestors().skip(1) {
+        let Ok(metadata) = fs::metadata(parent) else {
+            continue;
+        };
+        let owner_ok = metadata.uid() == uid || metadata.uid() == 0;
+        let writable_by_others = metadata.mode() & 0o022 != 0;
+        let sticky = metadata.mode() & 0o1000 != 0;
+        if !owner_ok || (writable_by_others && !sticky) {
+            return Err(not_private(parent));
+        }
+    }
+    Ok(())
+}
+
+fn not_private(path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!(
+            "{} is not private to this user; set XDG_RUNTIME_DIR or remove it",
+            path.display()
+        ),
+    )
 }

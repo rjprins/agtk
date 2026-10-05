@@ -11,6 +11,7 @@ use std::time::Instant;
 use crate::agent_hooks::ensure_claude_hook_settings;
 use crate::agent_status::ScreenTracker;
 use crate::emacs::EmacsIntegration;
+use crate::instance::ensure_private_dir;
 use crate::session_names::next_worktree_session_name;
 
 // Matches the original agmux, which sent 3 events for a browser wheel notch.
@@ -497,7 +498,7 @@ impl Workspace {
         self.run_io(
             move || {
                 let plan = SessionLaunchPlan::new(params)?;
-                fs::create_dir_all(socket.parent().ok_or("invalid socket path")?)?;
+                ensure_private_dir(socket.parent().ok_or("invalid socket path")?)?;
                 let mut record = SessionRecord::discovered(&id, socket.clone());
                 record.name = match plan.name {
                     Some(name) => name,

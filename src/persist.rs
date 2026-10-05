@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::control::{SessionKind, SessionState};
+use crate::instance::ensure_private_dir;
 
 pub type PersistResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -66,8 +67,7 @@ impl Store {
     // https://docs.rs/rusqlite/0.40.2/rusqlite/struct.Connection.html
     pub fn open(path: &Path) -> PersistResult<Self> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+            ensure_private_dir(parent)?;
         }
         let mut conn = Connection::open(path)?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;

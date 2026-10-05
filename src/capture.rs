@@ -1,11 +1,12 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::control::CaptureResult;
+use crate::instance::ensure_private_dir;
 
 const CAPTURE_RETENTION: usize = 20;
 static CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -16,8 +17,7 @@ pub fn store_png_capture(
     width: i32,
     height: i32,
 ) -> io::Result<CaptureResult> {
-    fs::create_dir_all(directory)?;
-    fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
+    ensure_private_dir(directory)?;
 
     let path = unique_capture_path(directory);
     let mut file = OpenOptions::new()

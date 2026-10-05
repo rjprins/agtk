@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use crate::instance::ensure_private_dir;
+
 const SETTINGS_NAME: &str = "claude-hooks.json";
 
 /// Notification types that leave the turn blocked on the user. The idle reminder
@@ -58,7 +60,7 @@ pub fn claude_hook_settings(agtkctl: &Path) -> Value {
 
 /// Writes the settings file when its content changed and returns its path.
 pub fn ensure_claude_hook_settings(dir: &Path, agtkctl: &Path) -> io::Result<PathBuf> {
-    fs::create_dir_all(dir)?;
+    ensure_private_dir(dir)?;
     let path = dir.join(SETTINGS_NAME);
     let wanted = serde_json::to_vec_pretty(&claude_hook_settings(agtkctl))?;
     if fs::read(&path).ok().as_deref() != Some(wanted.as_slice()) {

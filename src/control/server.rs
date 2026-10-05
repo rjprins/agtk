@@ -16,6 +16,7 @@ use super::{
     ControlError, ControlRequest, ControlResponse, ErrorCode, control_timeout, decode_request,
     encode_response,
 };
+use crate::instance::ensure_private_dir;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// Beyond this many open requests, new callers wait in the listen backlog.
@@ -43,8 +44,7 @@ impl ControlServer {
         let parent = socket_path.parent().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "control socket has no parent")
         })?;
-        fs::create_dir_all(parent)?;
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        ensure_private_dir(parent)?;
         prepare_socket_path(socket_path)?;
 
         let listener = UnixListener::bind(socket_path)?;
