@@ -1167,11 +1167,11 @@ impl Workspace {
     fn next_session_id(&self, kind: SessionKind) -> String {
         let sequence = self.sequence.get();
         self.sequence.set(sequence + 1);
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        format!("{}-{millis}-{sequence}", kind.as_str())
+        format!(
+            "{}-{}-{sequence}",
+            kind.as_str(),
+            crate::persist::now_millis()
+        )
     }
 
     fn report_failure(

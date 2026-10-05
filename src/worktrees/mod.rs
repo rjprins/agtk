@@ -6,12 +6,12 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::command_runner::BoundedByteOutput;
 use crate::git;
+use crate::persist::now_millis;
 use layout::worktree_template;
 use lifecycle::{ClassificationContext, classify};
 use snapshot::status;
@@ -262,7 +262,7 @@ impl WorktreeManager {
         let parsed = parse_worktree_porcelain(&output);
         let default_branch = default_branch(&repo_root)?;
         let layout = self.layout(&repo_root)?;
-        let now = now_millis() as u64;
+        let now = now_millis();
         let classification = ClassificationContext {
             repo_root: &repo_root,
             default_branch: &default_branch,
@@ -540,13 +540,6 @@ fn validate_branch(branch: &str) -> WorktreeResult<()> {
 
 fn paths_equal(left: &Path, right: &Path) -> bool {
     left.canonicalize().ok() == right.canonicalize().ok()
-}
-
-fn now_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
 }
 
 fn git_text<'a>(cwd: &Path, args: impl IntoIterator<Item = &'a str>) -> WorktreeResult<String> {
