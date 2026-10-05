@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use agtk::control::SessionKind;
 use agtk::launch_model::{
-    DEFAULT_BASE_BRANCH, carried_agent_args, choice_matches, directory_choices, path_completions,
-    provider_args, worktree_choices,
+    DEFAULT_BASE_BRANCH, carried_agent_args, choice_matches, codex_args_without_agtk_mcp,
+    directory_choices, path_completions, provider_args, worktree_choices,
 };
 use serde_json::json;
 
@@ -254,5 +254,15 @@ fn a_restarted_fork_resumes_its_own_conversation_instead_of_forking_again() {
             &args(&["fork", "parent-id", "-m", "o3"])
         ),
         args(&["-m", "o3"])
+    );
+}
+
+#[test]
+fn a_restarted_pr_review_stays_without_the_agtk_tools() {
+    let mut args = vec!["resume".to_owned(), "old-id".to_owned()];
+    args.extend(codex_args_without_agtk_mcp());
+    assert_eq!(
+        carried_agent_args(SessionKind::Codex, &args),
+        codex_args_without_agtk_mcp()
     );
 }

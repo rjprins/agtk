@@ -987,7 +987,7 @@ impl Workspace {
                     CreateSessionParams {
                         kind: SessionKind::Codex,
                         command: None,
-                        args: Vec::new(),
+                        args: crate::launch_model::codex_args_without_agtk_mcp(),
                         cwd: Some(worktree_path.clone()),
                         name: Some(format!("review: PR #{}", pull_request.id)),
                         project_root: Some(project_root),

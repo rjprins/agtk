@@ -190,6 +190,21 @@ pub fn provider_args(
     args
 }
 
+/// Codex arguments that turn off the agtk MCP server for one launch. A PR
+/// review reads a tree its author controls, so it gets no tools to start or
+/// drive other sessions. Codex's sandbox already keeps its shell commands off
+/// agtk's socket. The command keeps the override valid without an agtk entry.
+pub fn codex_args_without_agtk_mcp() -> Vec<String> {
+    [
+        "-c",
+        "mcp_servers.agtk.command=\"true\"",
+        "-c",
+        "mcp_servers.agtk.enabled=false",
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
 /// The launch flags an agent keeps when it starts again. Anything else in its
 /// arguments, such as an old resume or a first prompt, belongs to that launch only.
 pub fn carried_agent_args(kind: SessionKind, args: &[String]) -> Vec<String> {
@@ -213,6 +228,9 @@ pub fn carried_agent_args(kind: SessionKind, args: &[String]) -> Vec<String> {
             ("--profile", true),
             ("-p", true),
             ("--add-dir", true),
+            // Config overrides, such as the one that keeps a PR review away from agtk's tools.
+            ("-c", true),
+            ("--config", true),
         ],
         _ => &[],
     };
