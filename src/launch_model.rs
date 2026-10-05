@@ -237,6 +237,9 @@ pub fn carried_agent_args(kind: SessionKind, args: &[String]) -> Vec<String> {
     let mut carried = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
         let (flag, inline_value) = match arg.split_once('=') {
             Some((flag, _)) if flag.starts_with("--") => (flag, true),
             _ => (arg.as_str(), false),

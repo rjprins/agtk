@@ -192,6 +192,22 @@ fn provider_args_migrate_legacy_codex_approval_values() {
 }
 
 #[test]
+fn restarted_agents_do_not_treat_prompt_words_as_launch_flags() {
+    for kind in [SessionKind::Claude, SessionKind::Codex] {
+        let args = [
+            "--model",
+            "saved",
+            "--",
+            "--model",
+            "prompt text",
+            "--model=prompt",
+        ]
+        .map(str::to_owned);
+        assert_eq!(carried_agent_args(kind, &args), ["--model", "saved"]);
+    }
+}
+
+#[test]
 fn a_restarted_agent_keeps_its_launch_flags_but_not_its_resume_or_prompt() {
     let args = |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
     assert_eq!(
