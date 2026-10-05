@@ -7,7 +7,8 @@ build_stamp="$viewer_dir/dist/.agtk-viewer-build"
 needs_build=0
 
 if [[ ! -d "$viewer_dir/node_modules" ]]; then
-  npm --prefix "$viewer_dir" ci
+  # No dependency needs an install script on Linux, so none get to run.
+  npm --prefix "$viewer_dir" ci --ignore-scripts
   needs_build=1
 fi
 
