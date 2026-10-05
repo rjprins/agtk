@@ -34,3 +34,16 @@ fn runner_enforces_a_process_group_timeout() {
     assert!(error.contains("timed out"));
     assert!(started.elapsed() < Duration::from_secs(3));
 }
+
+#[test]
+fn runner_stops_waiting_for_output_a_leftover_process_holds_open() {
+    let started = Instant::now();
+    let mut command = Command::new("/bin/sh");
+    // The shell exits at once; its detached child keeps stdout open.
+    command.args(["-c", "setsid sleep 30 & printf done"]);
+    let error = run_bounded(command, Duration::from_millis(200), 64)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("timed out"), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(3));
+}

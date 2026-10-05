@@ -2,6 +2,7 @@ use std::fmt;
 use std::io::{self, Read};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -89,8 +90,8 @@ pub fn run_bounded_bytes(
         .stderr
         .take()
         .ok_or_else(|| CommandError::Io(io::Error::other("command stderr pipe is unavailable")))?;
-    let stdout_reader = thread::spawn(move || read_bounded(stdout, output_limit));
-    let stderr_reader = thread::spawn(move || read_bounded(stderr, output_limit));
+    let stdout_reader = spawn_reader(stdout, output_limit);
+    let stderr_reader = spawn_reader(stderr, output_limit);
 
     let deadline = Instant::now() + timeout;
     let status = loop {
@@ -103,13 +104,23 @@ pub fn run_bounded_bytes(
         }
         thread::sleep(Duration::from_millis(10));
     };
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| CommandError::ReaderPanicked)??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| CommandError::ReaderPanicked)??;
     let status = status?;
+    // A process the command left behind can hold its pipes open after it
+    // exits. The output must still arrive by the deadline, with a short grace.
+    let output_deadline = deadline.max(Instant::now()) + Duration::from_secs(1);
+    let output = finish_reader(&stdout_reader, output_deadline, timeout).and_then(|stdout| {
+        Ok((
+            stdout,
+            finish_reader(&stderr_reader, output_deadline, timeout)?,
+        ))
+    });
+    let (stdout, stderr) = match output {
+        Ok(output) => output,
+        Err(error) => {
+            let _ = killpg(Pid::from_raw(child.id().cast_signed()), Signal::SIGKILL);
+            return Err(error);
+        }
+    };
     if stdout.exceeded || stderr.exceeded {
         return Err(CommandError::OutputExceeded(output_limit));
     }
@@ -132,6 +143,29 @@ fn terminate_process_group(child: &mut std::process::Child) {
     }
     let _ = killpg(group, Signal::SIGKILL);
     let _ = child.wait();
+}
+
+fn spawn_reader(
+    reader: impl Read + Send + 'static,
+    limit: usize,
+) -> Receiver<io::Result<ReadResult>> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(read_bounded(reader, limit));
+    });
+    receiver
+}
+
+fn finish_reader(
+    reader: &Receiver<io::Result<ReadResult>>,
+    deadline: Instant,
+    timeout: Duration,
+) -> Result<ReadResult, CommandError> {
+    match reader.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(result) => Ok(result?),
+        Err(RecvTimeoutError::Timeout) => Err(CommandError::TimedOut(timeout)),
+        Err(RecvTimeoutError::Disconnected) => Err(CommandError::ReaderPanicked),
+    }
 }
 
 struct ReadResult {
