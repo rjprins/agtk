@@ -383,23 +383,23 @@ impl Workspace {
     }
 
     fn select_last_session(&self) {
-        let Some(id) = self
-            .workspace_tabs
-            .borrow()
-            .last_session()
-            .map(str::to_owned)
-        else {
-            self.show_error("No earlier session to go back to");
+        let row = {
+            let sessions = self.sessions.borrow();
+            self.workspace_tabs
+                .borrow()
+                .last_session_matching(|id| {
+                    sessions
+                        .get(id)
+                        .is_some_and(|session| session.row.is_visible())
+                })
+                .and_then(|id| sessions.get(id))
+                .map(|session| session.row.clone())
+        };
+        let Some(row) = row else {
+            self.show_error("No earlier visible session to go back to");
             return;
         };
-        let row = self
-            .sessions
-            .borrow()
-            .get(&id)
-            .map(|session| session.row.clone());
-        if let Some(row) = row {
-            self.list.select_row(Some(&row));
-        }
+        self.list.select_row(Some(&row));
     }
 
     fn select_next_ready_session(&self) {
@@ -407,15 +407,16 @@ impl Workspace {
         let mut ready = sessions
             .values()
             .filter(|session| {
-                matches!(
-                    session.record.state,
-                    SessionState::Ready | SessionState::Waiting
-                )
+                session.row.is_visible()
+                    && matches!(
+                        session.record.state,
+                        SessionState::Ready | SessionState::Waiting
+                    )
             })
             .collect::<Vec<_>>();
         ready.sort_by_key(|session| session.record.position);
         if ready.is_empty() {
-            self.show_error("No agent session is ready");
+            self.show_error("No visible agent session is ready");
             return;
         }
         let selected = self.selected_session_id();

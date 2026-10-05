@@ -236,11 +236,19 @@ impl WorkspaceTabs {
 
     /// The most recently selected session other than the current one.
     pub fn last_session(&self) -> Option<&str> {
+        self.last_session_matching(|_| true)
+    }
+
+    /// The most recently selected eligible session other than the current one.
+    pub(crate) fn last_session_matching(
+        &self,
+        mut eligible: impl FnMut(&str) -> bool,
+    ) -> Option<&str> {
         self.session_history
             .iter()
             .rev()
             .map(String::as_str)
-            .find(|id| Some(*id) != self.selected_session.as_deref())
+            .find(|id| Some(*id) != self.selected_session.as_deref() && eligible(id))
     }
 
     pub fn session_context(&self, session_id: &str) -> Option<&str> {
