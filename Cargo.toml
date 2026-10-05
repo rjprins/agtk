@@ -34,9 +34,11 @@ glib-build-tools = "=0.22.8"
 
 # The installed agtk is a debug build, so a change rebuilds in seconds.
 # Dependencies compile once, so they are optimized: agtk's log scanning and
-# screen parsing lean on regex, memchr and serde_json.
+# screen parsing lean on regex, memchr and serde_json. Overflow wraps as in a
+# release build, because a panic in agtk-session closes that agent's terminal.
 [profile.dev]
 debug = "line-tables-only"
+overflow-checks = false
 
 [profile.dev.package."*"]
 opt-level = 3
