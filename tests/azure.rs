@@ -240,6 +240,42 @@ fn run_git(cwd: &std::path::Path, args: &[&str]) {
 }
 
 #[test]
+fn review_settings_trim_effort_and_migrate_saved_approval_policies() {
+    for approval in [" untrusted ", " on-failure "] {
+        let settings = agtk::azure::PrReviewSettings {
+            model: " custom-model ".into(),
+            effort: " high ".into(),
+            approval: approval.into(),
+            sandbox: " read-only ".into(),
+            ..Default::default()
+        };
+        let mut expected = agtk::launch_model::codex_args_without_agtk_mcp();
+        expected.extend(
+            [
+                "--model",
+                "custom-model",
+                "--ask-for-approval",
+                "on-request",
+                "--sandbox",
+                "read-only",
+                "-c",
+                "model_reasoning_effort=\"high\"",
+            ]
+            .map(str::to_owned),
+        );
+        assert_eq!(settings.args(), expected);
+    }
+    let settings = agtk::azure::PrReviewSettings {
+        effort: " \t\n ".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        settings.args(),
+        agtk::launch_model::codex_args_without_agtk_mcp()
+    );
+}
+
+#[test]
 fn review_settings_preserve_legacy_defaults_and_customize_launch() {
     let preferences: agtk::azure::PrPreferences =
         serde_json::from_str(r#"{"projects":{}}"#).unwrap();

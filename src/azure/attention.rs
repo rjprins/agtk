@@ -82,21 +82,30 @@ impl Default for PrReviewSettings {
 impl PrReviewSettings {
     pub fn args(&self) -> Vec<String> {
         let mut args = crate::launch_model::codex_args_without_agtk_mcp();
-        for (flag, value) in [
-            ("--model", &self.model),
+        if !self.model.trim().is_empty() {
+            args.extend(["--model".to_owned(), self.model.trim().to_owned()]);
+        }
+        let flags = [
             ("--ask-for-approval", &self.approval),
             ("--sandbox", &self.sandbox),
-        ] {
-            if !value.trim().is_empty() {
-                args.extend([flag.to_owned(), value.trim().to_owned()]);
-            }
-        }
-        if !self.effort.is_empty() {
+        ]
+        .into_iter()
+        .filter_map(|(flag, value)| {
+            let value = value.trim();
+            (!value.is_empty()).then(|| (flag.to_owned(), serde_json::json!(value)))
+        })
+        .collect();
+        args.extend(crate::launch_model::provider_args(
+            crate::session::SessionKind::Codex,
+            &flags,
+        ));
+        let effort = self.effort.trim();
+        if !effort.is_empty() {
             args.extend([
                 "-c".to_owned(),
                 format!(
                     "model_reasoning_effort={}",
-                    serde_json::to_string(&self.effort).unwrap()
+                    serde_json::to_string(effort).unwrap()
                 ),
             ]);
         }
