@@ -77,6 +77,8 @@ where
     let mut command = Command::new("git");
     command
         .current_dir(root)
+        // An fsmonitor hook in .git/config would otherwise run on every refresh.
+        .args(["-c", "core.fsmonitor=false"])
         .arg("--literal-pathspecs")
         .args(arguments)
         .env_remove("GIT_DIR")
