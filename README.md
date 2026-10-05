@@ -225,7 +225,9 @@ agtk has four binaries:
 - `agtkctl` is the command line tool.
 - `agtk-mcp` is the MCP server.
 
-To try a change, run `./scripts/install-local.sh` and restart agtk. The installer makes a debug build with optimized dependencies, so it takes seconds after a change. Sessions keep running while agtk restarts.
+For development, run `./scripts/install-local.sh --dev` once. This links the installed binaries to this checkout. After a change, run `./scripts/build-viewer.sh` and `cargo build --locked --bins`, then restart agtk. Sessions keep running while agtk restarts. Keep the checkout and its build output in place while using this mode.
+
+For an installation that does not depend on the checkout, run `./scripts/install-local.sh` without `--dev`. Run it again after changes to update the installed copies.
 
 Run the checks:
 

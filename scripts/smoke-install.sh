@@ -13,6 +13,20 @@ for task_binary in agtk agtk-session agtkctl agtk-mcp; do
     test -x "$task_bindir/$task_binary"
 done
 
+# Development installs follow the checkout's binaries after every rebuild.
+DESTDIR="$task_stage" PREFIX=/usr/local "$task_repo/scripts/install-local.sh" --dev
+for task_binary in agtk agtk-session agtkctl agtk-mcp; do
+    test -L "$task_bindir/$task_binary"
+    test "$(readlink -f "$task_bindir/$task_binary")" = "$(readlink -f "${CARGO_TARGET_DIR:-$task_repo/target}/debug/$task_binary")"
+done
+
+# A regular installation can replace the links with independent copies again.
+DESTDIR="$task_stage" PREFIX=/usr/local "$task_repo/scripts/install-local.sh"
+for task_binary in agtk agtk-session agtkctl agtk-mcp; do
+    test ! -L "$task_bindir/$task_binary"
+    test -x "$task_bindir/$task_binary"
+done
+
 task_desktop="$task_stage/usr/local/share/applications/nl.rutger.Agtk.desktop"
 test -f "$task_desktop"
 grep -Fqx 'Exec=/usr/local/bin/agtk' "$task_desktop"
