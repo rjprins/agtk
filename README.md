@@ -175,6 +175,8 @@ agtkctl claude apply SESSION_ID opus-high
 
 Run `agtkctl --help` to see every command. Add `--instance NAME` before the command to talk to another instance than `default`.
 
+New sessions infer missing project and worktree associations from their working directory. A session inside a Git checkout appears under its repository, including when started from a subdirectory or linked worktree. Explicit associations take precedence; directories outside Git stay under Other. The MCP launch tools use the same behavior.
+
 Processes inside a session get `AGTK_INSTANCE`, `AGTK_SESSION_ID`, and `AGTK_CONTROL_SOCKET`. A hook of your own can report the agent state:
 
 ```sh

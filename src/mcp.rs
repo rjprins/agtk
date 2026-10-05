@@ -642,13 +642,13 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "spawn_shell",
             "Spawn shell",
-            "Launch a native shell session in an optional project or worktree. Give initialCommand to run it in the shell once it starts; read its output with snapshot. The session opens in the background and does not take the selection.",
+            "Launch a native shell session in an optional project or worktree. Missing projectRoot and worktreePath are inferred from the Git checkout containing cwd; explicit associations take precedence. Give initialCommand to run it in the shell once it starts; read its output with snapshot. The session opens in the background and does not take the selection.",
             launch_schema(false),
         ),
         tool(
             "launch_agent",
             "Launch agent",
-            "Launch Codex or Claude directly with optional arguments and initial input. The session opens in the background and does not take the selection. Give branch, purpose and projectRoot to create a new worktree first and start the agent inside it; the result then holds both the session and the worktree.",
+            "Launch Codex or Claude directly with optional arguments and initial input. Missing projectRoot and worktreePath are inferred from the Git checkout containing cwd; explicit associations take precedence. The session opens in the background and does not take the selection. Give branch, purpose and projectRoot to create a new worktree first and start the agent inside it; the result then holds both the session and the worktree.",
             launch_schema(true),
         ),
         tool(

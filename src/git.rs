@@ -150,6 +150,27 @@ pub fn toplevel(path: &Path) -> Option<PathBuf> {
     optional(path, ["rev-parse", "--show-toplevel"]).map(PathBuf::from)
 }
 
+/// Resolve a checkout root to its primary repository. Ordinary checkouts keep
+/// their own root; linked checkouts use Git's first worktree entry.
+pub(crate) fn primary_worktree(checkout: &Path) -> Option<PathBuf> {
+    let directories = optional(
+        checkout,
+        [
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+        ],
+    )?;
+    let mut directories = directories.lines();
+    if directories.next()? == directories.next()? {
+        return Some(checkout.to_owned());
+    }
+    let output = optional(checkout, ["worktree", "list", "--porcelain", "-z"])?;
+    let root = output.split('\0').next()?.strip_prefix("worktree ")?;
+    Path::new(root).canonicalize().ok()
+}
+
 /// The bases recorded in `branch`'s config, most preferred first, as written
 /// and without checking that they still resolve.
 pub fn configured_bases(root: &Path, branch: &str) -> Vec<String> {

@@ -41,8 +41,8 @@ pub struct LaunchPlanError(String);
 impl SessionLaunchPlan {
     pub fn new(params: CreateSessionParams) -> Result<Self, LaunchPlanError> {
         let cwd = canonical_directory(params.cwd, "working directory")?;
-        let project_root = canonical_directory(params.project_root, "project root")?;
-        let worktree_path = canonical_directory(params.worktree_path, "worktree path")?;
+        let mut project_root = canonical_directory(params.project_root, "project root")?;
+        let mut worktree_path = canonical_directory(params.worktree_path, "worktree path")?;
 
         let command = params
             .command
@@ -74,6 +74,18 @@ impl SessionLaunchPlan {
             .or_else(|| env::current_dir().ok())
             .map(|path| fs::canonicalize(path).map_err(|e| LaunchPlanError(e.to_string())))
             .transpose()?;
+        // Explicit associations take precedence over the process's directory.
+        // Git discovery is optional: a plain directory must still launch.
+        if (project_root.is_none() || worktree_path.is_none())
+            && let Some(context) = worktree_path.as_deref().or(cwd.as_deref())
+            && let Some(checkout) =
+                crate::git::toplevel(context).and_then(|path| path.canonicalize().ok())
+        {
+            if project_root.is_none() {
+                project_root = crate::git::primary_worktree(&checkout);
+            }
+            worktree_path.get_or_insert(checkout);
+        }
         // Typed input would race the agent's startup and stay unsent in its prompt box.
         let (initial_input, prompt_args) = match params.initial_input {
             Some(prompt) if matches!(params.kind, SessionKind::Codex | SessionKind::Claude) => {

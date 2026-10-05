@@ -1792,6 +1792,53 @@ fn relative_and_recent_session_navigation_skip_collapsed_projects() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn cwd_only_launch_infers_and_persists_its_project_and_worktree() {
+    let mut app = App::new();
+    let root = app.directory.path().join("project");
+    let cwd = root.join("src/deep");
+    std::fs::create_dir_all(&cwd).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .arg(&root)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom",
+            "command":"/bin/sh",
+            "args":["-c", "exec sleep 30"],
+            "cwd":cwd,
+            "name":"cwd-only"
+        }),
+    );
+    assert_eq!(session["cwd"], cwd.to_string_lossy().as_ref());
+    assert_eq!(session["projectRoot"], root.to_string_lossy().as_ref());
+    assert_eq!(session["worktreePath"], root.to_string_lossy().as_ref());
+
+    app.stop();
+    app.start();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(
+        state["projects"][0]["root"],
+        root.to_string_lossy().as_ref()
+    );
+    let restored = state["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["id"] == session["id"])
+        .unwrap();
+    assert_eq!(restored["projectRoot"], session["projectRoot"]);
+    assert_eq!(restored["worktreePath"], session["worktreePath"]);
+    app.request("session.close", json!({"sessionId":session["id"]}));
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn sessions_group_by_project_and_worktree_with_durable_project_state() {
     let mut app = App::new();
     let worktree = app.directory.path().join("feature-worktree");
