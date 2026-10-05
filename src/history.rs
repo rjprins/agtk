@@ -8,12 +8,7 @@ pub fn submitted_prompt(text: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    if trimmed.chars().count() <= MAX_PROMPT_CHARS {
-        return Some(trimmed.to_owned());
-    }
-    let mut cut = trimmed.chars().take(MAX_PROMPT_CHARS).collect::<String>();
-    cut.push('…');
-    Some(cut)
+    Some(crate::text::truncate_chars(trimmed, MAX_PROMPT_CHARS))
 }
 
 pub fn history_needle(text: &str, max_chars: usize) -> String {

@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::command_runner::run_bounded;
 use crate::git;
 
-pub type EmacsResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+pub use crate::AppResult as EmacsResult;
 const EMACS_TIMEOUT: Duration = Duration::from_secs(30);
 const OUTPUT_LIMIT: usize = 256 * 1024;
 

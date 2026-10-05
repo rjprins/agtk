@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 
 use super::{ConversationMessage, ConversationRole, LOG_PREVIEW_BYTES, MAX_MESSAGE_CHARS};
 use crate::persist::PersistResult;
+use crate::text::truncate_chars;
 use crate::timestamps::parse_utc_millis;
 
 pub fn recent_mutated_paths(path: &Path, limit: usize) -> PersistResult<Vec<PathBuf>> {
@@ -164,15 +165,6 @@ pub(super) fn first_line(text: &str, max_chars: usize) -> String {
         .or_else(|| line.strip_prefix("please "))
         .unwrap_or(line);
     truncate_chars(line, max_chars)
-}
-
-pub(super) fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_owned();
-    }
-    let mut value = text.chars().take(max_chars).collect::<String>();
-    value.push('…');
-    value
 }
 
 pub(super) fn validate_provider_session_id(value: &str) -> PersistResult<()> {

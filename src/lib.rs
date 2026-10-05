@@ -1,5 +1,8 @@
 //! Shared domain and session-lifecycle code for agtk.
 
+/// Errors passed between agtk's background workers and their callers.
+pub type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
 pub mod agent_hooks;
 pub mod agent_status;
 pub mod appearance;

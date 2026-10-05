@@ -1,6 +1,5 @@
 //! Azure DevOps pull requests for the repositories agtk works in.
 
-use std::error::Error;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +17,7 @@ pub use client::AzureClient;
 pub use normalize::normalize_active_prs;
 pub use remote::parse_azure_remote;
 
-pub type AzureResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+pub use crate::AppResult as AzureResult;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

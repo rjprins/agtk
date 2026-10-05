@@ -1,10 +1,9 @@
 use std::collections::BTreeSet;
-use std::error::Error;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub type ClaudePresetResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+pub use crate::AppResult as ClaudePresetResult;
 const MAX_PRESETS: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

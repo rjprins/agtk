@@ -11,11 +11,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::conversation::{
-    first_line, message, skip_user_text, string_field, truncate_chars, validate_provider_session_id,
+    first_line, message, skip_user_text, string_field, validate_provider_session_id,
 };
 use super::discovery::LogCandidate;
 use super::{AgentProvider, ConversationRole, LOG_HEAD_BYTES, MAX_TITLE_CHARS, ProviderSession};
 use crate::persist::PersistResult;
+use crate::text::truncate_chars;
 use crate::timestamps::parse_utc_millis;
 
 /// What one log says about its session. Cached, so keep it small.

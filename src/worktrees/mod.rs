@@ -1,7 +1,6 @@
 //! Git worktrees: listing, creating, reviewing and reaping them.
 
 use std::collections::BTreeSet;
-use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,7 +22,7 @@ mod snapshot;
 
 pub use layout::WorktreeLayout;
 
-pub type WorktreeResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+pub use crate::AppResult as WorktreeResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PorcelainWorktree {

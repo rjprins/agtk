@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::instance::ensure_private_dir;
 use crate::session::{SessionKind, SessionState};
 
-pub type PersistResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub use crate::AppResult as PersistResult;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
