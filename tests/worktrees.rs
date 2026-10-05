@@ -631,7 +631,7 @@ fn a_confirmed_reap_removes_an_active_worktree_but_keeps_its_branch_unless_force
             confirmed: true,
             ..request.clone()
         },
-        &[created.path.clone()],
+        std::slice::from_ref(&created.path),
     );
     assert!(live.unwrap_err().to_string().contains("live sessions"));
 

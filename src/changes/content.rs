@@ -843,7 +843,7 @@ fn read_disk_file(
     reader
         .read_to_end(&mut bytes)
         .map_err(|error| format!("could not read worktree file: {error}"))?;
-    let after = fstat(&reader.get_ref())
+    let after = fstat(reader.get_ref())
         .map_err(|error| format!("could not recheck worktree file: {error}"))?;
     let current_path = fstatat(&parent, name.as_os_str(), AtFlags::AT_SYMLINK_NOFOLLOW)
         .map_err(|error| format!("worktree file changed while it was being read: {error}"))?;

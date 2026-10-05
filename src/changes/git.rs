@@ -225,7 +225,7 @@ pub(super) fn commit_page(
         return Err("Git returned a malformed commit page".to_owned());
     }
     let mut commits = Vec::with_capacity(fields.len() / 4);
-    for record in fields.chunks_exact(4).take(PAGE_SIZE + 1) {
+    for record in fields.as_chunks::<4>().0.iter().take(PAGE_SIZE + 1) {
         let oid = String::from_utf8_lossy(record[0]).into_owned();
         if oid.len() != 40 && oid.len() != 64 {
             return Err("Git returned an invalid commit object ID".to_owned());
@@ -303,7 +303,7 @@ pub fn parse_status_porcelain_v2_z(input: &[u8]) -> Result<Vec<GitStatusFile>, S
                 files.push(GitStatusFile {
                     path: path.to_vec(),
                     old_path: None,
-                    index_status: fields[1].get(0).copied().unwrap_or(b'.'),
+                    index_status: fields[1].first().copied().unwrap_or(b'.'),
                     worktree_status: fields[1].get(1).copied().unwrap_or(b'.'),
                     submodule: fields[2].to_vec(),
                     head_mode: Some(fields[3].to_vec()),
@@ -326,7 +326,7 @@ pub fn parse_status_porcelain_v2_z(input: &[u8]) -> Result<Vec<GitStatusFile>, S
                 files.push(GitStatusFile {
                     path: path.to_vec(),
                     old_path: Some(old_path.to_vec()),
-                    index_status: fields[1].get(0).copied().unwrap_or(b'.'),
+                    index_status: fields[1].first().copied().unwrap_or(b'.'),
                     worktree_status: fields[1].get(1).copied().unwrap_or(b'.'),
                     submodule: fields[2].to_vec(),
                     head_mode: Some(fields[3].to_vec()),
@@ -343,7 +343,7 @@ pub fn parse_status_porcelain_v2_z(input: &[u8]) -> Result<Vec<GitStatusFile>, S
                 files.push(GitStatusFile {
                     path: path.to_vec(),
                     old_path: None,
-                    index_status: fields[1].get(0).copied().unwrap_or(b'.'),
+                    index_status: fields[1].first().copied().unwrap_or(b'.'),
                     worktree_status: fields[1].get(1).copied().unwrap_or(b'.'),
                     submodule: fields[2].to_vec(),
                     head_mode: None,

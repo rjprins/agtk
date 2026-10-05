@@ -20,15 +20,14 @@ impl Workspace {
         else {
             return;
         };
-        if self.workspace_tabs.borrow().selected_session() != Some(session_id) {
-            if self
+        if self.workspace_tabs.borrow().selected_session() != Some(session_id)
+            && self
                 .workspace_tabs
                 .borrow()
                 .context_tabs(&self.context_key_for_session(session_id))
                 .is_empty()
-            {
-                self.attach_workspace_session(session_id);
-            }
+        {
+            self.attach_workspace_session(session_id);
         }
         if self
             .workspace_tabs
@@ -40,11 +39,11 @@ impl Workspace {
             self.workspace_tabs.borrow_mut().select_session(session_id);
         }
 
-        if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
-            if let Some(viewer) = self.code_viewer.borrow().as_ref() {
-                viewer.save_view_state();
-                viewer.clear();
-            }
+        if self.stack.visible_child_name().as_deref() == Some("changes-diff")
+            && let Some(viewer) = self.code_viewer.borrow().as_ref()
+        {
+            viewer.save_view_state();
+            viewer.clear();
         }
         *self.selected_session.borrow_mut() = Some(session_id.to_owned());
         self.stack.set_visible_child_name(session_id);

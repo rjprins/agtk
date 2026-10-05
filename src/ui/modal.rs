@@ -20,8 +20,10 @@ pub(super) struct Modal {
     /// The size last set by fitting; any other size on close came from the user.
     fitted_size: Rc<Cell<Option<(i32, i32)>>>,
     refit_queued: Rc<Cell<bool>>,
-    on_resized: Rc<RefCell<Option<Box<dyn Fn(i32, i32)>>>>,
+    on_resized: Rc<RefCell<Option<ResizeHandler>>>,
 }
+
+type ResizeHandler = Box<dyn Fn(i32, i32)>;
 
 impl Modal {
     pub(super) fn new(

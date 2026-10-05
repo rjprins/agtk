@@ -196,7 +196,7 @@ fn a_client_that_trickles_bytes_is_dropped_at_the_request_deadline() {
         thread::sleep(Duration::from_millis(500));
         let mut probe = [0u8; 1];
         stream.set_nonblocking(true).unwrap();
-        let closed = matches!(stream.read(&mut probe), Ok(_));
+        let closed = stream.read(&mut probe).is_ok();
         stream.set_nonblocking(false).unwrap();
         if closed {
             break;

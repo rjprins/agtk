@@ -481,6 +481,7 @@ impl ChangesSidebar {
         self.append_group(&self.rows, key, title, files, expanded, scope, open_file);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn append_group(
         &self,
         parent: &gtk::Box,

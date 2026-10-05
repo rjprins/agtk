@@ -667,8 +667,7 @@ impl Workspace {
         };
         let listed_root = root.clone();
         let result = self.changes_io.submit(move || {
-            crate::changes::list_worktree_files(&listed_root)
-                .map(|paths| crate::explorer::build_tree(paths))
+            crate::changes::list_worktree_files(&listed_root).map(crate::explorer::build_tree)
         });
         let workspace = self.clone();
         glib::spawn_future_local(async move {

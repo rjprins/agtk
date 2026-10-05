@@ -106,9 +106,9 @@ impl Workspace {
             }
         });
         self.add_action("search", true, |workspace| {
-            if workspace.stack.visible_child_name().as_deref() == Some("changes-diff") {
-                workspace.open_search();
-            } else if workspace.selected_session_id().is_some() {
+            if workspace.stack.visible_child_name().as_deref() == Some("changes-diff")
+                || workspace.selected_session_id().is_some()
+            {
                 workspace.open_search();
             }
         });

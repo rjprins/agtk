@@ -288,11 +288,10 @@ fn interactive_shell_path() -> Result<OsString, LaunchPlanError> {
         .stdout
         .split(|byte| *byte == b'\n')
         .filter(|line| !line.is_empty())
-        .filter(|line| {
+        .rfind(|line| {
             let value = OsString::from_vec(line.to_vec());
             env::split_paths(&value).all(|part| part.is_absolute()) && line.contains(&b':')
         })
-        .next_back()
         .map(|line| OsString::from_vec(line.to_vec()))
         .filter(|path| !env::split_paths(path).next().is_none())
         .ok_or_else(|| LaunchPlanError("login shell did not return a valid PATH".to_owned()))?;
