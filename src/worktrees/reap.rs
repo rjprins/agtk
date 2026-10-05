@@ -20,7 +20,7 @@ impl WorktreeManager {
     pub fn reap(&self, request: ReapRequest, live_paths: &[PathBuf]) -> WorktreeResult<ReapResult> {
         let path = request.path.canonicalize()?;
         let repo_root = common_repo_root(&path)?;
-        let inventory = self.list(&repo_root, live_paths)?;
+        let inventory = self.inventory(&repo_root, live_paths, Some(&path))?;
         let Some(preview) = inventory
             .worktrees
             .iter()

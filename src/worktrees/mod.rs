@@ -246,6 +246,17 @@ impl WorktreeManager {
         repo_root: &Path,
         live_paths: &[PathBuf],
     ) -> WorktreeResult<WorktreeInventory> {
+        self.inventory(repo_root, live_paths, None)
+    }
+
+    /// Lists the repository's worktrees, or only the one at `only`. Each
+    /// costs several git calls, so reaping one worktree inspects just it.
+    fn inventory(
+        &self,
+        repo_root: &Path,
+        live_paths: &[PathBuf],
+        only: Option<&Path>,
+    ) -> WorktreeResult<WorktreeInventory> {
         let repo_root = canonical_repo(repo_root)?;
         let output = git_text(&repo_root, ["worktree", "list", "--porcelain"])?;
         let parsed = parse_worktree_porcelain(&output);
@@ -260,6 +271,9 @@ impl WorktreeManager {
         };
         let mut worktrees = Vec::with_capacity(parsed.len());
         for (index, worktree) in parsed.into_iter().enumerate() {
+            if only.is_some_and(|only| worktree.path != only) {
+                continue;
+            }
             let status = status(&worktree.path)?;
             let live_session_count = live_paths
                 .iter()
