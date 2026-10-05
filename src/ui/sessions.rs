@@ -14,6 +14,8 @@ use crate::emacs::EmacsIntegration;
 use crate::instance::ensure_private_dir;
 use crate::session_names::next_worktree_session_name;
 
+// Temper Claude's own wheel acceleration when translating touchpad movement.
+const TOUCHPAD_LINE_HEIGHTS_PER_EVENT: f64 = 4.0;
 const SGR_WHEEL_UP: &str = "\x1b[<64;1;1M";
 const SGR_WHEEL_DOWN: &str = "\x1b[<65;1;1M";
 
@@ -1365,7 +1367,11 @@ fn runs_claude(record: &SessionRecord) -> bool {
 fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal) {
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let pending = Cell::new(0.0_f64);
+    let pending = Rc::new(Cell::new(0.0_f64));
+    let begin_pending = pending.clone();
+    scroll.connect_scroll_begin(move |_| begin_pending.set(0.0));
+    let end_pending = pending.clone();
+    scroll.connect_scroll_end(move |_| end_pending.set(0.0));
     scroll.connect_scroll(move |controller, _, dy| {
         let Some(terminal) = controller.widget().and_downcast::<vte::Terminal>() else {
             return glib::Propagation::Proceed;
@@ -1401,7 +1407,9 @@ fn wheel_events(
     // Wheel deltas count clicks; touchpad deltas count logical pixels.
     // Claude applies its own scroll step to each event, so send each only once.
     let delta = match unit {
-        gtk::gdk::ScrollUnit::Surface => dy / line_height.max(1) as f64,
+        gtk::gdk::ScrollUnit::Surface => {
+            dy / (line_height.max(1) as f64 * TOUCHPAD_LINE_HEIGHTS_PER_EVENT)
+        }
         _ => dy,
     };
     // Preserve sub-line movement instead of dropping small touchpad deltas.
@@ -1566,6 +1574,21 @@ mod tests {
         input.borrow_mut().clear();
         assert!(emit(-2.0));
         assert_eq!(&*input.borrow(), &super::SGR_WHEEL_UP.repeat(2));
+        input.borrow_mut().clear();
+
+        assert!(emit(0.5));
+        assert!(input.borrow().is_empty());
+        controller.emit_by_name::<()>("scroll-end", &[]);
+        assert!(emit(0.5));
+        assert!(
+            input.borrow().is_empty(),
+            "a finished gesture leaves no remainder"
+        );
+        controller.emit_by_name::<()>("scroll-begin", &[]);
+        assert!(emit(0.5));
+        assert!(input.borrow().is_empty(), "a new gesture starts from zero");
+        assert!(emit(0.5));
+        assert_eq!(&*input.borrow(), super::SGR_WHEEL_DOWN);
         window.close();
     }
 
@@ -1581,27 +1604,25 @@ mod tests {
     }
 
     #[test]
-    fn touchpad_pixels_accumulate_into_terminal_lines() {
+    fn touchpad_movement_is_slowed_before_claude_accelerates_it() {
         let pending = std::cell::Cell::new(0.0);
-        for expected in [0.0, 0.0, 1.0] {
+        for expected in [0.0, 0.0, 0.0, 1.0] {
             assert_eq!(
-                super::wheel_events(&pending, 8.0, gtk::gdk::ScrollUnit::Surface, 24),
+                super::wheel_events(&pending, 24.0, gtk::gdk::ScrollUnit::Surface, 24),
                 expected
             );
         }
         assert_eq!(
-            super::wheel_events(&pending, -96.0, gtk::gdk::ScrollUnit::Surface, 24),
+            super::wheel_events(&pending, -384.0, gtk::gdk::ScrollUnit::Surface, 24),
             -4.0
         );
         // Doubling the font height doubles the movement needed for an event.
-        assert_eq!(
-            super::wheel_events(&pending, 24.0, gtk::gdk::ScrollUnit::Surface, 48),
-            0.0
-        );
-        assert_eq!(
-            super::wheel_events(&pending, 24.0, gtk::gdk::ScrollUnit::Surface, 48),
-            1.0
-        );
+        for expected in [0.0, 0.0, 0.0, 1.0] {
+            assert_eq!(
+                super::wheel_events(&pending, 48.0, gtk::gdk::ScrollUnit::Surface, 48),
+                expected
+            );
+        }
     }
 
     #[test]
