@@ -124,7 +124,7 @@ pub fn resolve_markdown_link(
     if raw_path.is_empty() {
         return None;
     }
-    let decoded = percent_decode(raw_path)?;
+    let decoded = crate::text::percent_decode(raw_path).filter(|bytes| !bytes.contains(&0))?;
     let relative = Path::new(OsStr::from_bytes(&decoded));
     let joined = match relative.strip_prefix("/") {
         Ok(inside) => worktree_root.join(inside),
@@ -147,23 +147,6 @@ fn uri_scheme(href: &str) -> Option<&str> {
     let valid = characters.next()?.is_ascii_alphabetic()
         && characters.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
     valid.then_some(scheme)
-}
-
-fn percent_decode(text: &str) -> Option<Vec<u8>> {
-    let bytes = text.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
-            decoded.push(u8::from_str_radix(hex, 16).ok()?);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    (!decoded.contains(&0)).then_some(decoded)
 }
 
 /// Removes `.` and `..` without touching the disk, so the same file gets the same tab.
@@ -301,6 +284,7 @@ mod tests {
         );
         assert_eq!(resolve_markdown_link("#section", document, root), None);
         assert_eq!(resolve_markdown_link("bad%zz.md", document, root), None);
+        assert_eq!(resolve_markdown_link("bad%+1.md", document, root), None);
         assert_eq!(resolve_markdown_link("nul%00.md", document, root), None);
     }
 

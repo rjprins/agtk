@@ -51,18 +51,7 @@ pub fn parse_azure_remote(remote: &str) -> Option<AzureRepoRef> {
 }
 
 fn percent_decode(value: &str) -> Option<String> {
-    let mut bytes = Vec::with_capacity(value.len());
-    let mut input = value.as_bytes().iter().copied();
-    while let Some(byte) = input.next() {
-        if byte == b'%' {
-            let high = hex(input.next()?)?;
-            let low = hex(input.next()?)?;
-            bytes.push(high * 16 + low);
-        } else {
-            bytes.push(byte);
-        }
-    }
-    String::from_utf8(bytes).ok()
+    String::from_utf8(crate::text::percent_decode(value)?).ok()
 }
 
 pub(super) fn percent_encode(value: &str) -> String {
@@ -76,13 +65,4 @@ pub(super) fn percent_encode(value: &str) -> String {
         }
     }
     output
-}
-
-fn hex(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
