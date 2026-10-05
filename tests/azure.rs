@@ -92,6 +92,51 @@ fn attention_baselines_then_tracks_new_published_and_review_events_with_cas_ackn
 }
 
 #[test]
+fn azure_origin_lookup_ignores_inherited_git_repository_overrides() {
+    if let Some(root) = std::env::var_os("AGTK_TEST_AZURE_ORIGIN_ROOT") {
+        let reference = AzureClient::new("unused-az")
+            .repository(std::path::Path::new(&root))
+            .unwrap()
+            .unwrap();
+        assert_eq!(reference.repository, "target");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("target");
+    let other = directory.path().join("other");
+    for (root, name) in [(&target, "target"), (&other, "other")] {
+        fs::create_dir(root).unwrap();
+        run_git(root, &["init", "-q"]);
+        run_git(
+            root,
+            &[
+                "remote",
+                "add",
+                "origin",
+                &format!("https://dev.azure.com/demo/Project/_git/{name}"),
+            ],
+        );
+    }
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "azure_origin_lookup_ignores_inherited_git_repository_overrides",
+            "--nocapture",
+        ])
+        .env("AGTK_TEST_AZURE_ORIGIN_ROOT", &target)
+        .env("GIT_DIR", other.join(".git"))
+        .env("GIT_WORK_TREE", &other)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn azure_client_uses_bounded_cli_calls_and_collects_unresolved_threads() {
     let directory = tempfile::tempdir().unwrap();
     let repository = directory.path().join("repository");
