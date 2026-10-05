@@ -1118,10 +1118,13 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 }
 
 fn validate_provider_session_id(value: &str) -> PersistResult<()> {
-    if value.trim() != value
-        || !(1..=240).contains(&value.chars().count())
-        || value.chars().any(char::is_whitespace)
-        || value.contains('\0')
+    // Claude and Codex use UUIDs. The ID goes into argv after --resume, so a
+    // leading '-' would read as a flag.
+    if !(1..=240).contains(&value.len())
+        || value.starts_with(['-', '.'])
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
     {
         return Err("provider session ID is invalid".into());
     }

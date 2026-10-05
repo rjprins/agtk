@@ -569,3 +569,31 @@ fn response_body_is_available_without_reparsing_json() {
 
     assert_eq!(response.body, ResponseBody::Success(json!({ "ok": true })));
 }
+
+#[test]
+fn provider_session_ids_cannot_pass_as_agent_flags() {
+    for id in [
+        "--dangerously-skip-permissions",
+        "-c",
+        "../log",
+        "a b",
+        "a;b",
+    ] {
+        let request = json!({
+            "version": 1,
+            "id": "agent",
+            "method": "agent.restore",
+            "params": {"provider": "claude", "providerSessionId": id},
+        });
+        let error = decode_request(request.to_string().as_bytes()).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidParams, "{id}");
+    }
+    let uuid = "0199a2b3-c4d5-7e6f-8091-a2b3c4d5e6f7";
+    let request = json!({
+        "version": 1,
+        "id": "agent",
+        "method": "agent.restore",
+        "params": {"provider": "codex", "providerSessionId": uuid},
+    });
+    assert!(decode_request(request.to_string().as_bytes()).is_ok());
+}
