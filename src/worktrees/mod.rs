@@ -205,14 +205,20 @@ impl WorktreeManager {
         known_project_roots: &[PathBuf],
     ) -> SessionLocation {
         let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
-        let project_root = known_project_roots
-            .iter()
-            .filter(|root| cwd.starts_with(root))
-            .max_by_key(|root| root.components().count())
-            .cloned()
-            .or_else(|| self.repository_root(&cwd).ok())
-            .unwrap_or_else(|| cwd.clone());
         let worktree_path = self.worktree_root(&cwd).ok();
+        // A registered ancestor can contain several repositories and their
+        // sibling worktrees. Git ownership must win over that path prefix.
+        let project_root = worktree_path
+            .as_deref()
+            .and_then(git::primary_worktree)
+            .or_else(|| {
+                known_project_roots
+                    .iter()
+                    .filter(|root| cwd.starts_with(root))
+                    .max_by_key(|root| root.components().count())
+                    .cloned()
+            })
+            .unwrap_or_else(|| cwd.clone());
         SessionLocation {
             cwd,
             project_root,

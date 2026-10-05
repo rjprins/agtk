@@ -133,6 +133,38 @@ fn worktree_root_resolves_nested_directories_in_linked_checkouts() {
 }
 
 #[test]
+fn git_repository_ownership_takes_precedence_over_known_parent_projects() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
+    let parent = fixture.root().parent().unwrap().to_path_buf();
+    let linked = parent.join("demo-linked");
+    git(
+        fixture.root(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "linked-work",
+            linked.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let nested = linked.join("src/deep");
+    fs::create_dir_all(&nested).unwrap();
+    let known = [parent, fixture.root().to_path_buf()];
+
+    for (cwd, checkout) in [
+        (fixture.root(), fixture.root()),
+        (nested.as_path(), linked.as_path()),
+    ] {
+        let location = manager.resolve_session_location(cwd, &known);
+
+        assert_eq!(location.project_root, fixture.root());
+        assert_eq!(location.worktree_path.as_deref(), Some(checkout));
+    }
+}
+
+#[test]
 fn branch_for_worktree_resolves_the_checked_out_branch() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());

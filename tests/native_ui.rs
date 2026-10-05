@@ -2079,6 +2079,12 @@ fn a_session_can_move_to_another_worktree_and_keeps_it_across_restart() {
     let id = session["id"].as_str().unwrap().to_owned();
     assert_eq!(session["name"], "repo");
 
+    // A registered ancestor must not claim this repository's sibling worktree.
+    app.request(
+        "project.set",
+        json!({"root":app.directory.path(),"isPinned":true}),
+    );
+
     let moved = app.request(
         "session.set_worktree",
         json!({"sessionId":id,"worktreePath":fix}),
@@ -2114,6 +2120,7 @@ fn a_session_can_move_to_another_worktree_and_keeps_it_across_restart() {
         .find(|s| s["id"] == id)
         .unwrap();
     assert_eq!(recovered["worktreePath"], fix.to_string_lossy().as_ref());
+    assert_eq!(recovered["projectRoot"], repo.to_string_lossy().as_ref());
     app.request("session.close", json!({"sessionId":id}));
 }
 
