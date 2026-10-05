@@ -758,6 +758,10 @@ impl Workspace {
 
     fn enable_terminal_links(&self, terminal: &vte::Terminal) {
         terminal.set_allow_hyperlink(true);
+        // A hyperlink's text can say anything, so its real target shows on hover.
+        terminal.connect_hyperlink_hover_uri_notify(|terminal| {
+            terminal.set_tooltip_text(terminal.hyperlink_hover_uri().as_deref());
+        });
         let add_pattern =
             |pattern: &str| match vte::Regex::for_match(pattern, PCRE2_UTF | PCRE2_MULTILINE) {
                 Ok(regex) => {
@@ -876,6 +880,10 @@ impl Workspace {
             } else {
                 self.show_error(&format!("{} is not a file", path.display()));
             }
+        } else if !is_web_link(text) {
+            // Hyperlinks from terminal output can name any scheme, and a custom
+            // scheme handler would start another program.
+            self.show_error("Only http, https, and file links open from the terminal");
         } else {
             let workspace = self.clone();
             gtk::UriLauncher::new(text).launch(
@@ -1303,6 +1311,10 @@ pub(super) fn show_worktree_caption(label: &gtk::Label, record: &SessionRecord) 
     label.set_visible(true);
 }
 
+fn is_web_link(uri: &str) -> bool {
+    glib::Uri::peek_scheme(uri).is_some_and(|scheme| scheme == "http" || scheme == "https")
+}
+
 /// The hyperlink or matched link text under a point, with the tag of the pattern that matched.
 fn link_at(
     terminal: &vte::Terminal,
@@ -1493,6 +1505,15 @@ mod tests {
         assert!(super::is_click((10.0, 10.0), (10.0, 10.0)));
         assert!(super::is_click((10.0, 10.0), (12.0, 13.0)));
         assert!(!super::is_click((10.0, 10.0), (30.0, 10.0)));
+    }
+
+    #[test]
+    fn only_web_links_go_to_the_uri_launcher() {
+        assert!(super::is_web_link("https://github.com/rjprins/agtk"));
+        assert!(super::is_web_link("HTTP://example.org"));
+        assert!(!super::is_web_link("smb://attacker/share"));
+        assert!(!super::is_web_link("x-custom-handler:run"));
+        assert!(!super::is_web_link("not a uri"));
     }
 
     /// Wraps every match of the terminal file pattern in brackets, using VTE's own PCRE2.
