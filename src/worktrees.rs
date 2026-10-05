@@ -340,9 +340,10 @@ impl WorktreeManager {
         }
         git_text(&repo_root, ["check-ref-format", "--branch", branch])?;
         let base = base.map(str::trim).filter(|base| !base.is_empty());
-        let base = base
-            .map(str::to_owned)
-            .unwrap_or(default_branch(&repo_root)?);
+        let base = match base {
+            Some(base) => base.to_owned(),
+            None => default_branch(&repo_root)?,
+        };
         git_text(
             &repo_root,
             ["rev-parse", "--verify", &format!("{base}^{{commit}}")],
