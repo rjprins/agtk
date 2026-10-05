@@ -209,7 +209,7 @@ The tools cover sessions, terminal input and text, diffs, worktrees, recent conv
 
 - Settings and session data: `$XDG_STATE_HOME/agtk/default`, or `~/.local/state/agtk/default`
 - Sockets and Claude hook settings: `$XDG_RUNTIME_DIR/agtk/default`, or `/tmp/agtk-UID/agtk/default` without `XDG_RUNTIME_DIR`. agtk makes these directories private to you and refuses one that someone else can change.
-- Worktrees: next to the project, as `../REPO-BRANCH`, or where `git config agtk.worktreeTemplate` says. PR reviews: `../pr-ID`.
+- Worktrees: `~/worktrees/REPO/BRANCH`, or where `git config agtk.worktreeTemplate` says (placeholders `{repo-name}`, `{repo-root}`, `{branch}`; relative paths start at the project, `~` is your home). PR reviews use the same place with branch `pr-ID`.
 - Work saved before a worktree is removed: `attic` in the settings directory. agtk stages it in a private directory under `/tmp` first.
 
 agtk makes no network requests itself. Pull requests go through the Azure CLI, and a PR review fetches the branch with `git fetch`. Building agtk downloads the crates in `Cargo.lock` and the npm packages in `viewer/package-lock.json`, without running their install scripts.

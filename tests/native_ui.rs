@@ -51,6 +51,14 @@ impl App {
         )
         .unwrap();
         std::fs::set_permissions(&fake_az, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(
+            directory.path().join("gitconfig"),
+            format!(
+                "[agtk]\n\tworktreeTemplate = {}/worktrees/{{repo-name}}/{{branch}}\n",
+                directory.path().canonicalize().unwrap().display()
+            ),
+        )
+        .unwrap();
         std::fs::write(directory.path().join("azure-prs.json"), "[]").unwrap();
         std::fs::write(directory.path().join("azure-pbis.json"), "[]").unwrap();
         std::fs::write(
@@ -108,6 +116,8 @@ impl App {
             .env("AGTK_INSTANCE", self.paths.name().as_str())
             .env("AGTK_RUNTIME_ROOT", self.directory.path())
             .env("AGTK_STATE_ROOT", self.directory.path())
+            // Worktrees land in the test directory instead of ~/worktrees.
+            .env("GIT_CONFIG_GLOBAL", self.directory.path().join("gitconfig"))
             .env("CLAUDE_CONFIG_DIR", self.directory.path().join("claude"))
             .env("CODEX_HOME", self.directory.path().join("codex"))
             .env("AGTK_CODEX_BIN", self.directory.path().join("fake-agent"))
@@ -921,7 +931,13 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
         );
     }
     let project = project.canonicalize().unwrap();
-    let review_checkout = |id: u64| project.parent().unwrap().join(format!("pr-{id}"));
+    let review_checkout = |id: u64| {
+        app.directory
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join(format!("worktrees/azure-project/pr-{id}"))
+    };
 
     let pr = |id: u64, branch: &str| {
         json!({

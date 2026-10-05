@@ -8,7 +8,7 @@ use crate::control::{
 };
 use crate::persist::now_millis;
 use crate::providers::{AgentProvider, ProviderDiscovery, recent_mutated_paths};
-use crate::worktrees::{PorcelainWorktree, WorktreeManager};
+use crate::worktrees::{PorcelainWorktree, WorktreeLayout, WorktreeManager};
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
@@ -367,7 +367,9 @@ impl Workspace {
                 let root_key = project_root.to_string_lossy().to_string();
                 let state = preferences.project(&root_key);
                 let worktrees = manager.linked_worktrees(&project_root).unwrap_or_default();
-                let context = pr_context_from_list(project_root, list, &state, &worktrees);
+                let layout = manager.layout(&project_root).ok();
+                let context =
+                    pr_context_from_list(project_root, list, &state, &worktrees, layout.as_ref());
                 // A review runs in its own detached pr-<id> checkout, so its
                 // name is what links it to the PR.
                 let reviewed = review_pr_id(&name).and_then(|id| {
@@ -791,9 +793,9 @@ impl Workspace {
                 let reconciliation = reconcile_attention(previous, &list.pull_requests);
                 let changed = reconciliation.changed.iter().copied().collect::<Vec<_>>();
 
-                let worktrees = WorktreeManager::new(attic)
-                    .linked_worktrees(&project_root)
-                    .unwrap_or_default();
+                let manager = WorktreeManager::new(attic);
+                let worktrees = manager.linked_worktrees(&project_root).unwrap_or_default();
+                let layout = manager.layout(&project_root).ok();
                 let pull_requests = list
                     .pull_requests
                     .into_iter()
@@ -805,10 +807,12 @@ impl Workspace {
                             .attention
                             .get(&pull_request.id)
                             .copied();
+                        let review_path = review_path(layout.as_ref(), pull_request.id);
                         PrItem {
                             pull_request,
                             attention,
                             worktree_path,
+                            review_path,
                         }
                     })
                     .collect();
@@ -900,7 +904,6 @@ impl Workspace {
 
     fn pr_row(&self, context: &PrContext, item: &PrItem) -> adw::ActionRow {
         let pull_request = &item.pull_request;
-        let location = review_checkout_path(&context.project_root, pull_request.id);
         let row = adw::ActionRow::builder()
             .title(glib::markup_escape_text(&pull_request.title))
             .subtitle(glib::markup_escape_text(&format!(
@@ -912,11 +915,14 @@ impl Workspace {
             )))
             .subtitle_lines(1)
             .build();
-        row.set_tooltip_text(Some(&format!(
-            "{}\nReview runs in {}",
-            pull_request.title,
-            location.display()
-        )));
+        row.set_tooltip_text(Some(&match &item.review_path {
+            Some(location) => format!(
+                "{}\nReview runs in {}",
+                pull_request.title,
+                location.display()
+            ),
+            None => pull_request.title.clone(),
+        }));
 
         let open = {
             let workspace = self.clone();
@@ -1112,6 +1118,7 @@ impl Workspace {
                     pull_request,
                     attention: None,
                     worktree_path,
+                    review_path: None,
                 })
             },
             move |workspace, result| match result {
@@ -1298,6 +1305,7 @@ fn pr_context_from_list(
     list: AzurePrList,
     state: &PrProjectState,
     worktrees: &[PorcelainWorktree],
+    layout: Option<&WorktreeLayout>,
 ) -> PrContext {
     let pull_requests = list
         .pull_requests
@@ -1306,6 +1314,7 @@ fn pr_context_from_list(
             let worktree_path = worktree_for_branch(worktrees, &pull_request.source_branch);
             PrItem {
                 attention: state.attention.get(&pull_request.id).copied(),
+                review_path: review_path(layout, pull_request.id),
                 pull_request,
                 worktree_path,
             }
@@ -1321,11 +1330,8 @@ fn pr_context_from_list(
 }
 
 /// Where `WorktreeManager::review_checkout` puts the review of one PR.
-fn review_checkout_path(project_root: &Path, pull_request_id: u64) -> PathBuf {
-    project_root
-        .parent()
-        .unwrap_or(project_root)
-        .join(format!("pr-{pull_request_id}"))
+fn review_path(layout: Option<&WorktreeLayout>, pull_request_id: u64) -> Option<PathBuf> {
+    layout?.review_path(pull_request_id).ok()
 }
 
 fn worktree_for_branch(worktrees: &[PorcelainWorktree], branch: &str) -> Option<PathBuf> {
@@ -1429,11 +1435,13 @@ mod tests {
                     pull_request: pull_request(42, "feature"),
                     attention: None,
                     worktree_path: Some(project.join("wt/feature")),
+                    review_path: None,
                 },
                 PrItem {
                     pull_request: pull_request(44, "later"),
                     attention: None,
                     worktree_path: None,
+                    review_path: None,
                 },
             ],
         }

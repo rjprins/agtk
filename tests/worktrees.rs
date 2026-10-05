@@ -22,7 +22,7 @@ fn porcelain_parser_preserves_detached_locked_and_prunable_flags() {
 #[test]
 fn linked_worktree_paths_include_every_checkout_without_status_scanning() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let extra = fixture.root().parent().unwrap().join("demo-extra");
     git(
         fixture.root(),
@@ -44,7 +44,7 @@ fn linked_worktree_paths_include_every_checkout_without_status_scanning() {
 #[test]
 fn linked_worktrees_report_each_checkout_branch() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let extra = fixture.root().parent().unwrap().join("demo-linked-branch");
     git(
         fixture.root(),
@@ -76,7 +76,7 @@ fn linked_worktrees_report_each_checkout_branch() {
 #[test]
 fn status_hash_follows_contents_around_deleted_and_oddly_named_files() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let root = fixture.root();
     // A deleted tracked file sits between the others and takes the index fallback.
     fs::remove_file(root.join("README.md")).unwrap();
@@ -107,7 +107,7 @@ fn status_hash_follows_contents_around_deleted_and_oddly_named_files() {
 #[test]
 fn worktree_root_resolves_nested_directories_in_linked_checkouts() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let extra = fixture.root().parent().unwrap().join("demo-nested-extra");
     git(
         fixture.root(),
@@ -135,7 +135,7 @@ fn worktree_root_resolves_nested_directories_in_linked_checkouts() {
 #[test]
 fn branch_for_worktree_resolves_the_checked_out_branch() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let extra = fixture.root().parent().unwrap().join("demo-branch-extra");
     git(
         fixture.root(),
@@ -158,7 +158,7 @@ fn branch_for_worktree_resolves_the_checked_out_branch() {
 #[test]
 fn branch_for_path_in_repo_resolves_a_file_in_another_worktree() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let extra = fixture.root().parent().unwrap().join("demo-edited-extra");
     git(
         fixture.root(),
@@ -185,9 +185,9 @@ fn branch_for_path_in_repo_resolves_a_file_in_another_worktree() {
 }
 
 #[test]
-fn create_records_purpose_and_uses_the_sibling_template() {
+fn create_records_purpose_and_groups_worktrees_by_repository_under_home() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
 
     let created = manager
         .create(
@@ -200,10 +200,7 @@ fn create_records_purpose_and_uses_the_sibling_template() {
 
     assert_eq!(
         created.path,
-        fixture.root().parent().unwrap().join(format!(
-            "{}-native-feature",
-            fixture.root().file_name().unwrap().to_string_lossy()
-        ))
+        fixture.home().join("worktrees/demo/native-feature")
     );
     assert_eq!(
         git(
@@ -217,9 +214,40 @@ fn create_records_purpose_and_uses_the_sibling_template() {
 }
 
 #[test]
-fn review_checkout_is_a_detached_pr_sibling_that_follows_the_source_tip() {
+fn configured_templates_place_worktrees_and_reviews_alike() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
+
+    git(
+        fixture.root(),
+        &["config", "agtk.worktreeTemplate", "../{repo-name}-{branch}"],
+    );
+    let layout = manager.layout(fixture.root()).unwrap();
+    let parent = fixture.root().parent().unwrap();
+    assert_eq!(layout.path_for("topic").unwrap(), parent.join("demo-topic"));
+    assert_eq!(layout.review_path(9).unwrap(), parent.join("demo-pr-9"));
+
+    git(
+        fixture.root(),
+        &["config", "agtk.worktreeTemplate", "~/src/{branch}"],
+    );
+    let created = manager
+        .create(fixture.root(), "tilde-work", Some("main"), "tilde template")
+        .unwrap();
+    assert_eq!(created.path, fixture.home().join("src/tilde-work"));
+    let inventory = manager.list(fixture.root(), &[]).unwrap();
+    let listed = inventory
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.path == created.path)
+        .unwrap();
+    assert!(!listed.off_convention);
+}
+
+#[test]
+fn review_checkout_is_a_detached_pr_worktree_that_follows_the_source_tip() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     git(fixture.root(), &["checkout", "-q", "-b", "feature/topic"]);
     fs::write(fixture.root().join("topic.txt"), "one\n").unwrap();
     git(fixture.root(), &["add", "topic.txt"]);
@@ -243,7 +271,7 @@ fn review_checkout_is_a_detached_pr_sibling_that_follows_the_source_tip() {
         .review_checkout(&clone, 42, "feature/topic")
         .expect("create review checkout");
 
-    assert_eq!(path, clone.parent().unwrap().join("pr-42"));
+    assert_eq!(path, fixture.home().join("worktrees/clone/pr-42"));
     assert_eq!(git(&path, &["rev-parse", "HEAD"]).trim(), first);
     assert!(manager.branch_for_worktree(&path).unwrap().is_none());
     let state = manager.list(&clone, &[]).unwrap();
@@ -281,7 +309,7 @@ fn review_checkout_is_a_detached_pr_sibling_that_follows_the_source_tip() {
 #[test]
 fn review_checkout_runs_no_hooks_from_the_pull_request() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let marker = fixture.root().parent().unwrap().join("hook-ran");
     git(fixture.root(), &["checkout", "-q", "-b", "feature/hook"]);
     fs::create_dir(fixture.root().join(".hooks")).unwrap();
@@ -319,7 +347,7 @@ fn review_checkout_runs_no_hooks_from_the_pull_request() {
 #[test]
 fn inventory_distinguishes_live_upstream_and_gone_upstream() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
 
     let open = manager
         .create(fixture.root(), "open-work", Some("main"), "open upstream")
@@ -402,7 +430,7 @@ fn inventory_distinguishes_live_upstream_and_gone_upstream() {
 #[test]
 fn inventory_covers_active_review_ephemeral_unknown_and_path_overlays() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let parent = fixture.root().parent().unwrap();
     let active = parent.join("odd-active-location");
     let review = parent.join("pr-42-checkout");
@@ -473,7 +501,7 @@ fn inventory_covers_active_review_ephemeral_unknown_and_path_overlays() {
 #[test]
 fn reap_aborts_on_drift_then_salvages_and_attic_tags_dirty_work() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let created = manager
         .create(
             fixture.root(),
@@ -593,7 +621,7 @@ fn reap_aborts_on_drift_then_salvages_and_attic_tags_dirty_work() {
 #[test]
 fn a_confirmed_reap_removes_an_active_worktree_but_keeps_its_branch_unless_forced() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let created = manager
         .create(
             fixture.root(),
@@ -696,7 +724,7 @@ fn a_confirmed_reap_removes_an_active_worktree_but_keeps_its_branch_unless_force
 #[test]
 fn staged_deletions_do_not_block_listing_or_reaping() {
     let fixture = Repository::new();
-    let manager = WorktreeManager::new(fixture.attic());
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
     let created = manager
         .create(
             fixture.root(),
@@ -768,6 +796,11 @@ impl Repository {
 
     fn attic(&self) -> std::path::PathBuf {
         self.directory.path().join("attic")
+    }
+
+    /// Stands in for `$HOME`, so default worktrees stay inside the fixture.
+    fn home(&self) -> std::path::PathBuf {
+        self.directory.path().canonicalize().unwrap().join("home")
     }
 }
 

@@ -70,6 +70,8 @@ pub struct PrItem {
     pub pull_request: AzurePr,
     pub attention: Option<PrAttention>,
     pub worktree_path: Option<PathBuf>,
+    /// Where a review of this PR runs, when the worktree layout was readable.
+    pub review_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

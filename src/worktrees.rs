@@ -125,11 +125,56 @@ pub struct ReapResult {
 #[derive(Debug, Clone)]
 pub struct WorktreeManager {
     attic_root: PathBuf,
+    home: Option<PathBuf>,
+}
+
+/// Where one repository's worktrees go, from `agtk.worktreeTemplate` or the
+/// default `~/worktrees/{repo-name}/{branch}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeLayout {
+    repo_root: PathBuf,
+    template: String,
+    home: Option<PathBuf>,
+}
+
+impl WorktreeLayout {
+    pub fn path_for(&self, branch: &str) -> WorktreeResult<PathBuf> {
+        resolve_template(
+            &self.repo_root,
+            branch,
+            &self.template,
+            self.home.as_deref(),
+        )
+    }
+
+    /// The detached checkout that reviews one pull request.
+    pub fn review_path(&self, pull_request_id: u64) -> WorktreeResult<PathBuf> {
+        self.path_for(&format!("pr-{pull_request_id}"))
+    }
 }
 
 impl WorktreeManager {
     pub fn new(attic_root: PathBuf) -> Self {
-        Self { attic_root }
+        let home = std::env::var_os("HOME")
+            .filter(|home| !home.is_empty())
+            .map(PathBuf::from);
+        Self { attic_root, home }
+    }
+
+    /// Resolve `~` in worktree templates against `home` instead of `$HOME`.
+    pub fn with_home(mut self, home: PathBuf) -> Self {
+        self.home = Some(home);
+        self
+    }
+
+    pub fn layout(&self, repo_root: &Path) -> WorktreeResult<WorktreeLayout> {
+        let repo_root = canonical_repo(repo_root)?;
+        let template = worktree_template(&repo_root);
+        Ok(WorktreeLayout {
+            repo_root,
+            template,
+            home: self.home.clone(),
+        })
     }
 
     pub fn repository_root(&self, path: &Path) -> WorktreeResult<PathBuf> {
@@ -218,12 +263,12 @@ impl WorktreeManager {
         let output = git_text(&repo_root, ["worktree", "list", "--porcelain"])?;
         let parsed = parse_worktree_porcelain(&output);
         let default_branch = default_branch(&repo_root)?;
-        let template = worktree_template(&repo_root);
+        let layout = self.layout(&repo_root)?;
         let now = now_millis() as u64;
         let classification = ClassificationContext {
             repo_root: &repo_root,
             default_branch: &default_branch,
-            template: &template,
+            layout: &layout,
             now,
         };
         let mut worktrees = Vec::with_capacity(parsed.len());
@@ -302,16 +347,11 @@ impl WorktreeManager {
             &repo_root,
             ["rev-parse", "--verify", &format!("{base}^{{commit}}")],
         )?;
-        let template = worktree_template(&repo_root);
-        let path = resolve_template(&repo_root, branch, &template)?;
+        let path = self.layout(&repo_root)?.path_for(branch)?;
         if path.exists() {
             return Err(format!("worktree target already exists: {}", path.display()).into());
         }
-        let parent = path.parent().ok_or("worktree target has no parent")?;
-        fs::create_dir_all(parent)?;
-        let path = parent
-            .canonicalize()?
-            .join(path.file_name().ok_or("invalid worktree target")?);
+        let path = with_canonical_parent(&path)?;
         let branch_ref = format!("refs/heads/{branch}");
         let branch_exists = git_success(
             &repo_root,
@@ -339,9 +379,9 @@ impl WorktreeManager {
         })
     }
 
-    /// The detached `pr-<id>` checkout next to the primary clone, created at the
-    /// PR's current source tip. An existing checkout moves to that tip when it
-    /// has no edits, so an earlier review's untracked notes survive.
+    /// The detached `pr-<id>` checkout at the repository's worktree location,
+    /// created at the PR's current source tip. An existing checkout moves to
+    /// that tip when it has no edits, so an earlier review's untracked notes survive.
     pub fn review_checkout(
         &self,
         repo_root: &Path,
@@ -356,8 +396,7 @@ impl WorktreeManager {
         {
             return Err("source branch is invalid".into());
         }
-        let parent = repo_root.parent().ok_or("repository root has no parent")?;
-        let path = parent.join(format!("pr-{pull_request_id}"));
+        let path = with_canonical_parent(&self.layout(&repo_root)?.review_path(pull_request_id)?)?;
         if path == repo_root {
             return Err("review target is the primary checkout".into());
         }
@@ -736,7 +775,7 @@ fn quote_c_style(path: &[u8], output: &mut Vec<u8>) {
 struct ClassificationContext<'a> {
     repo_root: &'a Path,
     default_branch: &'a str,
-    template: &'a str,
+    layout: &'a WorktreeLayout,
     now: u64,
 }
 
@@ -750,7 +789,7 @@ fn classify(
     let ClassificationContext {
         repo_root,
         default_branch,
-        template,
+        layout,
         now,
     } = *context;
     let clean = !status.dirty && !status.ignored_only;
@@ -868,7 +907,8 @@ fn classify(
         });
     let off_convention = !is_primary
         && worktree.branch.as_deref().is_some_and(|branch| {
-            resolve_template(repo_root, branch, template)
+            layout
+                .path_for(branch)
                 .is_ok_and(|expected| normalize_path(&worktree.path) != expected)
         });
     WorktreeInfo {
@@ -1025,7 +1065,17 @@ fn worktree_template(repo_root: &Path) -> String {
         .filter_map(|key| git_text(repo_root, ["config", "--get", key]).ok())
         .map(|value| value.trim().to_owned())
         .find(|value| !value.is_empty())
-        .unwrap_or_else(|| "../{repo-name}-{branch}".to_owned())
+        .unwrap_or_else(|| "~/worktrees/{repo-name}/{branch}".to_owned())
+}
+
+/// Creates the parent of a worktree target and resolves it, so the path
+/// matches what `git worktree list` reports.
+fn with_canonical_parent(path: &Path) -> WorktreeResult<PathBuf> {
+    let parent = path.parent().ok_or("worktree target has no parent")?;
+    fs::create_dir_all(parent)?;
+    Ok(parent
+        .canonicalize()?
+        .join(path.file_name().ok_or("invalid worktree target")?))
 }
 
 fn has_populated_submodules(worktree: &Path) -> bool {
@@ -1049,7 +1099,12 @@ fn validate_branch(branch: &str) -> WorktreeResult<()> {
     Ok(())
 }
 
-fn resolve_template(repo_root: &Path, branch: &str, template: &str) -> WorktreeResult<PathBuf> {
+fn resolve_template(
+    repo_root: &Path,
+    branch: &str,
+    template: &str,
+    home: Option<&Path>,
+) -> WorktreeResult<PathBuf> {
     let repo_name = repo_root
         .file_name()
         .and_then(OsStr::to_str)
@@ -1058,6 +1113,13 @@ fn resolve_template(repo_root: &Path, branch: &str, template: &str) -> WorktreeR
         .replace("{repo-name}", repo_name)
         .replace("{repo-root}", &repo_root.to_string_lossy())
         .replace("{branch}", &sanitize(branch));
+    let replaced = match replaced.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            let home = home.ok_or("worktree template uses ~, but HOME is not set")?;
+            format!("{}{rest}", home.display())
+        }
+        _ => replaced,
+    };
     let joined = if Path::new(&replaced).is_absolute() {
         PathBuf::from(replaced)
     } else {
