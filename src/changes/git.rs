@@ -1,12 +1,11 @@
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::command_runner::{BoundedByteOutput, CommandError, run_bounded_bytes};
+use crate::command_runner::BoundedByteOutput;
 
 use super::{ChangedFile, CommitSummary};
 
@@ -74,29 +73,9 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut command = Command::new("git");
-    command
-        .current_dir(root)
-        // An fsmonitor hook in .git/config would otherwise run on every refresh.
-        .args(["-c", "core.fsmonitor=false"])
-        .arg("--literal-pathspecs")
-        .args(arguments)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_EXTERNAL_DIFF")
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("LC_ALL", "C");
-    run_bounded_bytes(command, GIT_TIMEOUT, GIT_OUTPUT_LIMIT).map_err(|error| match error {
-        CommandError::TimedOut(timeout) => {
-            format!("Git command timed out after {} ms", timeout.as_millis())
-        }
-        CommandError::OutputExceeded(limit) => {
-            format!("Git command output exceeded {limit} bytes")
-        }
-        other => other.to_string(),
-    })
+    let mut command = crate::git::command(root);
+    command.arg("--literal-pathspecs").args(arguments);
+    crate::git::output(command, GIT_TIMEOUT, GIT_OUTPUT_LIMIT)
 }
 
 pub(super) fn git_argument(value: impl AsRef<OsStr>) -> OsString {
@@ -273,17 +252,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = run_git(root, arguments)?;
-    if output.status.success() {
-        Ok(output)
-    } else {
-        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        Err(if message.is_empty() {
-            "Git read command failed".to_owned()
-        } else {
-            message
-        })
-    }
+    crate::git::checked(run_git(root, arguments)?)
 }
 
 pub fn parse_status_porcelain_v2_z(input: &[u8]) -> Result<Vec<GitStatusFile>, String> {

@@ -4,15 +4,6 @@ use std::path::{Path, PathBuf};
 use super::WorktreeContext;
 use super::git::{git_argument, oid_from_output, output_text, run_git};
 
-// The agmux key is still set on branches the old agmux created.
-const BASE_CONFIG_KEYS: [&str; 5] = [
-    "agtk-base-branch",
-    "agmux-base-branch",
-    "vscode-merge-base",
-    "gh-merge-base",
-    "merge-base",
-];
-
 pub fn resolve_worktree_context(
     path: &Path,
     preferred_base: Option<&str>,
@@ -52,7 +43,7 @@ pub fn resolve_worktree_context(
         .filter(|branch| !branch.is_empty());
     let detached = head_oid.is_some() && branch.is_none();
 
-    let selected = select_base(&root, preferred_base)?;
+    let selected = select_base(&root, branch.as_deref(), preferred_base)?;
     let merge_base_oid = match (&selected, &head_oid) {
         (Some((_, base_oid)), Some(head_oid)) => {
             let output = run_git(&root, ["merge-base", base_oid.as_str(), head_oid.as_str()])?;
@@ -135,6 +126,7 @@ pub fn validate_base_ref(root: &Path, reference: &str) -> Result<Option<String>,
 
 fn select_base(
     root: &Path,
+    branch: Option<&str>,
     preferred_base: Option<&str>,
 ) -> Result<Option<(String, String)>, String> {
     if let Some(reference) = preferred_base {
@@ -147,12 +139,10 @@ fn select_base(
         }
     }
 
-    for key in BASE_CONFIG_KEYS {
-        let output = run_git(root, ["config", "--get", key])?;
-        if !output.status.success() {
-            continue;
-        }
-        let reference = output_text(&output);
+    let configured = branch
+        .map(|branch| crate::git::configured_bases(root, branch))
+        .unwrap_or_default();
+    for reference in configured {
         if let Some(oid) = validate_base_ref(root, &reference)? {
             return Ok(Some((reference, oid)));
         }

@@ -85,6 +85,23 @@ fn commits_ago_compares_ancestor_to_worktree_including_uncommitted_files() {
 }
 
 #[test]
+fn the_base_recorded_on_the_branch_is_compared_against() {
+    let dir = repository();
+    let root = dir.path();
+    git(root, &["branch", "develop", "HEAD~1"]);
+    git(root, &["switch", "-c", "feature"]);
+    git(
+        root,
+        &["config", "branch.feature.agtk-base-branch", "develop"],
+    );
+
+    let snapshot = read_changes_snapshot(root, None, 0, 0).unwrap().unwrap();
+
+    assert_eq!(snapshot.context.base_ref.as_deref(), Some("develop"));
+    assert_eq!(snapshot.commits.len(), 1);
+}
+
+#[test]
 fn unavailable_ancestor_keeps_selection_instead_of_falling_back_to_main() {
     let dir = repository();
     let snapshot = read_changes_snapshot(dir.path(), Some("HEAD~10"), 0, 0)

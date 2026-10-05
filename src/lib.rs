@@ -12,6 +12,7 @@ pub mod control;
 pub mod emacs;
 pub mod explorer;
 pub mod file_links;
+pub mod git;
 pub mod history;
 pub mod instance;
 pub mod io_worker;
