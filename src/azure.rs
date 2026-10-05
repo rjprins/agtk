@@ -101,7 +101,7 @@ impl PrAttention {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct KnownPr {
     pub is_draft: bool,
     pub unresolved_threads: u32,
@@ -109,7 +109,7 @@ pub struct KnownPr {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PrProjectState {
     #[serde(default)]
     pub auto_review: bool,
@@ -126,7 +126,7 @@ pub struct AttentionReconciliation {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PrPreferences {
     #[serde(default)]
     pub review: PrReviewSettings,
@@ -136,7 +136,7 @@ pub struct PrPreferences {
 
 /// Settings shared by automatic and manual PR reviews. Empty fields inherit Codex config.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PrReviewSettings {
     pub model: String,
     pub effort: String,

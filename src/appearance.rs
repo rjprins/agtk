@@ -41,7 +41,7 @@ impl ThemeKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct AppearancePreferences {
     pub theme: ThemeKey,
     pub follow_system: bool,

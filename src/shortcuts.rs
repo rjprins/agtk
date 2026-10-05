@@ -108,7 +108,7 @@ impl ShortcutAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ShortcutPreferences {
     pub bindings: BTreeMap<ShortcutAction, String>,
 }

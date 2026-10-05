@@ -167,39 +167,22 @@ impl Workspace {
                 let selected = store
                     .preference("selectedSessionId")?
                     .and_then(|v| v.as_str().map(str::to_owned));
-                let appearance = store
-                    .preference("appearance")?
-                    .map(serde_json::from_value::<AppearancePreferences>)
-                    .transpose()?
-                    .unwrap_or_default();
+                let appearance =
+                    store.preference_or_default::<AppearancePreferences>("appearance")?;
                 let loaded_sidebar_width =
                     sidebar_width(store.preference(SIDEBAR_WIDTH_PREFERENCE)?.as_ref());
                 let loaded_changes_width =
                     changes_width(store.preference(CHANGES_WIDTH_PREFERENCE)?.as_ref());
-                let shortcuts = store
-                    .preference("shortcuts")?
-                    .map(serde_json::from_value::<ShortcutPreferences>)
-                    .transpose()?
-                    .unwrap_or_default();
-                let projects = store
-                    .preference("projects")?
-                    .map(serde_json::from_value::<ProjectPreferences>)
-                    .transpose()?
-                    .unwrap_or_default();
+                let shortcuts = store.preference_or_default::<ShortcutPreferences>("shortcuts")?;
+                let projects = store.preference_or_default::<ProjectPreferences>("projects")?;
                 let inactive_projects_expanded = store
                     .preference(projects_ui::INACTIVE_PROJECTS_PREFERENCE)?
                     .and_then(|value| value.as_bool())
                     .unwrap_or(false);
-                let quick_launch = store
-                    .preference("quickLaunch")?
-                    .map(serde_json::from_value::<QuickLaunchPreferences>)
-                    .transpose()?
-                    .unwrap_or_default();
-                let pr_preferences = store
-                    .preference("pullRequests")?
-                    .map(serde_json::from_value::<crate::azure::PrPreferences>)
-                    .transpose()?
-                    .unwrap_or_default();
+                let quick_launch =
+                    store.preference_or_default::<QuickLaunchPreferences>("quickLaunch")?;
+                let pr_preferences =
+                    store.preference_or_default::<crate::azure::PrPreferences>("pullRequests")?;
                 let mut session_pr_cache = store
                     .preference("sessionPullRequests")?
                     .and_then(|value| {
@@ -217,10 +200,9 @@ impl Workspace {
                     .preference(explorer_ui::SIDEBAR_PAGE_PREFERENCE)?
                     .and_then(|value| value.as_str().map(str::to_owned));
                 let changes_base_refs = store
-                    .preference("changesBaseRefs")?
-                    .map(serde_json::from_value::<std::collections::HashMap<String, String>>)
-                    .transpose()?
-                    .unwrap_or_default();
+                    .preference_or_default::<std::collections::HashMap<String, String>>(
+                        "changesBaseRefs",
+                    )?;
                 let markdown_preview = store
                     .preference(file_tabs_ui::MARKDOWN_PREVIEW_PREFERENCE)?
                     .and_then(|value| serde_json::from_value(value).ok())

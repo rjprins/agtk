@@ -1,5 +1,7 @@
+use agtk::appearance::AppearancePreferences;
 use agtk::control::{SessionKind, SessionState};
 use agtk::persist::{SessionRecord, Store};
+use agtk::projects::ProjectPreferences;
 
 #[test]
 fn session_identity_associations_order_and_preferences_survive_reopen() {
@@ -44,4 +46,49 @@ fn refuses_a_database_from_a_newer_application_without_modifying_it() {
             .unwrap(),
         999
     );
+}
+
+#[test]
+fn values_another_build_wrote_differently_do_not_block_loading() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("agtk.db");
+    let store = Store::open(&path).unwrap();
+    let record = SessionRecord::discovered("session-a", dir.path().join("a.sock"));
+    store.save_session(&record).unwrap();
+    store
+        .set_preference(
+            "appearance",
+            &serde_json::json!({
+                "theme": "neutral",
+                "followSystem": false,
+                "font": "Mono 11",
+                "addedLater": true
+            }),
+        )
+        .unwrap();
+    store
+        .set_preference("projects", &serde_json::json!("not projects"))
+        .unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute(
+        "INSERT INTO sessions(id, position, data) VALUES ('broken', 9, '{}')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = Store::open(&path).unwrap();
+
+    let appearance = store
+        .preference_or_default::<AppearancePreferences>("appearance")
+        .unwrap();
+    assert!(!appearance.follow_system);
+    assert_eq!(
+        store
+            .preference_or_default::<ProjectPreferences>("projects")
+            .unwrap(),
+        ProjectPreferences::default()
+    );
+    assert_eq!(store.sessions().unwrap(), vec![record]);
 }

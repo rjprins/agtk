@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectSettings {
     #[serde(default)]
     pub is_pinned: bool,
@@ -14,7 +14,7 @@ pub struct ProjectSettings {
 /// Every project a session ran in, with its settings. A project stays listed
 /// after its sessions close, until it is removed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectPreferences {
     #[serde(default)]
     pub projects: BTreeMap<String, ProjectSettings>,

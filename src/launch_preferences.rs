@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::control::SessionKind;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct QuickLaunchPreferences {
     pub kind: SessionKind,
     #[serde(default)]

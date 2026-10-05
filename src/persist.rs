@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -92,7 +93,15 @@ impl Store {
         let conn = self.0.lock().map_err(|_| "database lock poisoned")?;
         let mut query = conn.prepare("SELECT data FROM sessions ORDER BY position, id")?;
         let rows = query.query_map([], |row| row.get::<_, String>(0))?;
-        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+        let mut sessions = Vec::new();
+        for row in rows {
+            // A record another agtk build wrote differently skips only itself.
+            match serde_json::from_str(&row?) {
+                Ok(session) => sessions.push(session),
+                Err(error) => eprintln!("agtk: skipping a saved session: {error}"),
+            }
+        }
+        Ok(sessions)
     }
 
     pub fn save_session(&self, session: &SessionRecord) -> PersistResult<()> {
@@ -127,6 +136,21 @@ impl Store {
             .optional()?;
         data.map(|data| serde_json::from_str(&data).map_err(Into::into))
             .transpose()
+    }
+
+    /// A saved preference, or its default when it is missing or no longer
+    /// parses, so one bad value cannot stop the workspace from loading.
+    pub fn preference_or_default<T: DeserializeOwned + Default>(
+        &self,
+        key: &str,
+    ) -> PersistResult<T> {
+        let Some(value) = self.preference(key)? else {
+            return Ok(T::default());
+        };
+        Ok(serde_json::from_value(value).unwrap_or_else(|error| {
+            eprintln!("agtk: ignoring saved preference {key}: {error}");
+            T::default()
+        }))
     }
 
     pub fn set_preference(&self, key: &str, value: &Value) -> PersistResult<()> {
