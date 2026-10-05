@@ -164,6 +164,49 @@ fn file_documents_report_text_binary_and_missing_files() {
 }
 
 #[test]
+fn file_documents_flag_links_out_of_the_worktree_and_skip_fifos() {
+    use agtk::changes::{FileDocumentResult, link_target_outside, read_file_document};
+
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = dir.path().join("worktree");
+    fs::create_dir(&worktree).unwrap();
+    let secret = dir.path().join("credentials");
+    fs::write(&secret, "secret\n").unwrap();
+    fs::write(worktree.join("inside.txt"), "inside\n").unwrap();
+    std::os::unix::fs::symlink(&secret, worktree.join("config.yml")).unwrap();
+    std::os::unix::fs::symlink("inside.txt", worktree.join("alias.txt")).unwrap();
+
+    assert_eq!(
+        link_target_outside(&worktree.join("config.yml"), &worktree),
+        Some(secret.canonicalize().unwrap())
+    );
+    assert_eq!(
+        link_target_outside(&worktree.join("alias.txt"), &worktree),
+        None
+    );
+    assert_eq!(
+        link_target_outside(&worktree.join("inside.txt"), &worktree),
+        None
+    );
+    // A path outside the worktree was opened as such, not through a link.
+    assert_eq!(link_target_outside(&secret, &worktree), None);
+
+    let fifo = worktree.join("pipe");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let FileDocumentResult::Placeholder(placeholder) = read_file_document(&fifo, "pipe").unwrap()
+    else {
+        panic!("expected a placeholder");
+    };
+    assert_eq!(placeholder.reason, "This path is not a regular file");
+}
+
+#[test]
 fn a_commit_without_a_message_still_lists_every_commit() {
     let dir = repository();
     let root = dir.path();

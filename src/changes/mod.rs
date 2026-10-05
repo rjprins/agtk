@@ -5,7 +5,7 @@ mod git;
 pub use base::{commits_ago_count, resolve_worktree_context, validate_base_ref};
 pub use content::{
     DiffDocumentResult, DiffPlaceholder, FileDocument, FileDocumentResult, FilePlaceholder,
-    display_changed_path, read_diff_document, read_file_document,
+    display_changed_path, link_target_outside, read_diff_document, read_file_document,
 };
 pub use git::{
     ChangeStatus, DiffScope, GitStatusFile, parse_name_status_z, parse_status_porcelain_v2_z,

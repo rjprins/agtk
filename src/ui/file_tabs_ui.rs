@@ -211,10 +211,15 @@ impl Workspace {
         *self.file_rendered.borrow_mut() = None;
         *self.diff_error.borrow_mut() = None;
         let path = key.path.clone();
+        let worktree = key.worktree_root.clone();
         let title = file_tab_title(&key);
-        let result = self
-            .changes_io
-            .submit(move || crate::changes::read_file_document(&path, &title));
+        let result = self.changes_io.submit(move || {
+            let document = crate::changes::read_file_document(&path, &title)?;
+            Ok((
+                document,
+                crate::changes::link_target_outside(&path, Path::new(&worktree)),
+            ))
+        });
         let workspace = self.clone();
         glib::spawn_future_local(async move {
             let result = result
@@ -226,7 +231,7 @@ impl Workspace {
                 return;
             }
             match result {
-                Ok(document) => {
+                Ok((document, link_target)) => {
                     let identity = match &document {
                         FileDocumentResult::Text(text) => text.identity.clone(),
                         FileDocumentResult::Placeholder(placeholder) => {
@@ -240,7 +245,7 @@ impl Workspace {
                     workspace.update_file_stale_banner(&key);
                     match document {
                         FileDocumentResult::Text(text) => {
-                            workspace.show_file_document(&key, text, request)
+                            workspace.show_file_document(&key, text, link_target, request)
                         }
                         FileDocumentResult::Placeholder(placeholder) => workspace
                             .show_viewer_placeholder(
@@ -261,7 +266,13 @@ impl Workspace {
         });
     }
 
-    fn show_file_document(&self, key: &FileTabKey, document: FileDocument, request: u64) {
+    fn show_file_document(
+        &self,
+        key: &FileTabKey,
+        document: FileDocument,
+        link_target: Option<PathBuf>,
+        request: u64,
+    ) {
         let tab_id = WorkspaceTabs::file_tab_id(key);
         let request_id = format!("{tab_id}-{request}");
         *self.diff_current_request.borrow_mut() = Some(request_id.clone());
@@ -279,12 +290,19 @@ impl Workspace {
             .borrow_mut()
             .get_mut(key)
             .and_then(|state| state.pending_position.take());
-        let inside_worktree = key.path.starts_with(&key.worktree_root);
+        let inside_worktree = key.path.starts_with(&key.worktree_root) && link_target.is_none();
         let lines = if document.line_count == 1 {
             "1 line".to_owned()
         } else {
             format!("{} lines", document.line_count)
         };
+        let mut metadata = vec![lines];
+        if let Some(target) = &link_target {
+            metadata.push(format!(
+                "Links outside the worktree to {}",
+                target.display()
+            ));
+        }
         let payload = serde_json::json!({
             "requestId": request_id,
             "tabId": tab_id,
@@ -292,7 +310,7 @@ impl Workspace {
             "text": document.text,
             "language": document.language,
             "label": if inside_worktree { "Working tree" } else { "" },
-            "metadata": [lines],
+            "metadata": metadata,
             "viewState": state,
             "line": position.map(|(line, _)| line),
             "column": position.and_then(|(_, column)| column),

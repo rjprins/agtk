@@ -5,7 +5,8 @@ use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 
 use nix::errno::Errno;
 use nix::fcntl::{AtFlags, OFlag, openat, readlinkat};
@@ -64,6 +65,17 @@ pub struct FilePlaceholder {
     pub identity: String,
 }
 
+/// Where a path inside `worktree` really leads when a symlink takes it outside,
+/// so the viewer does not present another file as part of the worktree.
+pub fn link_target_outside(path: &Path, worktree: &Path) -> Option<PathBuf> {
+    if !path.starts_with(worktree) {
+        return None;
+    }
+    let target = path.canonicalize().ok()?;
+    let worktree = worktree.canonicalize().ok()?;
+    (!target.starts_with(&worktree)).then_some(target)
+}
+
 /// Reads `path` for the file viewer with the diff limits. Symlinks are followed, so a
 /// link opens what it points at, and `display_path` is what the viewer shows.
 pub fn read_file_document(path: &Path, display_path: &str) -> Result<FileDocumentResult, String> {
@@ -100,8 +112,25 @@ pub fn read_file_document(path: &Path, display_path: &str) -> Result<FileDocumen
             format!("large:{size}"),
         );
     }
-    let file = File::open(path).map_err(|error| format!("could not open file: {error}"))?;
-    let mut bytes = Vec::with_capacity(size as usize);
+    // Non-blocking, and checked again once open: a FIFO swapped in after the
+    // check above would otherwise block the reader for good.
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|error| format!("could not open file: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("could not inspect file: {error}"))?;
+    if !metadata.is_file() {
+        return file_placeholder(
+            "This path is not a regular file",
+            None,
+            "non-regular".to_owned(),
+        );
+    }
+    let size = metadata.len();
+    let mut bytes = Vec::with_capacity(size.min(MAX_TEXT_BYTES as u64 + 1) as usize);
     file.take(MAX_TEXT_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("could not read file: {error}"))?;
