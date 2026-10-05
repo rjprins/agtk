@@ -48,7 +48,11 @@ pub fn receive_attachment(mut socket: &UnixStream) -> io::Result<Attachment> {
 
     let mut marker = [0_u8; 1];
     let mut iov = [IoSliceMut::new(&mut marker)];
-    let mut control_space = cmsg_space!([RawFd; 1]);
+    // Linux accepts at most 253 SCM_RIGHTS descriptors per message. Receive
+    // all of them before validating the count so OwnedFd closes rejected FDs.
+    // A one-FD buffer truncates larger messages: nix then refuses to iterate
+    // the control data, leaking the descriptors the kernel already installed.
+    let mut control_space = cmsg_space!([RawFd; 253]);
     let (message_bytes, mut descriptors) = {
         let message = recvmsg::<()>(
             socket.as_raw_fd(),
