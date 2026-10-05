@@ -86,6 +86,46 @@ fn discovery_deduplicates_recent_logs_and_excludes_live_conversations() {
 }
 
 #[test]
+fn an_unreadable_log_skips_only_itself() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let claude = fixture.path().join("claude");
+    fs::create_dir_all(claude.join("projects/demo")).unwrap();
+    for id in ["readable", "locked"] {
+        fs::write(
+            claude.join(format!("projects/demo/{id}.jsonl")),
+            format!(
+                "{{\"type\":\"user\",\"sessionId\":\"{id}\",\"cwd\":\"/work\",\"message\":{{\"content\":\"hello\"}}}}\n"
+            ),
+        )
+        .unwrap();
+    }
+    let locked = claude.join("projects/demo/locked.jsonl");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::File::open(&locked).is_ok() {
+        // Running as root: permissions cannot make the log unreadable.
+        return;
+    }
+    let discovery = ProviderDiscovery::new(
+        DiscoveryRoots {
+            claude_config_dir: claude,
+            codex_home_dir: fixture.path().join("codex"),
+        },
+        500,
+        u64::MAX,
+    );
+
+    let sessions = discovery.discover(u64::MAX, &BTreeSet::new()).unwrap();
+
+    let ids = sessions
+        .iter()
+        .map(|session| session.provider_session_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["readable"]);
+}
+
+#[test]
 fn preview_is_bounded_and_restore_uses_provider_specific_direct_arguments() {
     let fixture = tempfile::tempdir().unwrap();
     let claude = fixture.path().join("claude");

@@ -317,7 +317,7 @@ impl ProviderDiscovery {
         let codex_titles = self.codex_titles();
         let mut sessions = BTreeMap::<(AgentProvider, String), ProviderSession>::new();
         for candidate in candidates {
-            let Some(session) = self.parse_session(&candidate, &codex_titles)? else {
+            let Some(session) = self.parse_session_or_skip(&candidate, &codex_titles) else {
                 continue;
             };
             let key = (session.provider, session.provider_session_id.clone());
@@ -424,7 +424,7 @@ impl ProviderDiscovery {
             .into_iter()
             .filter(|candidate| candidate.provider == provider)
         {
-            let Some(session) = self.parse_session(&candidate, &codex_titles)? else {
+            let Some(session) = self.parse_session_or_skip(&candidate, &codex_titles) else {
                 continue;
             };
             if session.provider_session_id != provider_session_id {
@@ -487,6 +487,20 @@ impl ProviderDiscovery {
             }
         }
         titles
+    }
+
+    /// A log can vanish or turn unreadable between the scan and the read, since
+    /// the agents rewrite and prune them, so one bad log skips only itself.
+    fn parse_session_or_skip(
+        &self,
+        candidate: &LogCandidate,
+        codex_titles: &BTreeMap<String, String>,
+    ) -> Option<ProviderSession> {
+        self.parse_session(candidate, codex_titles)
+            .unwrap_or_else(|error| {
+                eprintln!("agtk: skipping {}: {error}", candidate.path.display());
+                None
+            })
     }
 
     fn parse_session(
