@@ -852,6 +852,20 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     workspace.launch.submit.connect_clicked(move |_| {
         launch_submit_workspace.launch_from_form(launch_submit_workspace.selected_launch_agent());
     });
+    let launch_review_workspace = workspace.clone();
+    workspace.launch.review.connect_clicked(move |_| {
+        launch_review_workspace.launch_review_from_form();
+    });
+    let launch_close_workspace = workspace.clone();
+    workspace
+        .launch
+        .modal
+        .window()
+        .connect_visible_notify(move |window| {
+            if !window.is_visible() {
+                launch_close_workspace.clear_launch_pr_context();
+            }
+        });
     let launch_cancel_workspace = workspace.clone();
     workspace
         .launch

@@ -231,7 +231,7 @@ impl Workspace {
         let current = self.pr_preferences.borrow().review.clone();
         let group = adw::PreferencesGroup::builder()
             .title("Codex PR Reviews")
-            .description("Applies to automatic and manual reviews across all projects. Changes affect new reviews.")
+            .description("Applies to automatic reviews and reviews launched through agtkctl or MCP. The Launch dialog uses its selected agent and options.")
             .build();
         let model = adw::EntryRow::builder()
             .title("Model (empty uses Codex default)")
@@ -1103,18 +1103,18 @@ impl Workspace {
         view.add_css_class("flat");
         view.connect_clicked(move |_| open());
         actions.append(&view);
-        let review = gtk::Button::builder()
-            .label("Review")
+        let launch = gtk::Button::builder()
+            .label("Launch")
             .valign(gtk::Align::Center)
-            .tooltip_text("Launch Codex with the review-pr workflow")
+            .tooltip_text("Launch an agent or review for this pull request")
             .build();
-        let review_workspace = self.clone();
-        let review_root = context.project_root.clone();
-        let review_item = item.clone();
-        review.connect_clicked(move |_| {
-            review_workspace.launch_pr_review(&review_root, &review_item, None)
+        let launch_workspace = self.clone();
+        let launch_root = context.project_root.clone();
+        let launch_item = item.clone();
+        launch.connect_clicked(move |_| {
+            launch_workspace.open_launch_for_pr(&launch_root, &launch_item)
         });
-        actions.append(&review);
+        actions.append(&launch);
         columns.actions.add_widget(&actions);
         row.add_suffix(&actions);
         row
@@ -1265,11 +1265,39 @@ impl Workspace {
         item: &PrItem,
         pending: Option<PendingRequest>,
     ) {
+        let settings = self.pr_preferences.borrow().review.clone();
+        self.launch_pr_review_with_params(
+            project_root,
+            item,
+            CreateSessionParams {
+                kind: SessionKind::Codex,
+                command: None,
+                args: settings.args(),
+                cwd: None,
+                name: None,
+                project_root: None,
+                worktree_path: None,
+                initial_input: Some(settings.prompt(item.pull_request.id)),
+            },
+            pending,
+        );
+    }
+
+    pub(super) fn launch_pr_review_with_params(
+        &self,
+        project_root: &Path,
+        item: &PrItem,
+        mut params: CreateSessionParams,
+        pending: Option<PendingRequest>,
+    ) {
         let project_root = project_root.to_path_buf();
         let pull_request = item.pull_request.clone();
         let attic = self.paths.attic_dir();
         let checkout_root = project_root.clone();
-        let settings = self.pr_preferences.borrow().review.clone();
+        params.project_root = Some(project_root);
+        params
+            .name
+            .get_or_insert_with(|| format!("review: PR #{}", pull_request.id));
         // Each review gets its own detached checkout, so it never runs in a
         // worktree the user is editing and a repeat review reuses it.
         self.run_slow(
@@ -1282,21 +1310,16 @@ impl Workspace {
             },
             move |workspace, result| match result {
                 // A review can start while the user is typing elsewhere, so it never takes focus.
-                Ok(worktree_path) => workspace.launch_session(
-                    CreateSessionParams {
-                        kind: SessionKind::Codex,
-                        command: None,
-                        args: settings.args(),
-                        cwd: Some(worktree_path.clone()),
-                        name: Some(format!("review: PR #{}", pull_request.id)),
-                        project_root: Some(project_root),
-                        worktree_path: Some(worktree_path),
-                        initial_input: Some(settings.prompt(pull_request.id)),
-                    },
-                    None,
-                    Some(super::sessions::Placement::in_background()),
-                    pending,
-                ),
+                Ok(worktree_path) => {
+                    params.cwd = Some(worktree_path.clone());
+                    params.worktree_path = Some(worktree_path);
+                    workspace.launch_session(
+                        params,
+                        None,
+                        Some(super::sessions::Placement::in_background()),
+                        pending,
+                    );
+                }
                 Err(error) => workspace.report_failure(
                     pending,
                     ErrorCode::OperationRefused,
@@ -1520,8 +1543,9 @@ fn session_pr_from_context(record: &SessionRecord, context: &PrContext) -> Optio
         .iter()
         .find(|item| {
             item.worktree_path
-                .as_deref()
-                .is_some_and(|path| pr_cache_key(path) == worktree)
+                .iter()
+                .chain(item.review_path.iter())
+                .any(|path| pr_cache_key(path) == worktree)
         })
         .map(|item| item.pull_request.clone())
 }
@@ -1581,7 +1605,7 @@ mod tests {
                     pull_request: pull_request(44, "later"),
                     attention: None,
                     worktree_path: None,
-                    review_path: None,
+                    review_path: Some(project.join("wt/pr-44")),
                 },
             ],
         }
@@ -1608,6 +1632,18 @@ mod tests {
         let project = fixture.path();
         let context = context(project);
         let review = record("review: PR #44", project, project);
+        assert_eq!(
+            session_pr_from_context(&review, &context).map(|pr| pr.id),
+            Some(44)
+        );
+    }
+
+    #[test]
+    fn a_review_with_a_custom_session_name_links_through_its_checkout() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path();
+        let context = context(project);
+        let review = record("My review", project, &project.join("wt/pr-44"));
         assert_eq!(
             session_pr_from_context(&review, &context).map(|pr| pr.id),
             Some(44)

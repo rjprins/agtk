@@ -136,6 +136,26 @@ impl Workspace {
         let launch_children = if self.launch.modal.is_visible() {
             vec![
                 UiNode {
+                    id: "launch-pr-branch".to_owned(),
+                    role: "radio".to_owned(),
+                    label: self.launch.pr_branch_row.subtitle().map(String::from),
+                    is_visible: self.launch.pr_branch_row.is_visible(),
+                    is_enabled: self.launch.pr_branch_radio.is_sensitive(),
+                    is_selected: self.launch.pr_branch_radio.is_active(),
+                    bounds: widget_bounds(&self.launch.pr_branch_radio, &self.window),
+                    children: Vec::new(),
+                },
+                UiNode {
+                    id: "launch-review".to_owned(),
+                    role: "button".to_owned(),
+                    label: Some("Launch review".to_owned()),
+                    is_visible: gtk::prelude::WidgetExt::is_visible(&self.launch.review),
+                    is_enabled: self.launch.review.is_sensitive(),
+                    is_selected: false,
+                    bounds: widget_bounds(&self.launch.review, &self.window),
+                    children: Vec::new(),
+                },
+                UiNode {
                     id: "launch-existing-worktree".to_owned(),
                     role: "radio".to_owned(),
                     label: Some("Existing worktree".to_owned()),

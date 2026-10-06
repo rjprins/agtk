@@ -1,6 +1,7 @@
 #![allow(deprecated)]
 
 use super::*;
+use crate::azure::PrItem;
 use crate::launch_model::{self, DEFAULT_BASE_BRANCH};
 use crate::worktrees::WorktreeManager;
 use serde_json::Value;
@@ -12,6 +13,26 @@ const WORKTREE_PLACEHOLDER: &str = "Search worktrees…";
 const LOCATION_CONTROL_WIDTH: i32 = 320;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WorktreeMode {
+    Existing,
+    New,
+    PullRequest,
+}
+
+#[derive(Clone)]
+pub(super) struct PrLaunchContext {
+    project_root: PathBuf,
+    item: PrItem,
+}
+
+fn supports_pr_review(kind: SessionKind) -> bool {
+    matches!(
+        kind,
+        SessionKind::Claude | SessionKind::Codex | SessionKind::Gemini
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WorktreeModePresentation {
     existing_row_visible: bool,
     new_row_visible: bool,
@@ -19,12 +40,12 @@ struct WorktreeModePresentation {
     new_fields_enabled: bool,
 }
 
-const fn worktree_mode_presentation(creating: bool) -> WorktreeModePresentation {
+const fn worktree_mode_presentation(mode: WorktreeMode) -> WorktreeModePresentation {
     WorktreeModePresentation {
         existing_row_visible: true,
         new_row_visible: true,
-        existing_fields_enabled: !creating,
-        new_fields_enabled: creating,
+        existing_fields_enabled: matches!(mode, WorktreeMode::Existing),
+        new_fields_enabled: matches!(mode, WorktreeMode::New),
     }
 }
 
@@ -34,6 +55,11 @@ pub(super) struct LaunchDialog {
     pub(super) modal: modal::Modal,
     pub(super) cancel: gtk::Button,
     pub(super) submit: gtk::Button,
+    pub(super) review: gtk::Button,
+    pr_review_group: adw::PreferencesGroup,
+    pub(super) pr_context: Rc<RefCell<Option<PrLaunchContext>>>,
+    pub(super) pr_branch_radio: gtk::CheckButton,
+    pub(super) pr_branch_row: adw::ActionRow,
     pub(super) agent_dropdown: gtk::DropDown,
     pub(super) agent_choices: gtk::StringList,
     pub(super) agent_buttons: Rc<Vec<(SessionKind, gtk::ToggleButton)>>,
@@ -72,7 +98,7 @@ pub(super) struct LaunchDialog {
     pub(super) base_branch_completion_items: Rc<RefCell<Vec<(String, String)>>>,
     pub(super) worktree_values: Rc<RefCell<Vec<Option<String>>>>,
     pub(super) project_values: Rc<RefCell<Vec<Option<String>>>>,
-    pub(super) creating_worktree: Rc<Cell<bool>>,
+    pub(super) worktree_mode: Rc<Cell<WorktreeMode>>,
     pub(super) choice_sequence: Rc<Cell<u64>>,
     pub(super) updating_choices: Rc<Cell<bool>>,
 }
@@ -80,6 +106,20 @@ pub(super) struct LaunchDialog {
 impl LaunchDialog {
     pub(super) fn build(parent: &adw::ApplicationWindow) -> Self {
         let page = adw::PreferencesPage::new();
+
+        let review = gtk::Button::builder()
+            .label("Launch review")
+            .valign(gtk::Align::Center)
+            .build();
+        let review_row = adw::ActionRow::builder()
+            .title("PR review")
+            .subtitle("Uses the selected agent and options in a separate PR review worktree")
+            .build();
+        review_row.add_suffix(&review);
+        let pr_review_group = adw::PreferencesGroup::new();
+        pr_review_group.add(&review_row);
+        pr_review_group.set_visible(false);
+        page.add(&pr_review_group);
 
         let agent_choices = gtk::StringList::new(&["claude", "codex", "gemini", "shell"]);
         let agent_dropdown =
@@ -195,8 +235,17 @@ impl LaunchDialog {
             editable_choice_control(&worktree, &worktree_dropdown, "Choose an existing worktree");
         let existing_worktree_radio = gtk::CheckButton::new();
         let new_worktree_radio = gtk::CheckButton::new();
+        let pr_branch_radio = gtk::CheckButton::new();
         new_worktree_radio.set_group(Some(&existing_worktree_radio));
+        pr_branch_radio.set_group(Some(&existing_worktree_radio));
         existing_worktree_radio.set_active(true);
+        let pr_branch_row = adw::ActionRow::builder()
+            .title("PR branch")
+            .use_markup(false)
+            .activatable_widget(&pr_branch_radio)
+            .visible(false)
+            .build();
+        pr_branch_row.add_prefix(&pr_branch_radio);
         let existing_worktree_mode = adw::ActionRow::builder()
             .title("Existing worktree")
             .activatable_widget(&existing_worktree_radio)
@@ -239,6 +288,7 @@ impl LaunchDialog {
 
         let location_group = adw::PreferencesGroup::builder().title("Location").build();
         location_group.add(&project_row);
+        location_group.add(&pr_branch_row);
         location_group.add(&existing_worktree_mode);
         location_group.add(&new_worktree_mode);
         location_group.add(&base_row);
@@ -281,6 +331,11 @@ impl LaunchDialog {
             modal,
             cancel,
             submit,
+            review,
+            pr_review_group,
+            pr_context: Rc::default(),
+            pr_branch_radio,
+            pr_branch_row,
             agent_dropdown,
             agent_choices,
             agent_buttons: Rc::new(agent_buttons),
@@ -320,7 +375,7 @@ impl LaunchDialog {
             base_branch_completion_items,
             worktree_values: Rc::new(RefCell::new(Vec::new())),
             project_values: Rc::new(RefCell::new(Vec::new())),
-            creating_worktree: Rc::new(Cell::new(false)),
+            worktree_mode: Rc::new(Cell::new(WorktreeMode::Existing)),
             choice_sequence: Rc::new(Cell::new(0)),
             updating_choices: Rc::new(Cell::new(false)),
         }
@@ -383,9 +438,9 @@ fn path_entry(label: &str, placeholder: &str, width: i32) -> gtk::Entry {
 }
 
 impl Workspace {
-    fn set_launch_worktree_mode(&self, creating: bool) {
-        self.launch.creating_worktree.set(creating);
-        let presentation = worktree_mode_presentation(creating);
+    fn set_launch_worktree_mode(&self, mode: WorktreeMode) {
+        self.launch.worktree_mode.set(mode);
+        let presentation = worktree_mode_presentation(mode);
         self.launch
             .existing_worktree_mode
             .set_visible(presentation.existing_row_visible);
@@ -407,7 +462,10 @@ impl Workspace {
         self.launch
             .base_branch_dropdown
             .set_sensitive(presentation.new_fields_enabled);
-        if creating {
+        if mode == WorktreeMode::PullRequest {
+            self.launch.cwd.set_text(self.launch.project.text().trim());
+            self.launch.pr_branch_radio.set_active(true);
+        } else if mode == WorktreeMode::New {
             self.launch.cwd.set_text(self.launch.project.text().trim());
             if self.launch.branch.text().trim().is_empty() {
                 self.launch.branch.set_text(&generated_branch_name());
@@ -440,7 +498,7 @@ impl Workspace {
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
         self.refresh_launch_base_branches();
-        self.set_launch_worktree_mode(self.launch.creating_worktree.get());
+        self.set_launch_worktree_mode(self.launch.worktree_mode.get());
         self.set_launch_agent(self.quick_launch.borrow().kind);
     }
 
@@ -455,7 +513,7 @@ impl Workspace {
                 .as_ref()
                 .or(preferences.worktree_path.as_ref()),
         ));
-        self.set_launch_worktree_mode(false);
+        self.set_launch_worktree_mode(WorktreeMode::Existing);
         self.launch.args.set_text(&if preferences.args.is_empty() {
             String::new()
         } else {
@@ -469,6 +527,18 @@ impl Workspace {
     }
 
     pub(super) fn launch_from_form(&self, kind: SessionKind) {
+        self.launch_form(kind, false);
+    }
+
+    pub(super) fn launch_review_from_form(&self) {
+        self.launch_form(self.selected_launch_agent(), true);
+    }
+
+    fn launch_form(&self, kind: SessionKind, review: bool) {
+        let pr_context = self.launch.pr_context.borrow().clone();
+        if review && (pr_context.is_none() || !supports_pr_review(kind)) {
+            return;
+        }
         let raw_args = match parse_arguments(&self.launch.args) {
             Ok(args) => args,
             Err(error) => {
@@ -480,7 +550,12 @@ impl Workspace {
         let mut args = raw_args.clone();
         args.extend(launch_model::provider_args(kind, &flags));
         let launch_args = args;
-        let creating_worktree = self.launch.creating_worktree.get();
+        let mode = self.launch.worktree_mode.get();
+        if mode == WorktreeMode::PullRequest && pr_context.is_none() {
+            self.show_error("Select a pull request before launching its branch");
+            return;
+        }
+        let creating_worktree = mode != WorktreeMode::Existing;
         let project_root = optional_path(&self.launch.project);
         if creating_worktree && project_root.is_none() {
             self.show_error("A project directory is required for a new worktree");
@@ -518,7 +593,57 @@ impl Workspace {
             self.save_preference("quickLaunch", value);
         }
         *self.quick_launch.borrow_mut() = preferences.clone();
-        if creating_worktree {
+        if review {
+            let context = pr_context.expect("validated PR context");
+            let prompt = initial_input.unwrap_or_else(|| {
+                self.pr_preferences
+                    .borrow()
+                    .review
+                    .prompt(context.item.pull_request.id)
+            });
+            self.launch.modal.hide();
+            self.launch_pr_review_with_params(
+                &context.project_root,
+                &context.item,
+                CreateSessionParams {
+                    kind,
+                    command: None,
+                    args: launch_args,
+                    cwd: None,
+                    name,
+                    project_root: None,
+                    worktree_path: None,
+                    initial_input: Some(prompt),
+                },
+                None,
+            );
+        } else if mode == WorktreeMode::PullRequest {
+            let context = pr_context.expect("validated PR context");
+            let manager = WorktreeManager::new(self.paths.attic_dir());
+            let root = context.project_root.clone();
+            self.launch.modal.hide();
+            self.run_slow(
+                move || manager.checkout_branch(&root, &context.item.pull_request.source_branch),
+                move |workspace, result| match result {
+                    Ok(path) => workspace.launch_controlled(
+                        CreateSessionParams {
+                            kind,
+                            command: None,
+                            args: launch_args,
+                            cwd: Some(path.clone()),
+                            name,
+                            project_root: preferences.project_root,
+                            worktree_path: Some(path),
+                            initial_input,
+                        },
+                        None,
+                    ),
+                    Err(error) => {
+                        workspace.show_error(&format!("Could not prepare PR branch: {error}"))
+                    }
+                },
+            );
+        } else if creating_worktree {
             let root = project_root.expect("validated project root");
             let branch = optional_text(&self.launch.branch).unwrap_or_else(generated_branch_name);
             let base = optional_text(&self.launch.base_branch);
@@ -565,8 +690,9 @@ impl Workspace {
     }
 
     pub(super) fn open_launch_for_project(&self, root: &str) {
+        self.clear_launch_pr_context();
         self.set_launch_location(root, root);
-        self.set_launch_worktree_mode(false);
+        self.set_launch_worktree_mode(WorktreeMode::Existing);
         self.launch.branch.set_text(&generated_branch_name());
         self.launch.base_branch.set_text(DEFAULT_BASE_BRANCH);
         self.refresh_launch_project_choices();
@@ -600,17 +726,63 @@ impl Workspace {
     }
 
     pub(super) fn open_launch_for_worktree(&self, project_root: &Path, worktree: &Path) {
+        self.clear_launch_pr_context();
         self.set_launch_location(
             project_root.to_string_lossy().as_ref(),
             worktree.to_string_lossy().as_ref(),
         );
-        self.set_launch_worktree_mode(false);
+        self.set_launch_worktree_mode(WorktreeMode::Existing);
         self.launch.branch.set_text(&generated_branch_name());
         self.launch.base_branch.set_text(DEFAULT_BASE_BRANCH);
         self.refresh_launch_project_choices();
         self.refresh_launch_worktree_choices();
         self.worktrees.modal.hide();
         self.launch.modal.present();
+    }
+
+    pub(super) fn open_launch_for_pr(&self, project_root: &Path, item: &PrItem) {
+        self.clear_launch_pr_context();
+        let worktree = item.worktree_path.as_deref().filter(|path| path.is_dir());
+        self.set_launch_location(
+            project_root.to_string_lossy().as_ref(),
+            worktree.unwrap_or(project_root).to_string_lossy().as_ref(),
+        );
+        *self.launch.pr_context.borrow_mut() = Some(PrLaunchContext {
+            project_root: project_root.to_owned(),
+            item: item.clone(),
+        });
+        self.launch
+            .pr_review_group
+            .set_title(&format!("PR #{}", item.pull_request.id));
+        self.launch.pr_review_group.set_visible(true);
+        self.launch.pr_branch_row.set_subtitle(&format!(
+            "{} · Create or reuse its worktree when launching",
+            item.pull_request.source_branch,
+        ));
+        self.launch.pr_branch_row.set_visible(true);
+        self.set_launch_worktree_mode(if worktree.is_some() {
+            WorktreeMode::Existing
+        } else {
+            WorktreeMode::PullRequest
+        });
+        self.launch.branch.set_text(&generated_branch_name());
+        self.launch
+            .base_branch
+            .set_text(&format!("origin/{}", item.pull_request.source_branch));
+        self.prs.modal.hide();
+        self.launch.modal.present();
+    }
+
+    pub(super) fn clear_launch_pr_context(&self) {
+        let had_context = self.launch.pr_context.borrow_mut().take().is_some();
+        self.launch.pr_review_group.set_visible(false);
+        self.launch.pr_branch_row.set_visible(false);
+        if self.launch.worktree_mode.get() == WorktreeMode::PullRequest {
+            self.set_launch_worktree_mode(WorktreeMode::Existing);
+        }
+        if had_context {
+            self.launch.base_branch.set_text(DEFAULT_BASE_BRANCH);
+        }
     }
 
     /// Fill the location fields without the entry handlers reacting; callers
@@ -784,7 +956,7 @@ impl Workspace {
         let root = self.launch.project.text().trim().to_owned();
         self.launch.worktree.set_text(&root);
         self.launch.cwd.set_text(&root);
-        self.set_launch_worktree_mode(self.launch.creating_worktree.get());
+        self.set_launch_worktree_mode(self.launch.worktree_mode.get());
         self.launch.branch.set_text(&generated_branch_name());
         self.launch.base_branch.set_text(DEFAULT_BASE_BRANCH);
         self.refresh_launch_worktree_choices();
@@ -792,12 +964,18 @@ impl Workspace {
     }
 
     pub(super) fn connect_launch_path_controls(&self) {
+        let pr_workspace = self.clone();
+        self.launch.pr_branch_radio.connect_toggled(move |radio| {
+            if radio.is_active() {
+                pr_workspace.set_launch_worktree_mode(WorktreeMode::PullRequest);
+            }
+        });
         let existing_workspace = self.clone();
         self.launch
             .existing_worktree_radio
             .connect_toggled(move |radio| {
                 if radio.is_active() {
-                    existing_workspace.set_launch_worktree_mode(false);
+                    existing_workspace.set_launch_worktree_mode(WorktreeMode::Existing);
                 }
             });
 
@@ -806,7 +984,7 @@ impl Workspace {
             .new_worktree_radio
             .connect_toggled(move |radio| {
                 if radio.is_active() {
-                    new_workspace.set_launch_worktree_mode(true);
+                    new_workspace.set_launch_worktree_mode(WorktreeMode::New);
                 }
             });
 
@@ -834,7 +1012,7 @@ impl Workspace {
                 let Some(path) = worktree_workspace.selected_worktree_path(dropdown) else {
                     return;
                 };
-                worktree_workspace.set_launch_worktree_mode(false);
+                worktree_workspace.set_launch_worktree_mode(WorktreeMode::Existing);
                 worktree_workspace.launch.worktree.set_text(&path);
                 worktree_workspace.launch.cwd.set_text(&path);
             });
@@ -842,7 +1020,7 @@ impl Workspace {
         let worktree_entry_workspace = self.clone();
         self.launch.worktree.connect_changed(move |entry| {
             if worktree_entry_workspace.launch.updating_choices.get()
-                || worktree_entry_workspace.launch.creating_worktree.get()
+                || worktree_entry_workspace.launch.worktree_mode.get() != WorktreeMode::Existing
             {
                 return;
             }
@@ -862,6 +1040,7 @@ impl Workspace {
             if project_entry_workspace.launch.updating_choices.get() {
                 return;
             }
+            project_entry_workspace.clear_launch_pr_context();
             project_entry_workspace.follow_launch_project();
         });
 
@@ -985,6 +1164,14 @@ impl Workspace {
     }
 
     pub(super) fn set_launch_agent(&self, kind: SessionKind) {
+        self.launch.review.set_sensitive(supports_pr_review(kind));
+        self.launch
+            .review
+            .set_tooltip_text(Some(if supports_pr_review(kind) {
+                "Start the PR review with the selected agent and launch options"
+            } else {
+                "Select Claude, Codex or Gemini to launch a PR review"
+            }));
         let name = kind.as_str();
         let selected = (0..self.launch.agent_choices.n_items())
             .find(|index| {
@@ -1409,21 +1596,27 @@ fn searchable_path_dropdown(model: &gtk::StringList) -> gtk::DropDown {
 
 #[cfg(test)]
 mod tests {
-    use super::{base_branch_choices, worktree_mode_presentation};
+    use super::{WorktreeMode, base_branch_choices, worktree_mode_presentation};
 
     #[test]
     fn both_worktree_mode_rows_remain_visible() {
-        let existing = worktree_mode_presentation(false);
+        let existing = worktree_mode_presentation(WorktreeMode::Existing);
         assert!(existing.existing_row_visible);
         assert!(existing.new_row_visible);
         assert!(existing.existing_fields_enabled);
         assert!(!existing.new_fields_enabled);
 
-        let new = worktree_mode_presentation(true);
+        let new = worktree_mode_presentation(WorktreeMode::New);
         assert!(new.existing_row_visible);
         assert!(new.new_row_visible);
         assert!(!new.existing_fields_enabled);
         assert!(new.new_fields_enabled);
+
+        let pr = worktree_mode_presentation(WorktreeMode::PullRequest);
+        assert!(pr.existing_row_visible);
+        assert!(pr.new_row_visible);
+        assert!(!pr.existing_fields_enabled);
+        assert!(!pr.new_fields_enabled);
     }
 
     #[test]
