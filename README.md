@@ -23,15 +23,13 @@ agtk is developed and used daily on Arch Linux with GNOME on Wayland. Other dist
 
 ## Install
 
-Paste this into Claude Code, Codex, or another coding agent. It checks agtk before running anything, and asks you before it installs.
+Paste this into Claude Code, Codex, or another coding agent:
 
 ```text
-I'd like to try agtk, a GNOME app for running coding agents side by side: https://github.com/rjprins/agtk
-
-1. Clone it into a directory of your choice and tell me where.
-2. Before running anything from it, check that it is safe to build and run. Read build.rs and the scripts in scripts/. Look through the source for network access, commands run as root, and files written outside the clone, ~/.local, and agtk's own state and runtime directories. Note what the build downloads (Cargo.lock and viewer/package-lock.json) and what the installer changes in my Claude Code and Codex settings. Tell me what you found.
-3. Check my system against the requirements in the README. Tell me what is missing and how to install it, but don't install system packages yourself.
-4. Ask me whether to go ahead. Only when I say yes, run ./scripts/install-local.sh and start agtk detached from your shell, for example with `setsid -f ~/.local/bin/agtk`.
+Check out https://github.com/rjprins/agtk into a directory I can keep.
+Before running anything, inspect the repository and its dependencies.
+Look for suspicious or malicious behavior.
+If it appears safe, run it so I can try it out and make my own changes.
 ```
 
 To install by hand, install the [requirements](#requirements), clone the repository, and run:
