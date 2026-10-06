@@ -37,6 +37,17 @@ impl Segment {
             .position(gtk::PositionType::Top)
             .child(&details)
             .build();
+        let details_on_open = details.downgrade();
+        popover.connect_map(move |_| {
+            let details = details_on_open.clone();
+            // GTK selects the whole label when the popover gives it focus.
+            // Clear that initial selection after focus, preserving manual copying.
+            glib::idle_add_local_once(move || {
+                if let Some(details) = details.upgrade() {
+                    details.select_region(0, 0);
+                }
+            });
+        });
         let button = gtk::MenuButton::builder()
             .child(&content)
             .popover(&popover)
@@ -53,7 +64,9 @@ impl Segment {
 
     fn set(&self, text: &str, details: &str) {
         self.label.set_text(text);
-        self.details.set_text(details);
+        if self.details.text() != details {
+            self.details.set_text(details);
+        }
         self.button.set_tooltip_text(Some(details));
         self.button
             .update_property(&[gtk::accessible::Property::Label(text)]);
@@ -271,31 +284,13 @@ impl Workspace {
             .context_remaining()
             .map(|left| format!(" · Context {left:.0}% left"))
             .unwrap_or_default();
-        let mut details = format!(
-            "{}\n\nSession tokens: {}\nInput: {} (includes {} cached)\nOutput: {}\n\n{}\nToken totals are separate from account quota.",
-            record.name,
-            usage.total(),
-            usage.input,
-            usage.cached,
-            usage.output,
-            match (usage.context_used, usage.context_capacity) {
-                (Some(used), Some(capacity)) if capacity > 0 =>
-                    format!("Current context: {used} / {capacity} tokens"),
-                _ => "Context capacity is not reported by this agent's log.".to_owned(),
-            }
-        );
-        if usage.incomplete {
-            details.push_str(
-                "\n\nAn oversized log entry was skipped; token totals may be incomplete.",
-            );
-        }
         segment.set(
             &format!(
                 "Session {}{} tokens{context}",
                 if usage.incomplete { "≥ " } else { "" },
                 compact(usage.total())
             ),
-            &details,
+            &session_details(&record.name, usage),
         );
     }
 
@@ -405,8 +400,48 @@ impl Workspace {
     }
 }
 
+fn session_details(name: &str, usage: &SessionUsage) -> String {
+    let context = match (
+        usage.context_used,
+        usage.context_capacity,
+        usage.context_remaining(),
+    ) {
+        (Some(used), Some(capacity), Some(left)) => format!(
+            "Current context: {} / {} tokens\n{:.1}% used · {left:.1}% left",
+            compact(used),
+            compact(capacity),
+            100.0 - left,
+        ),
+        _ => "Context capacity is not reported by this agent's log.".to_owned(),
+    };
+    let mut details = format!(
+        "{name}\n\nSession tokens: {}\nInput: {} ({:.1}% of total)\nCached input: {} ({:.1}% of input)\nOutput: {} ({:.1}% of total)\n\n{context}\nToken totals are separate from account quota.",
+        compact(usage.total()),
+        compact(usage.input),
+        percentage(usage.input, usage.total()),
+        compact(usage.cached),
+        percentage(usage.cached, usage.input),
+        compact(usage.output),
+        percentage(usage.output, usage.total()),
+    );
+    if usage.incomplete {
+        details.push_str("\n\nAn oversized log entry was skipped; token totals may be incomplete.");
+    }
+    details
+}
+
+fn percentage(part: u64, total: u64) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        100.0 * part as f64 / total as f64
+    }
+}
+
 fn compact(value: u64) -> String {
-    if value >= 1_000_000 {
+    if value >= 1_000_000_000 {
+        format!("{:.1}B", value as f64 / 1_000_000_000.0)
+    } else if value >= 1_000_000 {
         format!("{:.1}M", value as f64 / 1_000_000.0)
     } else if value >= 1_000 {
         format!("{:.1}k", value as f64 / 1_000.0)
@@ -423,5 +458,75 @@ fn countdown(seconds: u64) -> String {
         format!("{}h {}m", minutes / 60, minutes % 60)
     } else {
         format!("{minutes}m")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires a private display"]
+    fn usage_popover_opens_without_selecting_all_details() {
+        gtk::init().unwrap();
+        let segment = Segment::new("usage-test", "Session", "utilities-terminal-symbolic");
+        let details = session_details(
+            "usage",
+            &SessionUsage {
+                input: 9_990_944,
+                cached: 9_698_688,
+                output: 50_069,
+                context_used: Some(51_908),
+                context_capacity: Some(258_400),
+                available: true,
+                ..Default::default()
+            },
+        );
+        segment.set("Session 10.0M tokens", &details);
+        let window = gtk::Window::builder()
+            .default_width(500)
+            .default_height(300)
+            .child(&segment.button)
+            .build();
+        window.present();
+        let context = glib::MainContext::default();
+        let settle = || {
+            let until = Instant::now() + Duration::from_millis(100);
+            while Instant::now() < until {
+                while context.pending() {
+                    context.iteration(false);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        settle();
+        for _ in 0..2 {
+            segment.button.popup();
+            settle();
+            assert!(segment.button.popover().unwrap().is_visible());
+            assert_eq!(segment.details.selection_bounds(), None);
+            if let Ok(directory) = std::env::var("AGTK_TEST_CAPTURE_DIR") {
+                let popover = segment.button.popover().unwrap();
+                let paintable = gtk::WidgetPaintable::new(Some(&popover));
+                let snapshot = gtk::Snapshot::new();
+                paintable.snapshot(&snapshot, popover.width() as f64, popover.height() as f64);
+                let node = snapshot.to_node().expect("popover rendered");
+                let renderer = gtk::gsk::CairoRenderer::new();
+                renderer.realize_for_display(&popover.display()).unwrap();
+                let texture = renderer.render_texture(&node, None);
+                renderer.unrealize();
+                texture
+                    .save_to_png(std::path::Path::new(&directory).join("session-usage.png"))
+                    .unwrap();
+            }
+            // Explicit selection remains available for copying.
+            segment.details.select_region(0, 7);
+            assert_eq!(segment.details.selection_bounds(), Some((0, 7)));
+            segment.set("Session 10.0M tokens", &details);
+            assert_eq!(segment.details.selection_bounds(), Some((0, 7)));
+            segment.button.popdown();
+            settle();
+        }
+        window.close();
     }
 }
