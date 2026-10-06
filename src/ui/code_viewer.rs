@@ -18,6 +18,8 @@ const RESOURCE_PREFIX: &str = "/nl/rutger/Agtk/viewer/";
 const MESSAGE_HANDLER: &str = "agtk";
 const MAX_EVENT_BYTES: usize = 32 * 1024;
 const MAX_DIFF_BYTES: usize = 4 * 1024 * 1024 + MAX_EVENT_BYTES;
+const MAX_IMAGE_PAYLOAD_BYTES: usize =
+    crate::changes::MAX_IMAGE_BYTES.div_ceil(3) * 4 + MAX_EVENT_BYTES;
 
 static REGISTER_RESOURCES: Once = Once::new();
 
@@ -42,6 +44,12 @@ pub(super) enum ViewerEvent {
         request_id: String,
         tab_id: String,
         line_count: usize,
+    },
+    ImageRendered {
+        request_id: String,
+        tab_id: String,
+        width: u32,
+        height: u32,
     },
     ViewState {
         tab_id: String,
@@ -210,7 +218,12 @@ impl CodeViewer {
 
     pub(super) fn show_file(&self, file: &Value) -> Result<(), String> {
         let json = serde_json::to_string(file).map_err(|error| error.to_string())?;
-        if json.len() > MAX_DIFF_BYTES {
+        let limit = if file.get("dataUrl").is_some() {
+            MAX_IMAGE_PAYLOAD_BYTES
+        } else {
+            MAX_DIFF_BYTES
+        };
+        if json.len() > limit {
             return Err("file viewer payload is too large".to_owned());
         }
         self.state.borrow_mut().preview = wants_preview(file);
@@ -435,6 +448,19 @@ fn valid_event(event: &ViewerEvent) -> bool {
         }
         ViewerEvent::ViewState { tab_id, state } => {
             !tab_id.is_empty() && tab_id.len() <= 128 && state.to_string().len() <= 24 * 1024
+        }
+        ViewerEvent::ImageRendered {
+            request_id,
+            tab_id,
+            width,
+            height,
+        } => {
+            !request_id.is_empty()
+                && request_id.len() <= 128
+                && !tab_id.is_empty()
+                && tab_id.len() <= 128
+                && *width > 0
+                && *height > 0
         }
         ViewerEvent::OpenLink { tab_id, href } => {
             !tab_id.is_empty() && tab_id.len() <= 128 && !href.is_empty() && href.len() <= 4096

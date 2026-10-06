@@ -181,6 +181,62 @@ fn file_documents_report_text_binary_and_missing_files() {
 }
 
 #[test]
+fn file_documents_embed_images_without_interpreting_them_as_text() {
+    use agtk::changes::read_file_document;
+    use base64::Engine;
+
+    let dir = tempfile::tempdir().unwrap();
+    let png = include_bytes!("../galaxy.png");
+    let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"/>"#;
+    for (name, bytes, mime) in [
+        ("screenshot.PNG", png.as_slice(), "image/png"),
+        ("drawing.svg", svg.as_slice(), "image/svg+xml"),
+    ] {
+        let path = dir.path().join(name);
+        fs::write(&path, bytes).unwrap();
+        let document = serde_json::to_value(read_file_document(&path, name).unwrap()).unwrap();
+        assert_eq!(document["kind"], "image");
+        assert_eq!(document["value"]["path"], name);
+        assert_eq!(document["value"]["byteSize"], bytes.len());
+        assert_eq!(
+            document["value"]["dataUrl"],
+            format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            )
+        );
+        // Replacing an image with different content of the same length must offer a reload.
+        fs::write(&path, vec![b'x'; bytes.len()]).unwrap();
+        let changed = serde_json::to_value(read_file_document(&path, name).unwrap()).unwrap();
+        assert_ne!(document["value"]["identity"], changed["value"]["identity"]);
+    }
+}
+
+#[test]
+fn image_files_have_a_separate_bounded_size_limit() {
+    use agtk::changes::{FileDocumentResult, read_file_document};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("large.png");
+    let file = fs::File::create(&path).unwrap();
+    file.set_len(3 * 1024 * 1024).unwrap();
+    let document = serde_json::to_value(read_file_document(&path, "large.png").unwrap()).unwrap();
+    assert_eq!(document["kind"], "image");
+
+    file.set_len(20 * 1024 * 1024 + 1).unwrap();
+    let FileDocumentResult::Placeholder(placeholder) =
+        read_file_document(&path, "large.png").unwrap()
+    else {
+        panic!("expected an image size limit placeholder");
+    };
+    assert_eq!(
+        placeholder.reason,
+        "File is larger than the 20 MiB image limit"
+    );
+    assert_eq!(placeholder.byte_size, Some(20 * 1024 * 1024 + 1));
+}
+
+#[test]
 fn file_documents_flag_links_out_of_the_worktree_and_skip_fifos() {
     use agtk::changes::{FileDocumentResult, link_target_outside, read_file_document};
 

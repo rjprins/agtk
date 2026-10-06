@@ -238,6 +238,69 @@ body {
   content: 'Image: ';
 }
 
+#image-view {
+  --image-border: #d7d7d7;
+  --image-surface: #f6f6f6;
+  --image-checker: #e3e3e3;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+#image-view[hidden] { display: none; }
+
+#image-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--image-border);
+}
+
+#image-toolbar button {
+  font: inherit;
+  color: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--image-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+#image-toolbar button[aria-pressed='true'] { background: var(--image-checker); }
+#image-toolbar button:disabled { opacity: 0.5; cursor: default; }
+#image-status { overflow-wrap: anywhere; }
+
+#image-viewport {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--image-surface);
+  background-image: conic-gradient(var(--image-checker) 25%, transparent 0 50%, var(--image-checker) 0 75%, transparent 0);
+  background-size: 16px 16px;
+}
+
+#image-viewport img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+#image-viewport.actual-size { display: block; }
+#image-viewport.actual-size img { display: block; max-width: none; max-height: none; margin: auto; }
+#image-viewport img[hidden] { display: none; }
+
+body[data-theme='dark'] #image-view {
+  --image-border: #383838;
+  --image-surface: #262626;
+  --image-checker: #333333;
+}
+
 #empty-state {
   position: absolute;
   top: 50%;

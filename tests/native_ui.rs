@@ -2913,6 +2913,23 @@ fn files_page_lists_the_worktree_and_opens_files_read_only() {
     let tab = wait_for(opened["tabId"].as_str().unwrap(), "src/lib.rs (File)");
     assert_eq!(tab["isSelected"], true);
 
+    // The same file-opening route handles image bytes and returns to text cleanly.
+    std::fs::write(project.join("image.png"), include_bytes!("../galaxy.png")).unwrap();
+    app.request("ui.open_file", json!({"sessionId":id,"path":"image.png"}));
+    wait_for("diff-viewer", "rendered: image 512 × 512");
+    // Cross the text bridge's size limit with a valid image, and retain SVG's
+    // intrinsic dimensions even though the viewer fits it into a smaller pane.
+    let mut svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="red"/></svg>"#.to_vec();
+    svg.resize(4 * 1024 * 1024, b' ');
+    std::fs::write(project.join("large.svg"), svg).unwrap();
+    app.request("ui.open_file", json!({"sessionId":id,"path":"large.svg"}));
+    wait_for("diff-viewer", "rendered: image 1600 × 900");
+    std::fs::write(project.join("bad.png"), b"not an image").unwrap();
+    app.request("ui.open_file", json!({"sessionId":id,"path":"bad.png"}));
+    wait_for("diff-viewer", "error: Could not display this image");
+    app.request("ui.open_file", json!({"sessionId":id,"path":"src/lib.rs"}));
+    wait_for("diff-viewer", "rendered: 3 lines");
+
     let missing = app.request_body(
         "ui.open_file",
         json!({"sessionId":id,"path":"src/missing.rs"}),

@@ -18,6 +18,14 @@
       <div id="markdown" tabindex="-1" aria-label="Rendered Markdown">
         <article id="markdown-body"></article>
       </div>
+      <section id="image-view" aria-label="Image viewer" hidden>
+        <div id="image-toolbar" role="group" aria-label="Image size">
+          <button id="image-fit" type="button" aria-pressed="true">Fit to window</button>
+          <button id="image-actual" type="button" aria-pressed="false">Actual size (100%)</button>
+          <span id="image-status" role="status"></span>
+        </div>
+        <div id="image-viewport" tabindex="0" aria-label="Image preview"></div>
+      </section>
       <p id="empty-state">Select a file to view it.</p>
     </main>
     <script type="module" src="/src/main.js"></script>
