@@ -515,6 +515,7 @@ impl Workspace {
         if let Some(attention) = pr_attention {
             content.append(&self.project_pr_button(root, attention));
         }
+        content.append(&self.project_repository_link(root));
         content.append(&launch);
         content.append(&more);
         menus::open_menu_on_right_click(&collapse, &more);
@@ -609,10 +610,52 @@ impl Workspace {
         let remove_root = root.to_owned();
         remove.connect_clicked(move |_| workspace.remove_project(&remove_root, None));
         content.append(&open);
+        content.append(&self.project_repository_link(root));
         content.append(&pin);
         content.append(&remove);
         row.set_child(Some(&content));
         row
+    }
+
+    fn project_repository_link(&self, root: &str) -> gtk::LinkButton {
+        let link = gtk::LinkButton::builder()
+            .icon_name("web-browser-symbolic")
+            .valign(gtk::Align::Center)
+            .visible(false)
+            .build();
+        link.add_css_class("flat");
+        link.update_property(&[gtk::accessible::Property::Label(
+            "Open repository in browser",
+        )]);
+        let workspace = self.clone();
+        link.connect_activate_link(move |link| {
+            let workspace = workspace.clone();
+            gtk::UriLauncher::new(&link.uri()).launch(
+                Some(&workspace.window.clone()),
+                None::<&gio::Cancellable>,
+                move |result| {
+                    if let Err(error) = result {
+                        workspace.show_error(&format!("Could not open repository: {error}"));
+                    }
+                },
+            );
+            glib::Propagation::Stop
+        });
+        let root = root.to_owned();
+        let weak_link = link.downgrade();
+        self.run_io(
+            move || Ok(crate::projects::repository_url(Path::new(&root))),
+            move |_, result| {
+                if let Some(link) = weak_link.upgrade()
+                    && let Ok(Some(url)) = result
+                {
+                    link.set_uri(&url);
+                    link.set_tooltip_text(Some(&format!("Open repository in browser\n{url}")));
+                    link.set_visible(true);
+                }
+            },
+        );
+        link
     }
 }
 

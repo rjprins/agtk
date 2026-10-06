@@ -78,6 +78,7 @@ Without Claude Code or Codex, or when the source directory agtk was built from i
 ### Sessions
 
 - Sessions are grouped by project in the sidebar. Each project has buttons to launch, pin, resume, and manage worktrees and pull requests.
+- Use a project's browser button to open its repository. The link uses the first Git remote and supports GitHub and Azure DevOps HTTPS and SSH URLs.
 - When the last session in a project closes, the project moves to Inactive Projects at the bottom of the sidebar. Click it to launch a session there. Use the star to pin it, or the trash button to remove it from the list. This does not delete any files.
 - A pinned project stays at the top of the sidebar, even without sessions. Pin or unpin a project from its menu.
 - Launch Claude, Codex, Gemini, a shell, or a custom command in an exact directory and worktree.
