@@ -74,6 +74,100 @@ fn linked_worktrees_report_each_checkout_branch() {
 }
 
 #[test]
+fn inspection_and_reaping_ignore_missing_sibling_worktrees() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
+    let created = manager
+        .create(
+            fixture.root(),
+            "keep-checking",
+            Some("main"),
+            "close preview",
+        )
+        .unwrap();
+    fs::write(created.path.join("notes.txt"), "keep in attic\n").unwrap();
+    let missing = manager
+        .create(fixture.root(), "missing", Some("main"), "stale checkout")
+        .unwrap();
+    let expected = manager
+        .list(fixture.root(), &[])
+        .unwrap()
+        .worktrees
+        .into_iter()
+        .find(|row| row.path == created.path)
+        .unwrap();
+    fs::remove_dir_all(&missing.path).unwrap();
+    assert!(
+        manager
+            .linked_worktrees(fixture.root())
+            .unwrap()
+            .iter()
+            .any(|row| row.path == missing.path && row.prunable)
+    );
+
+    // Session paths can reach the checkout through a symlink.
+    let alias = fixture.root().parent().unwrap().join("alias");
+    std::os::unix::fs::symlink(&created.path, &alias).unwrap();
+    let preview = manager
+        .inspect(fixture.root(), &alias, &[])
+        .unwrap()
+        .unwrap();
+    assert_eq!(preview, expected);
+    assert!(preview.dirty);
+    assert!(!preview.is_primary);
+    let live = manager
+        .inspect(fixture.root(), &alias, std::slice::from_ref(&alias))
+        .unwrap()
+        .unwrap();
+    assert_eq!(live.live_session_count, 1);
+    assert!(manager.inspect(fixture.root(), &missing.path, &[]).is_err());
+
+    let result = manager
+        .reap(
+            ReapRequest {
+                path: preview.path,
+                expected_head: preview.head.unwrap(),
+                expected_status_hash: preview.status_hash,
+                delete_branch: DeleteBranch::Never,
+                confirmed: true,
+            },
+            &[],
+        )
+        .unwrap();
+    assert!(result.ok, "{:?}", result.reason);
+    assert!(result.salvage_path.unwrap().is_file());
+    assert!(!created.path.exists());
+    assert!(fixture.root().exists());
+}
+
+#[test]
+fn inspection_only_returns_registered_worktree_roots() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
+    let primary = manager
+        .inspect(fixture.root(), fixture.root(), &[])
+        .unwrap()
+        .unwrap();
+    assert!(primary.is_primary);
+
+    let nested = fixture.root().join("nested");
+    fs::create_dir(&nested).unwrap();
+    assert!(
+        manager
+            .inspect(fixture.root(), &nested, &[])
+            .unwrap()
+            .is_none()
+    );
+    let other = Repository::new();
+    assert!(
+        manager
+            .inspect(fixture.root(), other.root(), &[])
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
 fn status_hash_follows_contents_around_deleted_and_oddly_named_files() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());

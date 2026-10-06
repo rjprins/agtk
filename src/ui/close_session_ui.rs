@@ -208,12 +208,7 @@ impl Workspace {
                     Some(repo) => repo,
                     None => manager.repository_root(&worktree)?,
                 };
-                let inventory = manager.list(&repo, &live_paths)?;
-                let wanted = worktree.canonicalize().unwrap_or(worktree);
-                Ok(inventory
-                    .worktrees
-                    .into_iter()
-                    .find(|row| row.path.canonicalize().ok().as_ref() == Some(&wanted)))
+                manager.inspect(&repo, &worktree, &live_paths)
             },
             move |workspace, result| {
                 match result {

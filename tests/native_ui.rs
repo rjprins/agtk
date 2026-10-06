@@ -2235,6 +2235,7 @@ fn closing_the_last_session_in_a_worktree_offers_to_remove_it() {
         vec!["add", "README.md"],
         vec!["commit", "-m", "fixture"],
         vec!["worktree", "add", "-b", "fix", "../repo-fix"],
+        vec!["worktree", "add", "--detach", "../repo-missing"],
     ] {
         let output = Command::new("git")
             .args(arguments)
@@ -2243,6 +2244,8 @@ fn closing_the_last_session_in_a_worktree_offers_to_remove_it() {
             .unwrap();
         assert!(output.status.success());
     }
+    // A stale registration for another checkout must not block this one's scan.
+    std::fs::remove_dir_all(app.directory.path().join("repo-missing")).unwrap();
     let repo = repo.canonicalize().unwrap();
     let fix = app
         .directory

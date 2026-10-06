@@ -254,6 +254,22 @@ impl WorktreeManager {
         self.inventory(repo_root, live_paths, None)
     }
 
+    /// Inspect one registered checkout without reading other worktrees' files.
+    /// A stale or unreadable sibling must not block its removal preview.
+    pub fn inspect(
+        &self,
+        repo_root: &Path,
+        path: &Path,
+        live_paths: &[PathBuf],
+    ) -> WorktreeResult<Option<WorktreeInfo>> {
+        let path = path.canonicalize()?;
+        Ok(self
+            .inventory(repo_root, live_paths, Some(&path))?
+            .worktrees
+            .into_iter()
+            .next())
+    }
+
     /// Lists the repository's worktrees, or only the one at `only`. Each
     /// costs several git calls, so reaping one worktree inspects just it.
     fn inventory(
