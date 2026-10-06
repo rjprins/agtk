@@ -1,7 +1,7 @@
 //! Read-only file tabs: one reusable buffer per worktree in the shared code viewer.
 
 use super::*;
-use crate::changes::{FileDocument, FileDocumentResult};
+use crate::changes::FileDocumentResult;
 use crate::file_links::MarkdownLink;
 use crate::workspace_tabs::{FileTabKey, WorkspaceTabId, WorkspaceTabs};
 
@@ -246,28 +246,21 @@ impl Workspace {
             let result = result
                 .await
                 .unwrap_or_else(|_| Err("Changes worker stopped".to_owned()));
-            if workspace.workspace_tabs.borrow().visible_tab()
-                != Some(&WorkspaceTabId::File(key.clone()))
+            if workspace.diff_request_sequence.get() != request
+                || workspace.workspace_tabs.borrow().visible_tab()
+                    != Some(&WorkspaceTabId::File(key.clone()))
             {
                 return;
             }
             match result {
                 Ok((document, link_target)) => {
-                    let identity = match &document {
-                        FileDocumentResult::Text(text) => text.identity.clone(),
-                        FileDocumentResult::Placeholder(placeholder) => {
-                            placeholder.identity.clone()
-                        }
-                    };
+                    let identity = document.identity().to_owned();
                     if let Some(state) = workspace.file_tabs.borrow_mut().get_mut(&key) {
                         state.signature = Some(identity);
                         state.stale = false;
                     }
                     workspace.update_file_stale_banner(&key);
                     match document {
-                        FileDocumentResult::Text(text) => {
-                            workspace.show_file_document(&key, text, link_target, request)
-                        }
                         FileDocumentResult::Placeholder(placeholder) => workspace
                             .show_viewer_placeholder(
                                 &placeholder.path,
@@ -275,6 +268,9 @@ impl Workspace {
                                 placeholder.byte_size,
                                 &[],
                             ),
+                        document => {
+                            workspace.show_file_document(&key, document, link_target, request)
+                        }
                     }
                 }
                 Err(error) => workspace.show_viewer_placeholder(
@@ -290,7 +286,7 @@ impl Workspace {
     fn show_file_document(
         &self,
         key: &FileTabKey,
-        document: FileDocument,
+        document: FileDocumentResult,
         link_target: Option<PathBuf>,
         request: u64,
     ) {
@@ -312,24 +308,41 @@ impl Workspace {
             .get_mut(key)
             .and_then(|state| state.pending_position.take());
         let inside_worktree = key.path.starts_with(&key.worktree_root) && link_target.is_none();
-        let lines = if document.line_count == 1 {
-            "1 line".to_owned()
-        } else {
-            format!("{} lines", document.line_count)
+        let (mut payload, details) = match document {
+            FileDocumentResult::Text(document) => {
+                let lines = if document.line_count == 1 {
+                    "1 line".to_owned()
+                } else {
+                    format!("{} lines", document.line_count)
+                };
+                (
+                    serde_json::json!({
+                        "path": document.path,
+                        "text": document.text,
+                        "language": document.language,
+                    }),
+                    lines,
+                )
+            }
+            FileDocumentResult::Image(document) => (
+                serde_json::json!({
+                    "path": document.path,
+                    "dataUrl": document.data_url,
+                }),
+                glib::format_size(document.byte_size).to_string(),
+            ),
+            FileDocumentResult::Placeholder(_) => return,
         };
-        let mut metadata = vec![lines];
+        let mut metadata = vec![details];
         if let Some(target) = &link_target {
             metadata.push(format!(
                 "Links outside the worktree to {}",
                 target.display()
             ));
         }
-        let payload = serde_json::json!({
+        let common = serde_json::json!({
             "requestId": request_id,
             "tabId": tab_id,
-            "path": document.path,
-            "text": document.text,
-            "language": document.language,
             "label": if inside_worktree { "Working tree" } else { "" },
             "metadata": metadata,
             "viewState": state,
@@ -337,8 +350,17 @@ impl Workspace {
             "column": position.and_then(|(_, column)| column),
             "presentation": self.markdown_presentation_for(&key.path, false),
         });
+        payload
+            .as_object_mut()
+            .expect("file payload is an object")
+            .extend(
+                common
+                    .as_object()
+                    .expect("common payload is an object")
+                    .clone(),
+            );
         if let Err(error) = viewer.show_file(&payload) {
-            self.show_viewer_placeholder(&document.path, &error, None, &[]);
+            self.show_viewer_placeholder(&file_tab_title(key), &error, None, &[]);
             return;
         }
         self.diff_placeholder.set_visible(false);
@@ -376,10 +398,7 @@ impl Workspace {
                 return;
             }
             let stale = match result {
-                Ok(FileDocumentResult::Text(document)) => document.identity != expected,
-                Ok(FileDocumentResult::Placeholder(placeholder)) => {
-                    placeholder.identity != expected
-                }
+                Ok(document) => document.identity() != expected,
                 Err(_) => true,
             };
             if let Some(state) = workspace.file_tabs.borrow_mut().get_mut(&key) {

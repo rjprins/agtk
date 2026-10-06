@@ -31,6 +31,7 @@ import DOMPurify from 'dompurify';
 
 import { languageForFence, languageForPath } from './language.js';
 import { headingSlug, renderMarkdown } from './markdown.js';
+import { createImageView, isImageDataUrl } from './image.js';
 import './style.css';
 
 self.MonacoEnvironment = {
@@ -52,6 +53,7 @@ const metadataElement = document.querySelector('#metadata');
 const emptyStateElement = document.querySelector('#empty-state');
 const markdownElement = document.querySelector('#markdown');
 const markdownBodyElement = document.querySelector('#markdown-body');
+const imageView = createImageView(document.querySelector('#image-view'));
 
 const sharedOptions = {
   automaticLayout: true,
@@ -80,7 +82,7 @@ let fileEditor = null;
 let appearance = { theme: 'vs', fontFamily: null, fontSize: null };
 
 let modelSequence = 0;
-// 'diff', 'file' or null while nothing is shown.
+// 'diff', 'file', 'image' or null while nothing is shown.
 let mode = null;
 let currentTabId = null;
 let currentRequestId = null;
@@ -117,6 +119,7 @@ function activeEditor() {
 }
 
 function clear() {
+  imageView.clear();
   const models = diffEditor.getModel();
   if (models) {
     diffEditor.setModel(null);
@@ -213,6 +216,7 @@ function showFile({
   tabId,
   path,
   text,
+  dataUrl,
   language,
   label,
   metadata,
@@ -221,6 +225,27 @@ function showFile({
   column,
   presentation: requestedPresentation,
 }) {
+  if (dataUrl !== undefined) {
+    if (typeof tabId !== 'string' || typeof path !== 'string' || !isImageDataUrl(dataUrl)) {
+      throw new TypeError('Image data must include an encoded image, a path, and a tab ID');
+    }
+    clear();
+    mode = 'image';
+    currentTabId = tabId;
+    currentRequestId = typeof requestId === 'string' ? requestId : tabId;
+    fileNameElement.textContent = path;
+    versionLabelsElement.textContent = typeof label === 'string' ? label : '';
+    metadataElement.textContent = Array.isArray(metadata) ? metadata.join(' · ') : '';
+    emptyStateElement.hidden = true;
+    imageView.show({
+      dataUrl, path, viewState: viewState?.agtkImage,
+      onLoad: (width, height) => sendEvent({
+        type: 'imageRendered', requestId: currentRequestId, tabId, width, height,
+      }),
+      onError: (message) => sendEvent({ type: 'error', requestId: currentRequestId, message }),
+    });
+    return;
+  }
   if (typeof tabId !== 'string' || typeof path !== 'string' || typeof text !== 'string') {
     throw new TypeError('File data must include text, a path, and a tab ID');
   }
@@ -282,7 +307,9 @@ function reveal(line, column) {
 
 function sendViewState() {
   if (!currentTabId) return null;
-  let state = mode === 'diff' ? diffEditor.saveViewState() : fileEditor?.saveViewState();
+  let state = mode === 'image'
+    ? { agtkImage: imageView.saveViewState() }
+    : mode === 'diff' ? diffEditor.saveViewState() : fileEditor?.saveViewState();
   if (state && presentation === 'preview') {
     state = { ...state, agtkPreviewScroll: markdownElement.scrollTop };
   }

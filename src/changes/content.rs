@@ -8,6 +8,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use base64::Engine;
 use nix::errno::Errno;
 use nix::fcntl::{AtFlags, OFlag, openat, readlinkat};
 use nix::sys::stat::{Mode, fstat, fstatat};
@@ -17,6 +18,7 @@ use super::git::{DiffScope, git_argument, git_path_argument, run_checked};
 use super::{ChangeStatus, ChangedFile, DiffDocument, WorktreeContext};
 
 const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_LINES: usize = 50_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,7 +44,28 @@ pub struct DiffPlaceholder {
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
 pub enum FileDocumentResult {
     Text(FileDocument),
+    Image(ImageDocument),
     Placeholder(FilePlaceholder),
+}
+
+impl FileDocumentResult {
+    pub fn identity(&self) -> &str {
+        match self {
+            Self::Text(document) => &document.identity,
+            Self::Image(document) => &document.identity,
+            Self::Placeholder(document) => &document.identity,
+        }
+    }
+}
+
+/// Image bytes travel through the host bridge, never through a file or network URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageDocument {
+    pub path: String,
+    pub data_url: String,
+    pub byte_size: u64,
+    pub identity: String,
 }
 
 /// One worktree file for the read-only viewer.
@@ -76,9 +99,18 @@ pub fn link_target_outside(path: &Path, worktree: &Path) -> Option<PathBuf> {
     (!target.starts_with(&worktree)).then_some(target)
 }
 
-/// Reads `path` for the file viewer with the diff limits. Symlinks are followed, so a
+/// Reads `path` with bounded image or text limits. Symlinks are followed, so a
 /// link opens what it points at, and `display_path` is what the viewer shows.
 pub fn read_file_document(path: &Path, display_path: &str) -> Result<FileDocumentResult, String> {
+    let image_mime = image_mime_type(path);
+    let (limit, limit_reason) = if image_mime.is_some() {
+        (
+            MAX_IMAGE_BYTES,
+            "File is larger than the 20 MiB image limit",
+        )
+    } else {
+        (MAX_TEXT_BYTES, "File is larger than the 2 MiB text limit")
+    };
     let file_placeholder = |reason: &str, byte_size: Option<u64>, identity: String| {
         Ok(FileDocumentResult::Placeholder(FilePlaceholder {
             path: display_path.to_owned(),
@@ -105,12 +137,8 @@ pub fn read_file_document(path: &Path, display_path: &str) -> Result<FileDocumen
         );
     }
     let size = metadata.len();
-    if size > MAX_TEXT_BYTES as u64 {
-        return file_placeholder(
-            "File is larger than the 2 MiB text limit",
-            Some(size),
-            format!("large:{size}"),
-        );
+    if size > limit as u64 {
+        return file_placeholder(limit_reason, Some(size), format!("large:{size}"));
     }
     // Non-blocking, and checked again once open: a FIFO swapped in after the
     // check above would otherwise block the reader for good.
@@ -130,8 +158,8 @@ pub fn read_file_document(path: &Path, display_path: &str) -> Result<FileDocumen
         );
     }
     let size = metadata.len();
-    let mut bytes = Vec::with_capacity(size.min(MAX_TEXT_BYTES as u64 + 1) as usize);
-    file.take(MAX_TEXT_BYTES as u64 + 1)
+    let mut bytes = Vec::with_capacity(size.min(limit as u64 + 1) as usize);
+    file.take(limit as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("could not read file: {error}"))?;
     use std::os::unix::fs::PermissionsExt;
@@ -141,12 +169,19 @@ pub fn read_file_document(path: &Path, display_path: &str) -> Result<FileDocumen
         "100644"
     };
     let identity = disk_identity(&bytes, mode);
-    if bytes.len() > MAX_TEXT_BYTES {
-        return file_placeholder(
-            "File is larger than the 2 MiB text limit",
-            Some(bytes.len() as u64),
+    if bytes.len() > limit {
+        return file_placeholder(limit_reason, Some(bytes.len() as u64), identity);
+    }
+    if let Some(mime) = image_mime {
+        return Ok(FileDocumentResult::Image(ImageDocument {
+            path: display_path.to_owned(),
+            data_url: format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(&bytes)
+            ),
+            byte_size: bytes.len() as u64,
             identity,
-        );
+        }));
     }
     if bytes.contains(&0) {
         return file_placeholder(
@@ -173,6 +208,20 @@ pub fn read_file_document(path: &Path, display_path: &str) -> Result<FileDocumen
         identity,
         line_count,
     }))
+}
+
+fn image_mime_type(path: &Path) -> Option<&'static str> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "png" | "apng" => Some("image/png"),
+        "jpg" | "jpeg" | "jpe" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "svg" => Some("image/svg+xml"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/x-icon"),
+        "avif" => Some("image/avif"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]

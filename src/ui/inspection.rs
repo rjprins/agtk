@@ -414,10 +414,17 @@ impl Workspace {
         let file_rendered = current_diff_request
             .as_ref()
             .and_then(|request| rendered_file.filter(|(rendered, _)| rendered == request));
+        let image_rendered = self
+            .image_rendered
+            .borrow()
+            .clone()
+            .filter(|(request, _, _)| current_diff_request.as_ref() == Some(request));
         let diff_label = if let Some((_, line_changes, character_changes)) = &diff_rendered {
             format!("rendered: {line_changes} line changes, {character_changes} character changes")
         } else if let Some((_, line_count)) = &file_rendered {
             format!("rendered: {line_count} lines")
+        } else if let Some((_, width, height)) = &image_rendered {
+            format!("rendered: image {width} × {height}")
         } else if let Some((_, message)) = diff_error
             .filter(|(error_request, _)| current_diff_request.as_ref() == Some(error_request))
         {
@@ -445,7 +452,9 @@ impl Workspace {
                     role: "document".to_owned(),
                     label: Some(diff_label),
                     is_visible: diff_visible,
-                    is_enabled: diff_rendered.is_some() || file_rendered.is_some(),
+                    is_enabled: diff_rendered.is_some()
+                        || file_rendered.is_some()
+                        || image_rendered.is_some(),
                     is_selected: diff_visible,
                     bounds: widget_bounds(&self.diff_viewer_host, &self.window),
                     children: Vec::new(),

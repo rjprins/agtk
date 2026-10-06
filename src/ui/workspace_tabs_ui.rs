@@ -913,6 +913,7 @@ impl Workspace {
         let current_request = self.diff_current_request.clone();
         let rendered = self.diff_rendered.clone();
         let file_rendered = self.file_rendered.clone();
+        let image_rendered = self.image_rendered.clone();
         let error_state = self.diff_error.clone();
         let link_workspace = self.clone();
         let viewer = code_viewer::CodeViewer::new(move |event| match event {
@@ -941,6 +942,16 @@ impl Workspace {
             } => {
                 if current_request.borrow().as_deref() == Some(request_id.as_str()) {
                     *file_rendered.borrow_mut() = Some((request_id, line_count));
+                }
+            }
+            code_viewer::ViewerEvent::ImageRendered {
+                request_id,
+                width,
+                height,
+                ..
+            } => {
+                if current_request.borrow().as_deref() == Some(request_id.as_str()) {
+                    *image_rendered.borrow_mut() = Some((request_id, width, height));
                 }
             }
             code_viewer::ViewerEvent::Error {

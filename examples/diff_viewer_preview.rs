@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
+use agtk::changes;
 use code_viewer::{CodeViewer, ViewerEvent};
 use webkit6::prelude::*;
 
@@ -35,6 +36,9 @@ fn main() -> glib::ExitCode {
             ViewerEvent::FileRendered { line_count, .. } => {
                 println!("File rendered with {line_count} lines")
             }
+            ViewerEvent::ImageRendered { width, height, .. } => {
+                println!("Image rendered at {width} × {height}")
+            }
             ViewerEvent::ViewState { .. } => {}
             ViewerEvent::OpenLink { href, .. } => println!("Link clicked: {href}"),
             ViewerEvent::Error { message, .. } => eprintln!("Viewer error: {message}"),
@@ -48,7 +52,19 @@ fn main() -> glib::ExitCode {
             .build();
         let theme = std::env::var("AGTK_DIFF_THEME").unwrap_or_else(|_| "light".to_owned());
         viewer.set_appearance(&theme, "Monospace", 13);
-        if std::env::var_os("AGTK_DIFF_MARKDOWN").is_some() {
+        if let Some(path) = std::env::var_os("AGTK_DIFF_IMAGE") {
+            let path = PathBuf::from(path);
+            let changes::FileDocumentResult::Image(document) = changes::read_file_document(&path, &path.to_string_lossy()).expect("image fixture should load") else {
+                panic!("fixture must be an image");
+            };
+            viewer.show_file(&serde_json::json!({
+                "requestId": "preview-request",
+                "tabId": "preview-tab",
+                "path": document.path,
+                "dataUrl": document.data_url,
+                "metadata": [glib::format_size(document.byte_size).to_string()],
+            })).expect("image fixture should fit in the bridge limit");
+        } else if std::env::var_os("AGTK_DIFF_MARKDOWN").is_some() {
             viewer
                 .show_file(&serde_json::json!({
                     "requestId": "preview-request",

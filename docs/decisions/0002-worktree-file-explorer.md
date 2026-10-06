@@ -18,6 +18,8 @@ The right sidebar gets two pages in an `AdwViewStack` with an `AdwInlineViewSwit
 
 Files open read only in the same Monaco WebView as diffs. It now holds a diff editor and a plain editor and shows one of them. Each worktree has one reusable file buffer next to its diff buffer. A file on disk that changes while shown gets the same reload banner as a diff.
 
+Image files use an image element in the same WebView, with fit-to-window and actual-size controls. The host reads at most 20 MiB and sends a base64 data URL through the existing bridge. The viewer still has no file or network access. SVG stays in an image element so it uses [SVG's secure image processing mode](https://www.w3.org/TR/SVG/conform.html#secure-animated-mode), with scripts and external references disabled.
+
 Clicking a file path in the terminal opens it in this viewer at the printed line and column, in the worktree of the session that printed it. Emacs stays one click away from the viewer toolbar and the tree's context menu.
 
 ## Alternatives considered
