@@ -9,6 +9,7 @@ agtk runs Claude Code, Codex, Gemini and plain shells side by side in one window
 ## Highlights
 
 - **Know which agent needs you.** Every session shows a live state: busy, waiting for input, ready for review, or idle. `Ctrl+Shift+Space` jumps to the next session that is ready.
+- **Usage at a glance.** The bottom bar shows account quota on the left, selected-session tokens and available context in the middle, and whole-machine CPU/RAM on the right. Click a section for details and quota reset times. Claude and Codex token usage comes from local logs; context remaining appears when the log reports its capacity.
 - **Sessions outlive the window.** Each terminal runs in its own process. Close, crash, or rebuild agtk and it reattaches to every running agent. After a reboot it offers to resume each conversation where it stopped.
 - **Worktree-native.** Launch an agent in a fresh worktree with a generated branch in one step. Removing a worktree saves uncommitted work and tags the branch tip first, so nothing is lost.
 - **Review without leaving the window.** The Changes sidebar shows staged, unstaged, branch and commit diffs for the session's worktree. File paths in the terminal open in the built-in viewer at the right line.
@@ -217,7 +218,7 @@ The tools cover sessions, terminal input and text, diffs, worktrees, recent conv
 - Worktrees: `~/worktrees/REPO/BRANCH`, or where `git config agtk.worktreeTemplate` says (placeholders `{repo-name}`, `{repo-root}`, `{branch}`; relative paths start at the project, `~` is your home). PR reviews use the same place with branch `pr-ID`.
 - Work saved before a worktree is removed: `attic` in the settings directory. agtk stages it in a private directory under `/tmp` first.
 
-agtk makes no network requests itself. Pull requests go through the Azure CLI, and a PR review fetches the branch with `git fetch`. Building agtk downloads the crates in `Cargo.lock` and the npm packages in `viewer/package-lock.json`, without running their install scripts.
+Account quota uses `curl`, when installed, to read Claude and Codex usage once a minute using their existing local sign-ins. Credentials are sent only to the matching provider's HTTPS usage endpoint and are never stored by agtk or included in process arguments. Expired sign-ins and unavailable quota are shown in the account details; agtk does not refresh credentials. Pull requests go through the Azure CLI, and a PR review fetches the branch with `git fetch`. Building agtk downloads the crates in `Cargo.lock` and the npm packages in `viewer/package-lock.json`, without running their install scripts.
 
 To use another program for a tool, set `AGTK_CLAUDE_BIN`, `AGTK_CODEX_BIN`, `AGTK_EMACSCLIENT`, or `AGTK_AZURE_BIN`.
 

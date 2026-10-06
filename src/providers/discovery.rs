@@ -103,6 +103,23 @@ impl ProviderDiscovery {
         Ok(named || self.preview(provider, provider_session_id, 1).is_ok())
     }
 
+    /// Locate a known conversation without parsing its message history.
+    pub fn log_path(&self, provider: AgentProvider, id: &str) -> PersistResult<Option<PathBuf>> {
+        validate_provider_session_id(id)?;
+        Ok(self
+            .candidates()?
+            .into_iter()
+            .find(|candidate| {
+                candidate.provider == provider
+                    && candidate
+                        .path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .is_some_and(|stem| stem.ends_with(id))
+            })
+            .map(|candidate| candidate.path))
+    }
+
     /// The rollout a running Codex session writes: by conversation when known,
     /// else the earliest log in its directory that started after launch and no
     /// other live session claims. Codex creates the file at the first prompt,

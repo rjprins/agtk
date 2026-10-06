@@ -367,7 +367,7 @@ fn workspace_inspection_preserves_two_pane_tui_structure() {
         .iter()
         .filter_map(|node| node["id"].as_str())
         .collect::<Vec<_>>();
-    assert_eq!(ids, ["sidebar", "terminal-pane"]);
+    assert_eq!(ids, ["sidebar", "terminal-pane", "status-bar"]);
     let sidebar = children
         .iter()
         .find(|node| node["id"] == "sidebar")
@@ -552,6 +552,93 @@ fn window_size_is_restored_on_ui_restart() {
     assert_eq!(
         (bounds["width"].as_f64(), bounds["height"].as_f64()),
         (Some(1300.0), Some(700.0))
+    );
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn status_bar_follows_the_terminal_and_selected_conversation() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+    let mut app = App::new();
+    let session = app.request(
+        "session.create",
+        json!({"kind":"codex","cwd":app.directory.path(),"name":"usage test"}),
+    );
+    let id = session["id"].as_str().unwrap();
+    let logs = app.directory.path().join("codex/sessions/2026/10/06");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(
+        logs.join("rollout-usage-test.jsonl"),
+        json!({"type":"event_msg","payload":{"type":"token_count","info":{
+        "total_token_usage":{"input_tokens":1000,"output_tokens":200},
+        "last_token_usage":{"total_tokens":250},"model_context_window":1000}}})
+        .to_string()
+            + "\n",
+    )
+    .unwrap();
+    app.request(
+        "session.set_state",
+        json!({"sessionId":id,"state":"idle","conversationId":"usage-test"}),
+    );
+    app.request("session.select", json!({"sessionId":id}));
+    for width in [1200, 800] {
+        app.stop();
+        Store::open(&app.paths.database())
+            .unwrap()
+            .set_preference("windowSize", &json!({"width":width,"height":700}))
+            .unwrap();
+        app.start();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let inspection = app.request("ui.inspect", json!({}));
+            let root = &inspection["root"];
+            let session = find(root, "session-usage").unwrap();
+            if session["label"].as_str().unwrap().contains("1.2k tokens") {
+                assert!(session["label"].as_str().unwrap().contains("75% left"));
+                let bounds = |name| find(root, name).unwrap()["bounds"].clone();
+                let terminal = bounds("terminal-pane");
+                let account = bounds("account-usage");
+                let system = bounds("system-usage");
+                let session = bounds("session-usage");
+                let center =
+                    |b: &Value| b["x"].as_f64().unwrap() + b["width"].as_f64().unwrap() / 2.0;
+                assert!(
+                    (center(&terminal) - center(&session)).abs() <= 2.0,
+                    "{terminal} {session}"
+                );
+                assert!(
+                    account["x"].as_f64().unwrap() + account["width"].as_f64().unwrap()
+                        <= session["x"].as_f64().unwrap()
+                );
+                assert!(
+                    session["x"].as_f64().unwrap() + session["width"].as_f64().unwrap()
+                        <= system["x"].as_f64().unwrap()
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline, "usage did not appear: {session}");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+    let shell = app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":app.directory.path()}),
+    );
+    app.request("session.select", json!({"sessionId":shell["id"]}));
+    let inspection = app.request("ui.inspect", json!({}));
+    assert!(
+        !find(&inspection["root"], "session-usage").unwrap()["label"]
+            .as_str()
+            .unwrap()
+            .contains("1.2k")
     );
 }
 

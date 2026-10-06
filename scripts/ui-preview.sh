@@ -3,7 +3,7 @@
 # Nothing touches the live instance or the desktop.
 #
 # Usage: scripts/ui-preview.sh [--dark] [--keep] [--font-size N] [SURFACE...]
-#   SURFACE: main changes files launch appearance shortcuts history search worktrees agents
+#   SURFACE: main status changes files launch appearance shortcuts history search worktrees agents
 #            pull-requests review-settings claude-models close-session (default: all)
 #   --keep   leave the instance running and print how to drive it
 set -euo pipefail
@@ -139,6 +139,26 @@ export AGTK_AZURE_BIN="$work/fake-az" AGTK_AZURE_PRS_FILE="$work/azure-prs.json"
 export AGTK_AZURE_THREADS_FILE="$work/azure-threads.json" AGTK_EMACSCLIENT=/bin/true
 ((dark)) && export ADW_DEBUG_COLOR_SCHEME=prefer-dark
 
+# Usage preview fixtures: no real sign-ins and no outgoing usage requests.
+mkdir -p "$work/bin"
+cat > "$work/bin/curl" <<'CURL'
+#!/bin/sh
+cat >/dev/null
+for url in "$@"; do :; done
+reset=$(( $(date +%s) + 7200 ))
+case "$url" in
+  https://api.anthropic.com/api/oauth/usage)
+    printf '{"five_hour":{"utilization":18,"resets_at":%s},"seven_day":{"utilization":39,"resets_at":%s}}' "$reset" "$reset" ;;
+  https://chatgpt.com/backend-api/wham/usage)
+    printf '{"rate_limit":{"primary_window":{"used_percent":28,"limit_window_seconds":18000,"reset_at":%s},"secondary_window":{"used_percent":54,"limit_window_seconds":604800,"reset_at":%s}}}' "$reset" "$reset" ;;
+  *) exit 1 ;;
+esac
+CURL
+chmod 700 "$work/bin/curl"
+export PATH="$work/bin:$PATH"
+printf '%s\n' '{"tokens":{"access_token":"preview-fixture"}}' > "$work/codex/auth.json"
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"preview-fixture"}}' > "$work/claude/.credentials.json"
+
 ctl() { "$bin/agtkctl" --instance preview "$@"; }
 id_of() { ctl state | grep -o "\"id\":\"[^\"]*\"[^}]*\"name\":\"$1\"" | head -1 | cut -d'"' -f4; }
 
@@ -166,6 +186,9 @@ ctl session close "$(id_of billing)" >/dev/null
 sleep 1
 ctl session state "$(id_of 'cursor pagination')" waiting >/dev/null
 main_id=$(id_of demo-service)
+codex_id=$(id_of 'cursor pagination')
+printf '%s\n' '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":116000,"output_tokens":12000,"cached_input_tokens":88000},"last_token_usage":{"total_tokens":72000},"model_context_window":200000}}}' > "$work/codex/sessions/$day/rollout-status-preview.jsonl"
+printf '%s\n' '{"session_id":"status-preview"}' | ctl session state "$codex_id" waiting --hook-input >/dev/null
 ctl session input "$main_id" --text "Make the orders endpoint use cursor pagination" >/dev/null
 ctl session select "$main_id" >/dev/null
 [[ -n $font_size ]] && ctl appearance set --ui-font-size "$font_size" >/dev/null
@@ -182,6 +205,12 @@ capture() {
 }
 
 for surface in "${surfaces[@]}"; do
+  if [[ $surface == status ]]; then
+    ctl session select "$codex_id" >/dev/null
+    sleep 2.5
+    capture status
+    continue
+  fi
   if [[ $surface == main ]]; then
     capture main
     continue
