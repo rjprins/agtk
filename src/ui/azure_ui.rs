@@ -34,6 +34,7 @@ const PR_CONTENT_WIDTH: i32 = 1400;
 /// Keep the header and every PR aligned, including rows with status badges.
 struct PrColumns {
     number: gtk::SizeGroup,
+    pbis: gtk::SizeGroup,
     author: gtk::SizeGroup,
     comments: gtk::SizeGroup,
     actions: gtk::SizeGroup,
@@ -43,6 +44,7 @@ impl PrColumns {
     fn new() -> Self {
         Self {
             number: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
+            pbis: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
             author: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
             comments: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
             actions: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
@@ -55,6 +57,7 @@ impl PrColumns {
         let number = gtk::Label::new(Some("PR"));
         self.number.add_widget(&number);
         row.add_prefix(&number);
+        row.add_suffix(&Self::label("PBI", &self.pbis, 0.5));
         row.add_suffix(&Self::label("Author", &self.author, 0.0));
         row.add_suffix(&Self::label(
             "Comments\nresolved/total",
@@ -1036,8 +1039,32 @@ impl Workspace {
         columns.number.add_widget(&number);
         row.add_prefix(&number);
 
+        let pbis = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        pbis.set_valign(gtk::Align::Center);
+        pbis.set_margin_start(12);
+        pbis.set_margin_end(12);
+        if pull_request.linked_pbis.is_empty() {
+            let empty = gtk::Label::new(Some("—"));
+            empty.set_tooltip_text(Some("No linked PBIs"));
+            pbis.append(&empty);
+        }
+        for pbi in &pull_request.linked_pbis {
+            let button = gtk::Button::with_label(&format!("#{}", pbi.id));
+            button.add_css_class("flat");
+            button.add_css_class("accent");
+            let description = format!("Open PBI #{}: {}", pbi.id, pbi.title);
+            button.set_tooltip_text(Some(&description));
+            button.update_property(&[gtk::accessible::Property::Label(&description)]);
+            let workspace = self.clone();
+            let url = pbi.url.clone();
+            button.connect_clicked(move |_| workspace.open_pr_link(&url));
+            pbis.append(&button);
+        }
+        columns.pbis.add_widget(&pbis);
+        row.add_suffix(&pbis);
+
         let author = PrColumns::label(&pull_request.author, &columns.author, 0.0);
-        author.set_width_chars(14);
+        author.set_width_chars(18);
         author.set_max_width_chars(18);
         author.set_ellipsize(gtk::pango::EllipsizeMode::End);
         author.set_tooltip_text(Some(&pull_request.author));
