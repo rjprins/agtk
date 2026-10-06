@@ -29,7 +29,7 @@ Paste this into Claude Code, Codex, or another coding agent:
 Check out https://github.com/rjprins/agtk into a directory I can keep.
 Before running anything, inspect the repository and its dependencies.
 Look for suspicious or malicious behavior.
-If it appears safe, run it so I can try it out and make my own changes.
+If it appears safe, install and run it so I can try it out and make my own changes.
 ```
 
 To install by hand, install the [requirements](#requirements), clone the repository, and run:
@@ -46,6 +46,15 @@ This builds agtk, links its binaries under `~/.local/bin`, and adds a GNOME laun
 - To remove agtk, run `./scripts/uninstall-local.sh`. It also removes the `agtk` MCP server. Your saved sessions and settings are kept.
 
 If agtk does not start from the overview, look in the user journal for its output.
+
+An agent's sandbox may block package downloads or access to your desktop. If downloads fail or GTK reports `Failed to open display`, run the installer and launch agtk from a terminal in your GNOME session:
+
+```sh
+./scripts/install-local.sh
+setsid -f ~/.local/bin/agtk
+```
+
+`setsid` keeps agtk running when the terminal or agent command ends. If you used a custom `PREFIX`, use its `bin/agtk` path instead.
 
 ### Requirements
 
@@ -239,6 +248,15 @@ cargo fmt --all -- --check
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 ```
+
+If tests report `/tmp is not private to this user` inside a sandbox, use a private temporary directory under your home:
+
+```sh
+mkdir -m 700 -p "$HOME/.agtk-test-tmp"
+TMPDIR="$HOME/.agtk-test-tmp" cargo test --all-targets
+```
+
+The directory and its parents must be owned by you or root. If the sandbox also changes those owners or blocks local sockets, run the checks from a normal terminal.
 
 Render the UI without touching your running agtk or your desktop:
 
