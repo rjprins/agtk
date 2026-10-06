@@ -33,6 +33,18 @@ impl ChromeStyle {
 }
 
 const CHROME_CSS: &str = r#"
+.usage-status-bar {
+  border-top: 1px solid var(--borders);
+  background: var(--headerbar-bg-color);
+  font-size: 0.85em;
+  padding: 2px 6px;
+}
+.usage-status-bar > menubutton > button {
+  min-height: 24px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-status-bar image { -gtk-icon-size: 14px; }
 .navigation-sidebar row.session-ready:not(:selected) {
   background: color-mix(in srgb, var(--success-color) 12%, transparent);
 }

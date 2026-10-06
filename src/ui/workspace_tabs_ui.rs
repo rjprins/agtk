@@ -46,6 +46,7 @@ impl Workspace {
             viewer.clear();
         }
         *self.selected_session.borrow_mut() = Some(session_id.to_owned());
+        self.refresh_usage();
         self.stack.set_visible_child_name(session_id);
         self.session_context_bar.set_visible(true);
         self.context_pr.set_visible(true);

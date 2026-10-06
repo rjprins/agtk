@@ -787,6 +787,32 @@ impl Workspace {
             },
             is_truncated,
         };
+        inspection.root.children.push(UiNode {
+            id: "status-bar".to_owned(),
+            role: "status".to_owned(),
+            label: Some("Usage".to_owned()),
+            is_visible: self.status_bar.root.is_visible(),
+            is_enabled: true,
+            is_selected: false,
+            bounds: widget_bounds(&self.status_bar.root, &self.window),
+            children: [
+                ("account-usage", &self.status_bar.account),
+                ("session-usage", &self.status_bar.session),
+                ("system-usage", &self.status_bar.system),
+            ]
+            .into_iter()
+            .map(|(id, segment)| UiNode {
+                id: id.to_owned(),
+                role: "button".to_owned(),
+                label: Some(segment.label.text().to_string()),
+                is_visible: segment.button.is_visible(),
+                is_enabled: true,
+                is_selected: false,
+                bounds: widget_bounds(&segment.button, &self.window),
+                children: Vec::new(),
+            })
+            .collect(),
+        });
         if let Some(prompt) = self.resume_prompt.borrow().as_ref() {
             inspection
                 .root

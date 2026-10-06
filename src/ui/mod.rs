@@ -72,6 +72,8 @@ mod session_worktree_ui;
 mod sessions;
 mod shortcuts_ui;
 mod sidebar;
+mod status_bar;
+mod status_bar_layout;
 mod status_ui;
 mod style;
 mod window_size;
@@ -86,6 +88,7 @@ const PCRE2_MULTILINE: u32 = 0x0000_0400;
 
 #[derive(Clone)]
 struct Workspace {
+    status_bar: status_bar::StatusBar,
     application: adw::Application,
     window: adw::ApplicationWindow,
     list: gtk::ListBox,
@@ -556,7 +559,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     });
 
     let overlay = adw::ToastOverlay::new();
-    overlay.set_child(Some(&split));
+    let status_bar = status_bar::StatusBar::new(&stack);
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    split.set_vexpand(true);
+    body.append(&split);
+    body.append(&status_bar.root);
+    overlay.set_child(Some(&body));
     // Read synchronously so the window opens at its remembered size instead of jumping to it.
     let stored_size = Store::open(&paths.database())
         .and_then(|store| store.preference(window_size::WINDOW_SIZE_PREFERENCE))
@@ -598,6 +606,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let prs = azure_ui::PrDialog::build(&window);
     let agents = agents_ui::AgentDialog::build(&window);
     let workspace = Workspace {
+        status_bar,
         application: app.clone(),
         window: window.clone(),
         list: list.clone(),
@@ -893,6 +902,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 
     workspace.connect_preferences();
     workspace.install_status_timers();
+    workspace.install_usage_timer();
     let changes_refresh_workspace = workspace.clone();
     glib::timeout_add_local(Duration::from_secs(2), move || {
         let visible = changes_refresh_workspace.changes.split.shows_sidebar()
