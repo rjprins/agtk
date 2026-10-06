@@ -48,12 +48,49 @@ impl Modal {
         if let Some(application) = parent.application() {
             window.set_application(Some(&application));
         }
+        // Keep GTK's modal input grab, but let outside clicks reach GTK instead
+        // of having the compositor intercept them to refocus the dialog.
+        window.connect_realize(|window| {
+            if let Some(surface) = window.surface().and_downcast::<gtk::gdk::Toplevel>() {
+                surface.set_modal(false);
+            }
+        });
         let escape = gtk::ShortcutController::new();
         escape.add_shortcut(gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("Escape"),
             Some(gtk::NamedAction::new("window.close")),
         ));
         window.add_controller(escape);
+
+        // GTK redirects input blocked by modality to this window. Inspect the
+        // original surface so clicks in our own popovers still count as inside.
+        // Dismiss on release so neither half of the click reaches the workspace.
+        let outside_click = gtk::EventControllerLegacy::new();
+        outside_click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        outside_click.set_propagation_limit(gtk::PropagationLimit::None);
+        let closing = window.downgrade();
+        outside_click.connect_event(move |_, event| {
+            if !matches!(
+                event.event_type(),
+                gtk::gdk::EventType::ButtonRelease | gtk::gdk::EventType::TouchEnd
+            ) {
+                return glib::Propagation::Proceed;
+            }
+            let Some(window) = closing.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let outside = event
+                .surface()
+                .and_then(|surface| gtk::Native::for_surface(&surface))
+                .and_then(|native| native.root())
+                .is_some_and(|root| root != window);
+            if outside {
+                window.close();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(outside_click);
 
         let modal = Self {
             window,
@@ -228,3 +265,6 @@ fn scrolled_windows(root: &gtk::Widget) -> Vec<gtk::ScrolledWindow> {
     }
     found
 }
+
+#[cfg(test)]
+mod tests;
