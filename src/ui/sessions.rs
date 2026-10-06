@@ -15,7 +15,7 @@ use crate::instance::ensure_private_dir;
 use crate::session_names::next_worktree_session_name;
 
 // Temper agent TUIs' own wheel acceleration when translating touchpad movement.
-const TOUCHPAD_LINE_HEIGHTS_PER_EVENT: f64 = 4.0;
+const TOUCHPAD_LINE_HEIGHTS_PER_EVENT: f64 = 2.0;
 
 // Stops before trailing punctuation so "see https://x.y." opens https://x.y.
 const URL_PATTERN: &str = r#"\b(?:https?|file)://[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]"#;
@@ -1726,7 +1726,7 @@ mod tests {
             pump(100);
             assert!(!super::has_scrollback(&terminal));
             read_input(&mut slave);
-            scroll(-height * 4.0);
+            scroll(-height * 2.0);
             let input = read_input(&mut slave);
             assert_eq!(
                 input.matches("\x1b[<64;").count(),
@@ -1742,7 +1742,7 @@ mod tests {
             terminal.feed(b"\x1b[?1049h\x1b[?1000h\x1b[?1003h\x1b[?1006h\x1b[?1007l");
             pump(100);
             read_input(&mut slave);
-            scroll(-height * 4.0);
+            scroll(-height * 2.0);
             let input = read_input(&mut slave);
             assert_eq!(
                 input.matches("\x1b[<64;").count(),
@@ -1837,20 +1837,20 @@ mod tests {
     }
 
     #[test]
-    fn touchpad_movement_is_slowed_before_claude_accelerates_it() {
+    fn two_line_heights_of_touchpad_movement_send_one_event() {
         let pending = std::cell::Cell::new(0.0);
-        for expected in [0.0, 0.0, 0.0, 1.0] {
+        for expected in [0.0, 1.0] {
             assert_eq!(
                 super::wheel_events(&pending, 24.0, gtk::gdk::ScrollUnit::Surface, 24),
                 expected
             );
         }
         assert_eq!(
-            super::wheel_events(&pending, -384.0, gtk::gdk::ScrollUnit::Surface, 24),
+            super::wheel_events(&pending, -192.0, gtk::gdk::ScrollUnit::Surface, 24),
             -4.0
         );
         // Doubling the font height doubles the movement needed for an event.
-        for expected in [0.0, 0.0, 0.0, 1.0] {
+        for expected in [0.0, 1.0] {
             assert_eq!(
                 super::wheel_events(&pending, 48.0, gtk::gdk::ScrollUnit::Surface, 48),
                 expected
