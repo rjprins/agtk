@@ -70,6 +70,8 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         merge_status,
         reviewer_votes,
         unresolved_threads: 0,
+        resolved_threads: 0,
+        total_threads: None,
         linked_pbis: Vec::new(),
         url: format!(
             "{}/{}/_git/{}/pullrequest/{id}?_a=files",
@@ -148,8 +150,13 @@ pub(super) fn normalize_thread_summary(value: &Value) -> ThreadSummary {
             })
             .filter(|comment| comment.get("content").and_then(nonempty).is_some())
             .collect::<Vec<_>>();
-        if unresolved && !comments.is_empty() {
-            summary.unresolved_threads += 1;
+        if !comments.is_empty() {
+            summary.total_threads += 1;
+            if unresolved {
+                summary.unresolved_threads += 1;
+            } else if matches!(status.as_str(), "fixed" | "closed" | "wontfix" | "bydesign") {
+                summary.resolved_threads += 1;
+            }
         }
         for comment in comments {
             for key in ["lastUpdatedDate", "publishedDate"] {
@@ -170,6 +177,8 @@ pub(super) fn normalize_thread_summary(value: &Value) -> ThreadSummary {
 #[derive(Debug, Default)]
 pub(super) struct ThreadSummary {
     pub(super) unresolved_threads: u32,
+    pub(super) resolved_threads: u32,
+    pub(super) total_threads: u32,
     pub(super) latest_review_at: u64,
 }
 

@@ -31,6 +31,55 @@ const PR_POLL_INTERVAL: Duration = Duration::from_secs(120);
 /// Widest the PR list grows inside the dialog.
 const PR_CONTENT_WIDTH: i32 = 1400;
 
+/// Keep the header and every PR aligned, including rows with status badges.
+struct PrColumns {
+    number: gtk::SizeGroup,
+    author: gtk::SizeGroup,
+    comments: gtk::SizeGroup,
+    actions: gtk::SizeGroup,
+}
+
+impl PrColumns {
+    fn new() -> Self {
+        Self {
+            number: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
+            author: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
+            comments: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
+            actions: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
+        }
+    }
+
+    fn header(&self) -> adw::ActionRow {
+        let row = adw::ActionRow::builder().title("Pull request").build();
+        row.add_css_class("dim-label");
+        let number = gtk::Label::new(Some("PR"));
+        self.number.add_widget(&number);
+        row.add_prefix(&number);
+        row.add_suffix(&Self::label("Author", &self.author, 0.0));
+        row.add_suffix(&Self::label(
+            "Comments\nresolved/total",
+            &self.comments,
+            0.5,
+        ));
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        self.actions.add_widget(&actions);
+        row.add_suffix(&actions);
+        row
+    }
+
+    fn label(text: &str, group: &gtk::SizeGroup, xalign: f32) -> gtk::Label {
+        let label = gtk::Label::builder()
+            .label(text)
+            .xalign(xalign)
+            .valign(gtk::Align::Center)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        group.add_widget(&label);
+        label
+    }
+}
+
 /// The pull request dialog for one Azure DevOps project.
 #[derive(Clone)]
 pub(super) struct PrDialog {
@@ -900,8 +949,10 @@ impl Workspace {
             self.render_pr_message("No active pull requests");
             return;
         }
+        let columns = PrColumns::new();
+        self.prs.list.append(&columns.header());
         for item in &context.pull_requests {
-            self.prs.list.append(&self.pr_row(context, item));
+            self.prs.list.append(&self.pr_row(context, item, &columns));
         }
     }
 
@@ -924,16 +975,13 @@ impl Workspace {
         true
     }
 
-    fn pr_row(&self, context: &PrContext, item: &PrItem) -> adw::ActionRow {
+    fn pr_row(&self, context: &PrContext, item: &PrItem, columns: &PrColumns) -> adw::ActionRow {
         let pull_request = &item.pull_request;
         let row = adw::ActionRow::builder()
             .title(glib::markup_escape_text(&pull_request.title))
             .subtitle(glib::markup_escape_text(&format!(
-                "{} · {} → {} · {} unresolved",
-                pull_request.author,
-                pull_request.source_branch,
-                pull_request.target_branch,
-                pull_request.unresolved_threads
+                "{} → {}",
+                pull_request.source_branch, pull_request.target_branch
             )))
             .subtitle_lines(1)
             .build();
@@ -985,13 +1033,40 @@ impl Workspace {
         ));
         let open_number = open.clone();
         number.connect_clicked(move |_| open_number());
+        columns.number.add_widget(&number);
         row.add_prefix(&number);
 
+        let author = PrColumns::label(&pull_request.author, &columns.author, 0.0);
+        author.set_width_chars(14);
+        author.set_max_width_chars(18);
+        author.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        author.set_tooltip_text(Some(&pull_request.author));
+        row.add_suffix(&author);
+        let (count, description) = match pull_request.total_threads {
+            Some(total) => (
+                format!("{}/{total}", pull_request.resolved_threads),
+                format!(
+                    "{} of {total} comment threads resolved",
+                    pull_request.resolved_threads
+                ),
+            ),
+            None => ("—".to_owned(), "Comment counts unavailable".to_owned()),
+        };
+        let comments = PrColumns::label(&count, &columns.comments, 0.5);
+        comments.set_tooltip_text(Some(&description));
+        comments.update_property(&[gtk::accessible::Property::Label(&description)]);
+        row.add_suffix(&comments);
+
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        actions.set_hexpand(false);
+        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        actions.append(&spacer);
         if let Some(attention) = item.attention {
-            row.add_suffix(&badge(attention_name(attention), "accent"));
+            actions.append(&badge(attention_name(attention), "accent"));
         }
         if pull_request.is_draft {
-            row.add_suffix(&badge("draft", "dim-label"));
+            actions.append(&badge("draft", "dim-label"));
         }
         let view = gtk::Button::builder()
             .icon_name("adw-external-link-symbolic")
@@ -1000,7 +1075,7 @@ impl Workspace {
             .build();
         view.add_css_class("flat");
         view.connect_clicked(move |_| open());
-        row.add_suffix(&view);
+        actions.append(&view);
         let review = gtk::Button::builder()
             .label("Review")
             .valign(gtk::Align::Center)
@@ -1012,7 +1087,9 @@ impl Workspace {
         review.connect_clicked(move |_| {
             review_workspace.launch_pr_review(&review_root, &review_item, None)
         });
-        row.add_suffix(&review);
+        actions.append(&review);
+        columns.actions.add_widget(&actions);
+        row.add_suffix(&actions);
         row
     }
 

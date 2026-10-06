@@ -136,6 +136,8 @@ impl AzureClient {
                 };
                 if let Some(summary) = summary {
                     pull_request.unresolved_threads = summary.unresolved_threads;
+                    pull_request.resolved_threads = summary.resolved_threads;
+                    pull_request.total_threads = Some(summary.total_threads);
                     pull_request.latest_review_at = summary.latest_review_at;
                     pull_request.updated_at = pull_request.updated_at.max(summary.latest_review_at);
                 }

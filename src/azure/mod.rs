@@ -46,6 +46,11 @@ pub struct AzurePr {
     pub reviewer_votes: Vec<i64>,
     pub unresolved_threads: u32,
     #[serde(default)]
+    pub resolved_threads: u32,
+    /// None when thread details have not been fetched successfully.
+    #[serde(default)]
+    pub total_threads: Option<u32>,
+    #[serde(default)]
     pub linked_pbis: Vec<LinkedPbi>,
     pub url: String,
 }
@@ -138,6 +143,8 @@ mod tests {
         ]}));
 
         assert_eq!(summary.unresolved_threads, 0);
+        assert_eq!(summary.resolved_threads, 0);
+        assert_eq!(summary.total_threads, 0);
         assert_eq!(summary.latest_review_at, 0);
     }
 
@@ -158,6 +165,12 @@ mod tests {
             ]));
             let expected = u32::from(status == "active" || status == "pending");
             assert_eq!(summary.unresolved_threads, expected, "status: {status}");
+            let resolved = u32::from(matches!(
+                status.as_str(),
+                Some("fixed" | "closed" | "wontFix" | "byDesign")
+            ));
+            assert_eq!(summary.resolved_threads, resolved, "status: {status}");
+            assert_eq!(summary.total_threads, 1, "status: {status}");
         }
     }
 
@@ -176,6 +189,8 @@ mod tests {
         ]}));
 
         assert_eq!(summary.unresolved_threads, 1);
+        assert_eq!(summary.resolved_threads, 0);
+        assert_eq!(summary.total_threads, 1);
         assert_eq!(summary.latest_review_at, 1_789_466_400_000);
     }
 }
