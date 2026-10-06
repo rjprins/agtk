@@ -397,6 +397,70 @@ impl WorktreeManager {
         })
     }
 
+    /// Reuse a branch's worktree or check it out at the configured location.
+    /// Local branches and edits stay intact; remote-only branches track origin.
+    pub fn checkout_branch(&self, repo_root: &Path, branch: &str) -> WorktreeResult<PathBuf> {
+        let repo_root = canonical_repo(repo_root)?;
+        if branch.is_empty() || branch.starts_with('-') {
+            return Err("source branch is invalid".into());
+        }
+        let branch_ref = format!("refs/heads/{branch}");
+        git_text(&repo_root, ["check-ref-format", &branch_ref])?;
+        if let Some(worktree) = self
+            .linked_worktrees(&repo_root)?
+            .into_iter()
+            .find(|worktree| worktree.branch.as_deref() == Some(branch))
+        {
+            return Ok(worktree.path);
+        }
+        let path = self.layout(&repo_root)?.path_for(branch)?;
+        if path.exists() {
+            return Err(format!("worktree target already exists: {}", path.display()).into());
+        }
+        let path = with_canonical_parent(&path)?;
+        let local = git_success(&repo_root, ["show-ref", "--verify", "--quiet", &branch_ref]);
+        let remote_ref = format!("refs/remotes/origin/{branch}");
+        if !local {
+            // Fetch the exact PR branch, even with a restricted clone refspec.
+            let refspec = format!("+{branch_ref}:{remote_ref}");
+            run_slow_git(
+                &repo_root,
+                os_args(&[
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "fetch",
+                    "origin",
+                    &refspec,
+                ]),
+            )?;
+            let fetch_specs = git_text(&repo_root, ["config", "--get-all", "remote.origin.fetch"])
+                .unwrap_or_default();
+            if !fetch_specs.lines().any(|spec| {
+                let spec = spec.trim_start_matches('+');
+                spec == "refs/heads/*:refs/remotes/origin/*"
+                    || spec == refspec.trim_start_matches('+')
+            }) {
+                git_text(
+                    &repo_root,
+                    ["remote", "set-branches", "--add", "origin", branch],
+                )?;
+            }
+        }
+        // A PR can introduce a repo-relative post-checkout hook.
+        let mut args = os_args(&["-c", "core.hooksPath=/dev/null", "worktree", "add"]);
+        if !local {
+            args.extend(os_args(&["--track", "-b", branch]));
+        }
+        args.push(path.as_os_str().to_owned());
+        args.push(if local {
+            branch.into()
+        } else {
+            remote_ref.into()
+        });
+        run_slow_git(&repo_root, args)?;
+        Ok(path)
+    }
+
     /// The detached `pr-<id>` checkout at the repository's worktree location,
     /// created at the PR's current source tip. An existing checkout moves to
     /// that tip when it has no edits, so an earlier review's untracked notes survive.

@@ -285,6 +285,100 @@ fn configured_templates_place_worktrees_and_reviews_alike() {
 }
 
 #[test]
+fn pr_branch_checkout_reuses_local_work_without_resetting_it() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
+    git(fixture.root(), &["branch", "feature/Local-Work"]);
+    let path = manager
+        .checkout_branch(fixture.root(), "feature/Local-Work")
+        .unwrap();
+    assert_eq!(
+        path,
+        fixture.home().join("worktrees/demo/feature-Local-Work")
+    );
+    assert_eq!(
+        manager.branch_for_worktree(&path).unwrap().as_deref(),
+        Some("feature/Local-Work")
+    );
+    fs::write(path.join("README.md"), "local edits\n").unwrap();
+    assert_eq!(
+        manager
+            .checkout_branch(fixture.root(), "feature/Local-Work")
+            .unwrap(),
+        path
+    );
+    assert_eq!(
+        fs::read_to_string(path.join("README.md")).unwrap(),
+        "local edits\n"
+    );
+    assert_eq!(
+        manager.checkout_branch(fixture.root(), "main").unwrap(),
+        fixture.root()
+    );
+}
+
+#[test]
+fn pr_branch_checkout_fetches_a_remote_branch_and_tracks_it() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
+    let clone = fixture.root().parent().unwrap().join("clone");
+    git(
+        fixture.root(),
+        &[
+            "clone",
+            "-q",
+            fixture.root().to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    // The PR branch is created after cloning, so there is no cached remote ref.
+    git(&clone, &["remote", "set-branches", "origin", "main"]);
+    git(fixture.root(), &["checkout", "-q", "-b", "feature/remote"]);
+    fs::write(fixture.root().join("remote.txt"), "PR contents\n").unwrap();
+    git(fixture.root(), &["add", "remote.txt"]);
+    git(fixture.root(), &["commit", "-qm", "PR branch"]);
+    let path = manager.checkout_branch(&clone, "feature/remote").unwrap();
+    assert_eq!(
+        fs::read_to_string(path.join("remote.txt")).unwrap(),
+        "PR contents\n"
+    );
+    assert_eq!(
+        git(&path, &["rev-parse", "--abbrev-ref", "@{upstream}"]).trim(),
+        "origin/feature/remote"
+    );
+    assert_eq!(
+        manager.branch_for_worktree(&path).unwrap().as_deref(),
+        Some("feature/remote")
+    );
+}
+
+#[test]
+fn pr_branch_checkout_refuses_invalid_names_and_occupied_paths() {
+    let fixture = Repository::new();
+    let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
+    for branch in ["", "--detach", "@{-1}", "feature/../main"] {
+        assert!(
+            manager.checkout_branch(fixture.root(), branch).is_err(),
+            "{branch}"
+        );
+    }
+    git(fixture.root(), &["branch", "feature/taken"]);
+    let path = manager
+        .layout(fixture.root())
+        .unwrap()
+        .path_for("feature/taken")
+        .unwrap();
+    fs::create_dir_all(&path).unwrap();
+    fs::write(path.join("keep.txt"), "keep").unwrap();
+    assert!(
+        manager
+            .checkout_branch(fixture.root(), "feature/taken")
+            .is_err()
+    );
+    assert_eq!(fs::read_to_string(path.join("keep.txt")).unwrap(), "keep");
+}
+
+#[test]
 fn review_checkout_is_a_detached_pr_worktree_that_follows_the_source_tip() {
     let fixture = Repository::new();
     let manager = WorktreeManager::new(fixture.attic()).with_home(fixture.home());
@@ -365,6 +459,8 @@ fn review_checkout_runs_no_hooks_from_the_pull_request() {
             "clone",
             "-q",
             "--no-checkout",
+            "--branch",
+            "main",
             fixture.root().to_str().unwrap(),
             clone.to_str().unwrap(),
         ],
@@ -382,6 +478,14 @@ fn review_checkout_runs_no_hooks_from_the_pull_request() {
         .review_checkout(&clone, 7, "feature/hook")
         .expect("move review checkout");
     assert!(!marker.exists(), "post-checkout hook ran on checkout");
+
+    manager
+        .checkout_branch(&clone, "feature/hook")
+        .expect("create regular PR branch checkout");
+    assert!(
+        !marker.exists(),
+        "post-checkout hook ran on PR branch checkout"
+    );
 }
 
 #[test]
