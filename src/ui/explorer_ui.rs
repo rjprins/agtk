@@ -656,15 +656,18 @@ impl Workspace {
             return;
         }
         let root = snapshot.context.root.clone();
-        let generation = {
+        let (generation, root_changed) = {
             let mut state = explorer.state.borrow_mut();
             state.request_generation = state.request_generation.wrapping_add(1);
-            if state.worktree_root.as_ref() != Some(&root) {
-                drop(state);
-                explorer.set_loading();
-            }
-            explorer.state.borrow().request_generation
+            (
+                state.request_generation,
+                state.worktree_root.as_ref() != Some(&root),
+            )
         };
+        // GTK updates can borrow explorer state too, so release it on both paths.
+        if root_changed {
+            explorer.set_loading();
+        }
         let listed_root = root.clone();
         let result = self.changes_io.submit(move || {
             crate::changes::list_worktree_files(&listed_root).map(crate::explorer::build_tree)

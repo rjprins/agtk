@@ -3119,6 +3119,74 @@ fn sessions_that_lost_their_host_are_offered_for_resume_at_startup() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn files_page_refreshes_the_same_worktree_and_can_be_reopened() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
+    let app = App::new();
+    let project = app.directory.path().join("refresh-project");
+    std::fs::create_dir(&project).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .arg(&project)
+            .status()
+            .unwrap()
+            .success()
+    );
+    std::fs::write(project.join("before.txt"), "before\n").unwrap();
+    app.request("session.create", json!({"kind":"shell","cwd":project}));
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"files"}))["shown"],
+        true
+    );
+
+    let wait_for_count = |expected: &str| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            let inspection = app.request("ui.inspect", json!({}));
+            if find(&inspection["root"], "files-page")
+                .and_then(|page| page["label"].as_str())
+                .is_some_and(|label| label.contains(expected))
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        panic!("Files page did not refresh to {expected}");
+    };
+    wait_for_count("1 file");
+
+    // Reopening Files refreshes synchronously inside a GTK notification callback.
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"changes"}))["shown"],
+        true
+    );
+    assert_eq!(
+        app.request("ui.show", json!({"surface":"files"}))["shown"],
+        true
+    );
+    wait_for_count("1 file");
+
+    // Refresh explicitly: the private compositor may leave the window inactive,
+    // which pauses the periodic background refresh.
+    std::fs::write(project.join("after.txt"), "after\n").unwrap();
+    app.request("ui.show", json!({"surface":"files"}));
+    wait_for_count("2 files");
+    std::fs::remove_file(project.join("before.txt")).unwrap();
+    app.request("ui.show", json!({"surface":"files"}));
+    wait_for_count("1 file");
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn files_page_lists_the_worktree_and_opens_files_read_only() {
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
         if node["id"] == id {
