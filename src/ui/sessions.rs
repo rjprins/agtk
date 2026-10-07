@@ -894,30 +894,22 @@ impl Workspace {
     }
 
     /// Opens a path printed in the terminal in the file viewer, resolved against
-    /// where that terminal runs.
+    /// the session's associated worktree before its terminal directories.
     fn open_terminal_file(&self, terminal: &vte::Terminal, text: &str) {
         let Some(link) = crate::file_links::parse_link(text) else {
             return;
         };
         let session_id = self.session_id_for_terminal(terminal);
-        // The shell's live directory (OSC 7) first, then where the session started.
-        let mut bases = terminal
+        let current_directory = terminal
             .current_directory_uri()
-            .and_then(|uri| gio::File::for_uri(&uri).path())
-            .into_iter()
-            .collect::<Vec<_>>();
-        bases.extend(
+            .and_then(|uri| gio::File::for_uri(&uri).path());
+        let mut bases = terminal_file_bases(
+            current_directory,
             self.sessions
                 .borrow()
                 .values()
                 .find(|session| &session.terminal == terminal)
-                .and_then(|session| {
-                    session
-                        .record
-                        .cwd
-                        .clone()
-                        .or_else(|| session.record.worktree_path.clone())
-                }),
+                .map(|session| &session.record),
         );
         let home = glib::home_dir();
         self.run_slow(
@@ -1309,6 +1301,28 @@ pub(super) fn show_worktree_caption(label: &gtk::Label, record: &SessionRecord) 
 
 fn is_web_link(uri: &str) -> bool {
     glib::Uri::peek_scheme(uri).is_some_and(|scheme| scheme == "http" || scheme == "https")
+}
+
+fn terminal_file_bases(
+    current_directory: Option<PathBuf>,
+    record: Option<&SessionRecord>,
+) -> Vec<PathBuf> {
+    // Re-associating a session changes its worktree without changing the running
+    // program's directory, so that worktree must take precedence over OSC 7/cwd.
+    let mut bases = Vec::new();
+    for base in [
+        record.and_then(|record| record.worktree_path.clone()),
+        current_directory,
+        record.and_then(|record| record.cwd.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !bases.contains(&base) {
+            bases.push(base);
+        }
+    }
+    bases
 }
 
 /// The hyperlink or matched link text under a point, with the tag of the pattern that matched.
@@ -1929,6 +1943,67 @@ mod tests {
     use gtk::prelude::*;
     use std::fs;
     use std::process::Command;
+
+    #[test]
+    fn terminal_file_links_follow_the_associated_worktree() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        let worktree = fixture.path().join("worktree");
+        for directory in [&project, &worktree] {
+            fs::create_dir_all(directory.join("src")).unwrap();
+            fs::write(directory.join("src/main.rs"), "").unwrap();
+        }
+        fs::write(worktree.join("worktree-only.rs"), "").unwrap();
+        let mut record = SessionRecord::discovered("session", fixture.path().join("a.sock"));
+        record.project_root = Some(project.clone());
+        record.cwd = Some(project.clone());
+        record.worktree_path = Some(worktree.clone());
+
+        // Changing the associated worktree leaves both the launch directory and
+        // the terminal's OSC 7 directory pointing at the original checkout.
+        for current_directory in [Some(project.clone()), None] {
+            let bases = super::terminal_file_bases(current_directory, Some(&record));
+            for path in ["src/main.rs", "worktree-only.rs"] {
+                assert_eq!(
+                    crate::file_links::resolve(path, &bases, fixture.path()),
+                    Some(worktree.join(path)),
+                );
+            }
+            let absolute = project.join("src/main.rs");
+            assert_eq!(
+                crate::file_links::resolve(absolute.to_str().unwrap(), &bases, fixture.path()),
+                Some(absolute),
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_file_links_fall_back_to_current_and_launch_directories() {
+        let fixture = tempfile::tempdir().unwrap();
+        let launch = fixture.path().join("launch");
+        let current = fixture.path().join("current");
+        let worktree = fixture.path().join("worktree");
+        for directory in [&launch, &current, &worktree] {
+            fs::create_dir(directory).unwrap();
+        }
+        fs::write(launch.join("local.rs"), "").unwrap();
+        fs::write(current.join("local.rs"), "").unwrap();
+        fs::write(launch.join("launch.rs"), "").unwrap();
+        let mut record = SessionRecord::discovered("session", fixture.path().join("a.sock"));
+        record.cwd = Some(launch.clone());
+        for associated_worktree in [None, Some(worktree)] {
+            record.worktree_path = associated_worktree;
+            let bases = super::terminal_file_bases(Some(current.clone()), Some(&record));
+            assert_eq!(
+                crate::file_links::resolve("local.rs", &bases, fixture.path()),
+                Some(current.join("local.rs")),
+            );
+            assert_eq!(
+                crate::file_links::resolve("launch.rs", &bases, fixture.path()),
+                Some(launch.join("launch.rs")),
+            );
+        }
+    }
 
     #[test]
     #[ignore = "requires a private display"]

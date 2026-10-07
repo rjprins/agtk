@@ -72,10 +72,10 @@ pub fn resolve(raw: &str, bases: &[PathBuf], home: &Path) -> Option<PathBuf> {
     if let Some(stripped) = raw.strip_prefix("a/").or_else(|| raw.strip_prefix("b/")) {
         variants.push(PathBuf::from(stripped));
     }
-    variants.iter().find_map(|variant| {
-        bases
+    bases.iter().find_map(|base| {
+        variants
             .iter()
-            .map(|base| base.join(variant))
+            .map(|variant| base.join(variant))
             .find(|candidate| candidate.is_file())
     })
 }
@@ -233,6 +233,27 @@ mod tests {
             resolve(&root.to_string_lossy(), &bases, home),
             None::<PathBuf>
         );
+    }
+
+    #[test]
+    fn diff_prefixes_respect_base_directory_priority() {
+        let fixture = tempfile::tempdir().unwrap();
+        let worktree = fixture.path().join("worktree");
+        let project = fixture.path().join("project");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(worktree.join("main.rs"), "").unwrap();
+        for prefix in ["a", "b"] {
+            std::fs::create_dir_all(project.join(prefix)).unwrap();
+            std::fs::write(project.join(prefix).join("main.rs"), "").unwrap();
+            assert_eq!(
+                resolve(
+                    &format!("{prefix}/main.rs"),
+                    &[worktree.clone(), project.clone()],
+                    fixture.path(),
+                ),
+                Some(worktree.join("main.rs")),
+            );
+        }
     }
 
     #[test]
