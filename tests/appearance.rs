@@ -57,6 +57,10 @@ fn appearance_preferences_have_safe_stable_defaults() {
     assert!(preferences.follow_system);
     assert_eq!(preferences.font, "Monospace 11");
     assert_eq!(preferences.ui_font_size, 13);
+    assert_eq!(
+        serde_json::to_value(&preferences).unwrap()["viewerFontSize"],
+        11
+    );
     let json = serde_json::to_value(&preferences).unwrap();
     assert_eq!(
         serde_json::from_value::<AppearancePreferences>(json).unwrap(),
@@ -65,7 +69,7 @@ fn appearance_preferences_have_safe_stable_defaults() {
 }
 
 #[test]
-fn older_appearance_preferences_receive_the_default_ui_font_size() {
+fn older_appearance_preferences_receive_default_ui_and_viewer_sizes() {
     let preferences: AppearancePreferences = serde_json::from_value(serde_json::json!({
         "theme": "neutral",
         "followSystem": false,
@@ -73,4 +77,8 @@ fn older_appearance_preferences_receive_the_default_ui_font_size() {
     }))
     .expect("deserialize legacy appearance preferences");
     assert_eq!(preferences.ui_font_size, 13);
+    assert_eq!(
+        serde_json::to_value(&preferences).unwrap()["viewerFontSize"],
+        11
+    );
 }

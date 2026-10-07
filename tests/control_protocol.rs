@@ -472,6 +472,7 @@ fn appearance_updates_decode_to_a_typed_additive_command() {
             follow_system: Some(true),
             font: Some("Iosevka 12".to_owned()),
             ui_font_size: Some(15),
+            viewer_font_size: None,
         })
     );
 
@@ -481,6 +482,10 @@ fn appearance_updates_decode_to_a_typed_additive_command() {
             .as_slice(),
         br#"{"version":1,"id":"theme","method":"appearance.set","params":{"font":""}}"#.as_slice(),
         br#"{"version":1,"id":"theme","method":"appearance.set","params":{"uiFontSize":25}}"#
+            .as_slice(),
+        br#"{"version":1,"id":"theme","method":"appearance.set","params":{"viewerFontSize":7}}"#
+            .as_slice(),
+        br#"{"version":1,"id":"theme","method":"appearance.set","params":{"viewerFontSize":49}}"#
             .as_slice(),
     ] {
         assert_eq!(

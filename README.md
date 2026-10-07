@@ -106,6 +106,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 - Selected text is copied to the clipboard.
 - Click a file path such as `src/main.rs:42:7` to open it in the file viewer at that line. Click a URL to open it in the browser.
 - `Ctrl++` and `Ctrl+-` scale the font of the whole window.
+- `Ctrl+Scroll` up or down increases or decreases text size under the pointer: the UI, terminals, or file/diff viewer. Each surface has its own saved size; terminal size applies to all sessions, and viewer size applies to all file and diff tabs.
 
 ### Changes and files
 

@@ -972,7 +972,7 @@ impl Workspace {
         *self.code_viewer.borrow_mut() = Some(Rc::new(viewer));
     }
 
-    /// The viewer follows the terminal theme and font.
+    /// The viewer shares the terminal theme and font family, with its own size.
     pub(super) fn viewer_appearance(&self) -> (&'static str, String, u32) {
         let appearance = self.appearance.borrow().clone();
         let description = FontDescription::from_string(&appearance.font);
@@ -980,9 +980,7 @@ impl Workspace {
             .family()
             .map(|family| family.to_string())
             .unwrap_or_else(|| "monospace".to_owned());
-        let font_size = (description.size() as f64 / gtk::pango::SCALE as f64)
-            .round()
-            .clamp(8.0, 48.0) as u32;
+        let font_size = u32::from(appearance.viewer_font_size);
         let theme = if matches!(
             self.effective_terminal_theme(),
             ThemeKey::NeutralLight | ThemeKey::SolarizedLight | ThemeKey::Light

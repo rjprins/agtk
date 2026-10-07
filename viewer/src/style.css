@@ -14,6 +14,8 @@ body,
 }
 
 body {
+  --code-font-family: monospace;
+  --code-font-size: 11px;
   color: #242424;
   background: #ffffff;
   font: 13px system-ui, sans-serif;
@@ -72,8 +74,6 @@ body {
   min-height: 0;
   overflow: auto;
   outline: none;
-  --code-font-family: monospace;
-  --code-font-size: 13px;
   --muted: #59636e;
   --border: #d1d9e0;
   --surface: #f6f8fa;
@@ -84,7 +84,7 @@ body {
   max-width: 880px;
   margin: 0 auto;
   padding: 24px 32px 48px;
-  font-size: 15px;
+  font-size: calc(var(--code-font-size) + 4px);
   line-height: 1.6;
   overflow-wrap: break-word;
 }

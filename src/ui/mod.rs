@@ -935,6 +935,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     workspace.bind_sidebar_model();
     workspace.install_menu_actions();
     workspace.install_shortcut_actions();
+    workspace.install_font_scroll();
     workspace.discover_sessions();
 
     window.present();

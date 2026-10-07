@@ -359,12 +359,15 @@ fn appearance_set_command_has_a_typed_protocol_mapping() {
             "Iosevka 12",
             "--ui-font-size",
             "15",
+            "--viewer-font-size",
+            "16",
         ],
         ControlCommand::AppearanceSet(AppearanceSetParams {
             theme: Some(ThemeKey::SolarizedDark),
             follow_system: Some(true),
             font: Some("Iosevka 12".to_owned()),
             ui_font_size: Some(15),
+            viewer_font_size: Some(16),
         }),
     );
 }

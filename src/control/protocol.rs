@@ -146,6 +146,7 @@ pub struct AppearanceSetParams {
     pub follow_system: Option<bool>,
     pub font: Option<String>,
     pub ui_font_size: Option<u8>,
+    pub viewer_font_size: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -917,6 +918,7 @@ fn validate_appearance(params: &AppearanceSetParams) -> Result<(), ControlError>
         && params.follow_system.is_none()
         && params.font.is_none()
         && params.ui_font_size.is_none()
+        && params.viewer_font_size.is_none()
     {
         return Err(invalid_params(
             "at least one appearance setting is required",
@@ -935,6 +937,12 @@ fn validate_appearance(params: &AppearanceSetParams) -> Result<(), ControlError>
             .contains(&size)
     {
         return Err(invalid_params("ui font size must be between 9 and 24"));
+    }
+    if let Some(size) = params.viewer_font_size
+        && !(crate::appearance::MIN_VIEWER_FONT_SIZE..=crate::appearance::MAX_VIEWER_FONT_SIZE)
+            .contains(&size)
+    {
+        return Err(invalid_params("viewer font size must be between 8 and 48"));
     }
     Ok(())
 }

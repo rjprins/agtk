@@ -1,7 +1,16 @@
 use super::*;
 use crate::appearance::{
-    MAX_UI_FONT_SIZE, MIN_UI_FONT_SIZE, clamp_ui_font_size, resolve_system_theme, theme,
+    MAX_UI_FONT_SIZE, MAX_VIEWER_FONT_SIZE, MIN_UI_FONT_SIZE, MIN_VIEWER_FONT_SIZE,
+    clamp_ui_font_size, resolve_system_theme, theme,
 };
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FontSurface {
+    Ui,
+    Terminal,
+    Viewer,
+    All,
+}
 
 impl Workspace {
     pub(super) fn load_appearance(&self, preferences: AppearancePreferences) {
@@ -47,6 +56,18 @@ impl Workspace {
             return;
         }
 
+        if update
+            .viewer_font_size
+            .is_some_and(|size| !(MIN_VIEWER_FONT_SIZE..=MAX_VIEWER_FONT_SIZE).contains(&size))
+        {
+            self.report_failure(
+                pending,
+                ErrorCode::InvalidParams,
+                "Viewer font size is invalid",
+                "use a viewer font size between 8 and 48".to_owned(),
+            );
+            return;
+        }
         let mut preferences = self.appearance.borrow().clone();
         if let Some(theme) = update.theme {
             preferences.theme = theme;
@@ -60,6 +81,9 @@ impl Workspace {
         if let Some(ui_font_size) = update.ui_font_size {
             preferences.ui_font_size = clamp_ui_font_size(ui_font_size);
         }
+        if let Some(size) = update.viewer_font_size {
+            preferences.viewer_font_size = size;
+        }
         let value = match serde_json::to_value(&preferences) {
             Ok(value) => value,
             Err(error) => {
@@ -71,11 +95,14 @@ impl Workspace {
                 return;
             }
         };
+        // Scroll gestures can deliver several steps before the first write finishes.
+        // Apply now so every step builds on the latest sizes, and never replay an
+        // older snapshot from a save callback. The IO worker keeps writes ordered.
+        self.load_appearance(preferences);
         self.run_io(
             move || store.set_preference("appearance", &value),
             move |workspace, result| match result {
                 Ok(()) => {
-                    workspace.load_appearance(preferences);
                     if let Some(pending) = pending {
                         let id = pending.request.id.clone();
                         match serde_json::to_value(workspace.appearance_summary()) {
@@ -108,6 +135,7 @@ impl Workspace {
             follow_system: preferences.follow_system,
             font: preferences.font.clone(),
             ui_font_size: preferences.ui_font_size,
+            viewer_font_size: preferences.viewer_font_size,
             available_themes: ThemeKey::ALL.to_vec(),
         }
     }
@@ -126,6 +154,10 @@ impl Workspace {
         for terminal in terminals {
             apply_terminal_appearance(&terminal, effective, &preferences.font);
         }
+        if let Some(viewer) = self.code_viewer.borrow().as_ref() {
+            let (theme, font_family, font_size) = self.viewer_appearance();
+            viewer.set_appearance(theme, &font_family, font_size);
+        }
     }
 
     pub(super) fn apply_current_terminal_appearance(&self, terminal: &vte::Terminal) {
@@ -134,23 +166,121 @@ impl Workspace {
     }
 
     pub(super) fn adjust_font_size(&self, delta: i8) {
+        self.adjust_surface_font_size(FontSurface::All, delta);
+    }
+
+    fn adjust_surface_font_size(&self, surface: FontSurface, delta: i8) {
         let preferences = self.appearance.borrow().clone();
         let current = i16::from(preferences.ui_font_size);
         let next = (current + i16::from(delta))
             .clamp(i16::from(MIN_UI_FONT_SIZE), i16::from(MAX_UI_FONT_SIZE))
             as u8;
-        if next == preferences.ui_font_size {
+        let font = matches!(surface, FontSurface::Terminal | FontSurface::All)
+            .then(|| adjust_terminal_font_size(&preferences.font, delta))
+            .filter(|font| *font != preferences.font);
+        let ui_font_size = (matches!(surface, FontSurface::Ui | FontSurface::All)
+            && next != preferences.ui_font_size)
+            .then_some(next);
+        let next_viewer = (i16::from(preferences.viewer_font_size) + i16::from(delta)).clamp(
+            i16::from(MIN_VIEWER_FONT_SIZE),
+            i16::from(MAX_VIEWER_FONT_SIZE),
+        ) as u8;
+        let viewer_font_size = (matches!(surface, FontSurface::Viewer | FontSurface::All)
+            && next_viewer != preferences.viewer_font_size)
+            .then_some(next_viewer);
+        if font.is_none() && ui_font_size.is_none() && viewer_font_size.is_none() {
             return;
         }
         self.set_appearance(
             AppearanceSetParams {
-                theme: None,
-                follow_system: None,
-                font: Some(adjust_terminal_font_size(&preferences.font, delta)),
-                ui_font_size: Some(next),
+                font,
+                ui_font_size,
+                viewer_font_size,
+                ..Default::default()
             },
             None,
         );
+    }
+
+    pub(super) fn install_font_scroll(&self) {
+        for window in self.application.windows() {
+            self.install_window_font_scroll(&window);
+        }
+        let workspace = self.clone();
+        self.application.connect_window_added(move |_, window| {
+            workspace.install_window_font_scroll(window);
+        });
+    }
+
+    fn install_window_font_scroll(&self, window: &gtk::Window) {
+        // Wayland scroll events carry no position. Track motion in window
+        // coordinates, then pick the current widget (independent of focus).
+        let position = Rc::new(Cell::new(None));
+        let motion = gtk::EventControllerMotion::new();
+        motion.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pointer = position.clone();
+        motion.connect_enter(move |_, x, y| pointer.set(Some((x, y))));
+        let pointer = position.clone();
+        motion.connect_motion(move |_, x, y| pointer.set(Some((x, y))));
+        let pointer = position.clone();
+        motion.connect_leave(move |_| pointer.set(None));
+        window.add_controller(motion);
+
+        // GtkEventControllerScroll propagates stop frames even when its signal
+        // handler returns Stop. Those frames can contain the final touchpad
+        // deltas, so handle raw events to keep them away from VTE and WebKit.
+        let scroll = gtk::EventControllerLegacy::new();
+        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pending = Cell::new(0.0_f64);
+        let previous_surface = Cell::new(FontSurface::Ui);
+        let workspace = self.clone();
+        scroll.connect_event(move |controller, event| {
+            if !controller
+                .current_event_state()
+                .contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
+                pending.set(0.0);
+                return glib::Propagation::Proceed;
+            }
+            let Some(event) = event.downcast_ref::<gtk::gdk::ScrollEvent>() else {
+                return glib::Propagation::Proceed;
+            };
+            let (_, dy) = event.deltas();
+            let Some(widget) = controller.widget().and_then(|window| {
+                let (x, y) = position.get()?;
+                window.pick(x, y, gtk::PickFlags::DEFAULT)
+            }) else {
+                return glib::Propagation::Proceed;
+            };
+            let surface = if widget.ancestor(vte::Terminal::static_type()).is_some() {
+                FontSurface::Terminal
+            } else if widget.ancestor(webkit6::WebView::static_type()).is_some() {
+                FontSurface::Viewer
+            } else {
+                FontSurface::Ui
+            };
+            if previous_surface.replace(surface) != surface || pending.get() * dy < 0.0 {
+                pending.set(0.0);
+            }
+            // Accumulate touchpad pixels and high-resolution wheel fractions;
+            // consume even partial steps so Ctrl+Scroll never reaches the PTY.
+            let step = if event.unit() == gtk::gdk::ScrollUnit::Surface {
+                50.0
+            } else {
+                1.0
+            };
+            let accumulated = pending.get() + dy / step;
+            let steps = accumulated.trunc() as i8;
+            pending.set(accumulated.fract());
+            if steps != 0 {
+                workspace.adjust_surface_font_size(surface, steps.saturating_neg());
+            }
+            if event.is_stop() {
+                pending.set(0.0);
+            }
+            glib::Propagation::Stop
+        });
+        window.add_controller(scroll);
     }
 
     pub(super) fn effective_terminal_theme(&self) -> ThemeKey {

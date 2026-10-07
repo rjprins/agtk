@@ -32,6 +32,7 @@ done
 [[ -S "$AGTK_TEST_DISPLAY" ]] || { cat "$log" >&2; exit 1; }
 
 cd "$repo"
+cargo test --locked --test native_ui ctrl_scroll -- --ignored --test-threads=1
 cargo test --locked --lib real_touchpad_input -- --ignored --test-threads=1
 cargo test --locked --lib fullscreen_wheel_input -- --ignored --test-threads=1
 cargo test --locked --test history_scroll -- --ignored --test-threads=1

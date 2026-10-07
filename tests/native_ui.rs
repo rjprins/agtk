@@ -841,6 +841,297 @@ fn terminal_appearance_updates_live_and_survives_ui_restart() {
 }
 
 #[test]
+#[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
+fn ctrl_scroll_resizes_each_surface_independently() {
+    use glib::variant::ToVariant;
+
+    let display = std::env::var("AGTK_TEST_DISPLAY").unwrap();
+    assert!(display.contains("agtk-scroll-"));
+    assert_eq!(
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap(),
+        std::env::var("AGTK_TEST_BUS").unwrap()
+    );
+    let mut app = App::new();
+    let project = app.directory.path().join("viewer-project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(project.join("sample.rs"), "fn before() {}\n").unwrap();
+    for args in [
+        vec!["init", "-q"],
+        vec!["add", "sample.rs"],
+        vec![
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    ] {
+        assert!(
+            Command::new("git")
+                .current_dir(&project)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(project.join("sample.rs"), "fn after() {}\n").unwrap();
+    std::fs::write(
+        project.join("notes.md"),
+        "# Font resizing\n\nPreview text follows the viewer size.\n\n```rust\nfn after() {}\n```\n",
+    )
+    .unwrap();
+    let input_path = app.directory.path().join("wheel-input");
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom", "command":"/bin/sh", "cwd":project,
+            "args":["-c", "stty raw -echo; printf '\\033[?1000h\\033[?1006h__FONT_SCROLL__\\r\\n'; cat > \"$1\"", "font-scroll", input_path]
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    app.wait_text(id, "__FONT_SCROLL__");
+    let bus = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>).unwrap();
+    let destination = "org.gnome.Mutter.RemoteDesktop";
+    let remote = bus
+        .call_sync(
+            Some(destination),
+            "/org/gnome/Mutter/RemoteDesktop",
+            destination,
+            "CreateSession",
+            None,
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    let path = remote.child_value(0).str().unwrap().to_owned();
+    let call = |method: &str, parameters: Option<glib::Variant>| {
+        bus.call_sync(
+            Some(destination),
+            &path,
+            "org.gnome.Mutter.RemoteDesktop.Session",
+            method,
+            parameters.as_ref(),
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    };
+    call("Start", None);
+    let key = |code: u32, state: bool| {
+        call("NotifyKeyboardKeycode", Some((code, state).to_variant()));
+    };
+    let wheel = |steps: i32| {
+        call(
+            "NotifyPointerAxisDiscrete",
+            Some((0_u32, steps).to_variant()),
+        );
+    };
+    let move_to = |x: f64, y: f64| {
+        call(
+            "NotifyPointerMotionRelative",
+            Some((-10000.0_f64, -10000.0_f64).to_variant()),
+        );
+        call("NotifyPointerMotionRelative", Some((x, y).to_variant()));
+        thread::sleep(Duration::from_millis(100));
+    };
+    let assert_sizes = |ui: u8, font: &str, viewer: u8| {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let appearance = app.request("app.get_state", json!({}))["appearance"].clone();
+            if appearance["uiFontSize"] == ui
+                && appearance["font"] == font
+                && appearance["viewerFontSize"] == viewer
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "expected UI {ui}, terminal {font}, viewer {viewer}: {appearance}"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
+    };
+    thread::sleep(Duration::from_millis(300));
+    // Super+Up maximizes the disposable window so coordinates start at (0, 0).
+    key(125, true);
+    key(103, true);
+    key(103, false);
+    key(125, false);
+    thread::sleep(Duration::from_millis(300));
+    let input_before_zoom = std::fs::read_to_string(&input_path).unwrap();
+
+    // The terminal keeps keyboard focus while the pointer is over the sidebar.
+    move_to(120.0, 250.0);
+    key(29, true);
+    wheel(-1);
+    assert_sizes(14, "Monospace 11", 11);
+    wheel(1);
+    assert_sizes(13, "Monospace 11", 11);
+
+    move_to(700.0, 350.0);
+    for _ in 0..3 {
+        wheel(-1);
+    }
+    assert_sizes(13, "Monospace 14", 11);
+    wheel(1);
+    assert_sizes(13, "Monospace 13", 11);
+    // Smooth touchpad deltas accumulate, including sub-step motion.
+    for _ in 0..5 {
+        call(
+            "NotifyPointerAxis",
+            Some((0.0_f64, -10.0_f64, 4_u32).to_variant()),
+        );
+    }
+    call(
+        "NotifyPointerAxis",
+        Some((0.0_f64, 0.0_f64, 5_u32).to_variant()),
+    );
+    assert_sizes(13, "Monospace 14", 11);
+    assert_eq!(
+        std::fs::read_to_string(&input_path).unwrap(),
+        input_before_zoom,
+        "zoom must not send terminal input"
+    );
+    key(29, false);
+    wheel(-1);
+    thread::sleep(Duration::from_millis(100));
+    assert_sizes(13, "Monospace 14", 11);
+    let input = std::fs::read_to_string(&input_path).unwrap();
+    assert!(
+        input.contains("\x1b[<64;"),
+        "ordinary scrolling must still reach the terminal: {input:?}"
+    );
+
+    // Limits apply independently: UI at its maximum must not block terminal zoom.
+    app.request(
+        "appearance.set",
+        json!({"uiFontSize":24, "font":"Monospace 31"}),
+    );
+    key(29, true);
+    wheel(-1);
+    assert_sizes(24, "Monospace 32", 11);
+    wheel(-1);
+    move_to(120.0, 250.0);
+    wheel(-1);
+    thread::sleep(Duration::from_millis(100));
+    assert_sizes(24, "Monospace 32", 11);
+    app.request(
+        "appearance.set",
+        json!({"uiFontSize":9, "font":"Monospace 6"}),
+    );
+    wheel(1);
+    move_to(700.0, 350.0);
+    wheel(1);
+    thread::sleep(Duration::from_millis(100));
+    assert_sizes(9, "Monospace 6", 11);
+    key(29, false);
+    app.request(
+        "appearance.set",
+        json!({"uiFontSize":13, "font":"Monospace 14"}),
+    );
+    app.activate_action("increase-font-size");
+    assert_sizes(14, "Monospace 15", 12);
+    let wait_for_viewer = || {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let inspection = app.request("ui.inspect", json!({}));
+            if inspection.to_string().contains("rendered:") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "viewer did not render: {inspection}"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
+    };
+    app.request("ui.open_file", json!({"sessionId":id,"path":"sample.rs"}));
+    wait_for_viewer();
+    move_to(700.0, 350.0);
+    let before = app.request("ui.capture", json!({}));
+    key(29, true);
+    wheel(-1);
+    assert_sizes(14, "Monospace 15", 13);
+    key(29, false);
+    let after = app.request("ui.capture", json!({}));
+    assert_ne!(before["sha256"], after["sha256"], "viewer must resize live");
+    if let Ok(target) = std::env::var("AGTK_TEST_CAPTURE_DIR") {
+        for (name, capture) in [("font-before.png", &before), ("font-after.png", &after)] {
+            std::fs::copy(
+                capture["path"].as_str().unwrap(),
+                std::path::Path::new(&target).join(name),
+            )
+            .unwrap();
+        }
+    }
+
+    app.request(
+        "ui.open_diff",
+        json!({"sessionId":id,"path":"sample.rs","scope":"unstaged"}),
+    );
+    wait_for_viewer();
+    move_to(700.0, 350.0);
+    key(29, true);
+    wheel(-1);
+    assert_sizes(14, "Monospace 15", 14);
+    wheel(-100);
+    assert_sizes(14, "Monospace 15", 48);
+    wheel(100);
+    assert_sizes(14, "Monospace 15", 8);
+    wheel(-6);
+    assert_sizes(14, "Monospace 15", 14);
+    key(29, false);
+
+    app.request("ui.open_file", json!({"sessionId":id,"path":"notes.md"}));
+    wait_for_viewer();
+    move_to(700.0, 350.0);
+    let before = app.request("ui.capture", json!({}));
+    key(29, true);
+    wheel(-3);
+    assert_sizes(14, "Monospace 15", 17);
+    key(29, false);
+    let after = app.request("ui.capture", json!({}));
+    assert_ne!(
+        before["sha256"], after["sha256"],
+        "Markdown preview must resize live"
+    );
+    if let Ok(target) = std::env::var("AGTK_TEST_CAPTURE_DIR") {
+        for (name, capture) in [
+            ("markdown-before.png", &before),
+            ("markdown-after.png", &after),
+        ] {
+            std::fs::copy(
+                capture["path"].as_str().unwrap(),
+                std::path::Path::new(&target).join(name),
+            )
+            .unwrap();
+        }
+    }
+    call("Stop", None);
+
+    let store = Store::open(&app.paths.database()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while store.preference("appearance").unwrap().unwrap()["viewerFontSize"] != 17 {
+        assert!(Instant::now() < deadline, "font size was not saved");
+        thread::sleep(Duration::from_millis(30));
+    }
+    app.stop();
+    app.start();
+    let appearance = app.request("app.get_state", json!({}))["appearance"].clone();
+    assert_eq!(appearance["uiFontSize"], 14);
+    assert_eq!(appearance["font"], "Monospace 15");
+    assert_eq!(appearance["viewerFontSize"], 17);
+    app.request("session.close", json!({"sessionId":id}));
+}
+
+#[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn emacs_actions_use_the_selected_sessions_repository_context() {
     let app = App::new();
