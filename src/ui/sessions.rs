@@ -187,6 +187,10 @@ impl Workspace {
                         serde_json::from_value::<HashMap<String, crate::azure::AzurePr>>(value).ok()
                     })
                     .unwrap_or_default();
+                let mut pr_activity = store
+                    .preference_or_default::<crate::azure::PrActivityTracker>("prAgentActivity")?;
+                let mut session_input_pending =
+                    store.preference_or_default::<HashSet<String>>("sessionInputPending")?;
                 let claude_presets = store
                     .preference("claudeModelPresets")?
                     .map(crate::claude_presets::ClaudePresetPreferences::from_value_lossy)
@@ -212,6 +216,9 @@ impl Workspace {
                     .unwrap_or(1);
                 let mut records = store.sessions()?;
                 session_pr_cache.retain(|id, _| records.iter().any(|record| &record.id == id));
+                pr_activity
+                    .retain_sessions(&records.iter().map(|record| record.id.clone()).collect());
+                session_input_pending.retain(|id| records.iter().any(|record| &record.id == id));
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
                     && let Some(legacy) = paths.runtime_dir().parent()
@@ -275,6 +282,8 @@ impl Workspace {
                     quick_launch,
                     pr_preferences,
                     session_pr_cache,
+                    pr_activity,
+                    session_input_pending,
                     claude_presets,
                     changes_sidebar_open,
                     changes_sidebar_page,
@@ -298,6 +307,8 @@ impl Workspace {
                     quick_launch,
                     pr_preferences,
                     session_pr_cache,
+                    pr_activity,
+                    session_input_pending,
                     claude_presets,
                     changes_sidebar_open,
                     changes_sidebar_page,
@@ -323,6 +334,8 @@ impl Workspace {
                     workspace.load_quick_launch(quick_launch);
                     *workspace.pr_preferences.borrow_mut() = pr_preferences;
                     *workspace.session_pr_cache.borrow_mut() = session_pr_cache;
+                    *workspace.pr_activity.borrow_mut() = pr_activity;
+                    *workspace.session_input_pending.borrow_mut() = session_input_pending;
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
                     workspace.changes.state.borrow_mut().base_ref_by_context = changes_base_refs;
@@ -1099,12 +1112,17 @@ impl Workspace {
             }
         });
 
-        let input_tracker = Rc::new(RefCell::new(InputTracker::default()));
+        let input_tracker = Rc::new(RefCell::new(InputTracker::with_pending_input(
+            self.session_input_pending.borrow().contains(&id),
+        )));
         let tracker = input_tracker.clone();
         let history_workspace = self.clone();
         let history_id = id.clone();
         terminal.connect_commit(move |_, text, _| {
-            if let Some(input) = tracker.borrow_mut().push(text) {
+            let submitted = tracker.borrow_mut().push(text);
+            history_workspace
+                .remember_pending_input(&history_id, tracker.borrow().has_pending_input());
+            if let Some(input) = submitted {
                 history_workspace.record_typed_input(&history_id, input);
             }
         });
@@ -1262,6 +1280,7 @@ impl Workspace {
                 pr_attention_dot,
                 history: Vec::new(),
                 typed_history_pending: 0,
+                input_tracker,
                 prompt_log: prompt_log_ui::PromptLogFollower::default(),
                 hook_signal: None,
                 tracker: ScreenTracker::new(Instant::now()),

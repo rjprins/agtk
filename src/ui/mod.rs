@@ -196,6 +196,9 @@ struct Workspace {
     pr_preferences: Rc<RefCell<PrPreferences>>,
     pr_context_cache: Rc<RefCell<HashMap<String, PrContext>>>,
     session_pr_cache: Rc<RefCell<HashMap<String, AzurePr>>>,
+    pr_activity: Rc<RefCell<crate::azure::PrActivityTracker>>,
+    pr_activity_snapshots: Rc<RefCell<HashMap<String, std::time::Instant>>>,
+    session_input_pending: Rc<RefCell<HashSet<String>>>,
     claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
     selected_pr: Rc<RefCell<Option<SelectedPrContext>>>,
     /// The session in front of the user and since when; see `acknowledge_session`.
@@ -234,6 +237,7 @@ struct SessionView {
     /// How many trailing history entries came from keystrokes and still await
     /// the agent's own version.
     typed_history_pending: usize,
+    input_tracker: Rc<RefCell<InputTracker>>,
     /// Follows the Codex rollout for submitted prompts; None until it is found.
     prompt_log: prompt_log_ui::PromptLogFollower,
     /// Last state an agent hook reported; None until the agent sends one.
@@ -703,6 +707,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         pr_preferences: Rc::new(RefCell::new(PrPreferences::default())),
         pr_context_cache: Rc::new(RefCell::new(HashMap::new())),
         session_pr_cache: Rc::new(RefCell::new(HashMap::new())),
+        pr_activity: Rc::default(),
+        pr_activity_snapshots: Rc::default(),
+        session_input_pending: Rc::default(),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         selected_pr: Rc::new(RefCell::new(None)),
         viewing: Rc::new(RefCell::new(None)),

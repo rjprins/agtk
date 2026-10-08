@@ -1,6 +1,22 @@
 use super::*;
 
 impl Workspace {
+    /// Save only whether a draft exists, so a restart cannot mix an automatic
+    /// notification into a reattached composer. Draft text stays in the agent.
+    pub(super) fn remember_pending_input(&self, id: &str, pending: bool) {
+        let changed = {
+            let mut drafts = self.session_input_pending.borrow_mut();
+            if pending {
+                drafts.insert(id.to_owned())
+            } else {
+                drafts.remove(id)
+            }
+        };
+        if changed && let Ok(value) = serde_json::to_value(&*self.session_input_pending.borrow()) {
+            self.save_preference("sessionInputPending", value);
+        }
+    }
+
     /// A line the user typed into the terminal, reconstructed from keystrokes.
     pub(super) fn record_typed_input(&self, id: &str, input: String) {
         let hooked = self

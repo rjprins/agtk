@@ -25,6 +25,7 @@ impl Workspace {
         let workspace = self.clone();
         glib::timeout_add_local(Duration::from_secs(1), move || {
             workspace.refresh_agent_states();
+            workspace.deliver_pr_activity();
             workspace.follow_prompt_logs();
             workspace.refresh_state_labels();
             glib::ControlFlow::Continue
@@ -313,7 +314,7 @@ pub(super) const fn is_agent(kind: SessionKind) -> bool {
 }
 
 /// The live screen, not the scrolled view, so scrolling back does not change the reading.
-fn screen_text(terminal: &vte::Terminal) -> String {
+pub(super) fn screen_text(terminal: &vte::Terminal) -> String {
     let rows = terminal.row_count();
     let end = terminal
         .vadjustment()

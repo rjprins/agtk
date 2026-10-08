@@ -317,9 +317,10 @@ impl Workspace {
                         (
                             session.terminal.clone(),
                             status_ui::is_agent(session.record.kind),
+                            session.input_tracker.clone(),
                         )
                     });
-                if let Some((terminal, is_agent)) = terminal {
+                if let Some((terminal, is_agent, tracker)) = terminal {
                     // VTE sends these bytes directly to the attached child PTY.
                     // Source: https://gnome.pages.gitlab.gnome.org/vte/gtk4/method.Terminal.feed_child.html
                     let mut bytes_written = params.text.len();
@@ -329,14 +330,27 @@ impl Workspace {
                         if is_agent && !params.text.is_empty() {
                             terminal.paste_text(&params.text);
                         } else {
+                            tracker.borrow_mut().push(&params.text);
                             terminal.feed_child(params.text.as_bytes());
                         }
                         terminal.feed_child(b"\r");
+                        let submitted = tracker.borrow_mut().push("\r");
+                        if let Some(input) = submitted {
+                            self.record_typed_input(&params.session_id, input);
+                        }
                         bytes_written += 1;
                         self.mark_agent_busy(&params.session_id);
                     } else {
+                        let submitted = tracker.borrow_mut().push(&params.text);
+                        if let Some(input) = submitted {
+                            self.record_typed_input(&params.session_id, input);
+                        }
                         terminal.feed_child(params.text.as_bytes());
                     }
+                    self.remember_pending_input(
+                        &params.session_id,
+                        tracker.borrow().has_pending_input(),
+                    );
                     ControlResponse::success(
                         id,
                         serde_json::json!({ "bytesWritten": bytes_written }),

@@ -248,7 +248,10 @@ impl App {
             }
             thread::sleep(Duration::from_millis(30));
         }
-        panic!("terminal did not contain {needle}");
+        panic!(
+            "terminal did not contain {needle}: {}",
+            self.request("session.get_text", json!({"sessionId":id,"lines":200}))
+        );
     }
 }
 
@@ -1562,6 +1565,165 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     app.request("session.close", json!({"sessionId":auto_review_id}));
     assert!(review_checkout(42).is_dir());
     assert!(review_checkout(44).is_dir());
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn pr_activity_notifies_working_and_review_agents_and_defers_drafts_and_dialogs() {
+    let mut app = App::new();
+    std::fs::write(
+        app.directory.path().join("fake-agent"),
+        r#"#!/bin/sh
+stty -echo
+printf '› \n'
+while IFS= read -r line; do
+    printf '%s\n' "$line" >> "$AGTK_STATE_ROOT/received-$AGTK_SESSION_ID"
+    printf '__INPUT_%s__\n' "$line"
+    case "$line" in
+        __WAIT__) printf '› 1. Yes, proceed\n  2. No\nPress enter to confirm\n' ;;
+        *) printf '─ Worked for 1s ─\n› \n' ;;
+    esac
+done
+"#,
+    )
+    .unwrap();
+    let project = app.directory.path().join("watched-project");
+    std::fs::create_dir(&project).unwrap();
+    for args in [
+        vec!["init", "-q", "-b", "feature"],
+        vec![
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "Initial",
+            "--allow-empty",
+        ],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            "https://dev.azure.com/demo/Project/_git/app",
+        ],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let pr_file = app.directory.path().join("azure-prs.json");
+    let mut prs = json!([{
+        "pullRequestId":42, "title":"Own PR", "sourceRefName":"refs/heads/feature",
+        "targetRefName":"refs/heads/main", "creationDate":"2026-10-01T10:00:00Z", "isDraft":false,
+        "createdBy":{"uniqueName":"reviewer@example.com"}, "lastMergeSourceCommit":{"commitId":"aaa"}
+    }]);
+    std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    let author = app.request(
+        "session.create",
+        json!({"kind":"codex","cwd":project,"name":"Implement feature"}),
+    );
+    let review = app.request(
+        "session.create",
+        json!({"kind":"codex","cwd":project,"name":"review: PR #42"}),
+    );
+    let shell = app.request("session.create", json!({"kind":"shell","cwd":project}));
+    let author_id = author["id"].as_str().unwrap();
+    let review_id = review["id"].as_str().unwrap();
+    app.request("session.select", json!({"sessionId":author_id}));
+    app.wait_text(author_id, "›");
+    app.request("session.select", json!({"sessionId":review_id}));
+    app.wait_text(review_id, "›");
+    app.request("session.select", json!({"sessionId":shell["id"]}));
+    app.request("pr.list", json!({"projectRoot":project}));
+    let text = |id: &str| {
+        app.request("session.get_text", json!({"sessionId":id,"lines":200}))["text"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert!(!text(author_id).contains("agtk detected activity"));
+    app.request(
+        "session.send_input",
+        json!({"sessionId":author_id,"text":"draft","appendEnter":false}),
+    );
+    app.request(
+        "session.send_input",
+        json!({"sessionId":review_id,"text":"__WAIT__","appendEnter":true}),
+    );
+    app.wait_text(review_id, "Press enter to confirm");
+
+    prs[0]["lastMergeSourceCommit"]["commitId"] = json!("bbb");
+    std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    std::fs::write(app.directory.path().join("azure-threads.json"), serde_json::to_vec(&json!({"value":[{
+        "id":3, "status":"active", "comments":[
+            {"id":1, "commentType":"text", "content":"Please fix", "publishedDate":"2026-10-01T11:00:00Z", "author":{"uniqueName":"colleague@example.com"}},
+            {"id":2, "commentType":"text", "content":"My reply", "publishedDate":"2026-10-01T11:00:00Z", "author":{"uniqueName":"reviewer@example.com"}}
+        ]
+    }]})).unwrap()).unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    // Poll again after the delivery grace: both the draft and dialog must survive.
+    thread::sleep(Duration::from_secs(3));
+    app.request("pr.list", json!({"projectRoot":project}));
+    assert!(!text(author_id).contains("agtk detected activity"));
+    assert!(!text(review_id).contains("agtk detected activity"));
+    assert!(!text(shell["id"].as_str().unwrap()).contains("agtk detected activity"));
+
+    app.stop();
+    app.start();
+    for id in [author_id, review_id] {
+        app.request("session.select", json!({"sessionId":id}));
+    }
+    app.request("session.select", json!({"sessionId":shell["id"]}));
+    app.request("pr.list", json!({"projectRoot":project}));
+    thread::sleep(Duration::from_secs(3));
+    for id in [author_id, review_id] {
+        let text = app.request("session.get_text", json!({"sessionId":id,"lines":200}));
+        assert!(
+            !text["text"]
+                .as_str()
+                .unwrap()
+                .contains("agtk detected activity")
+        );
+    }
+
+    app.request(
+        "session.send_input",
+        json!({"sessionId":author_id,"text":"\u{15}__READY__","appendEnter":true}),
+    );
+    app.request(
+        "session.send_input",
+        json!({"sessionId":review_id,"text":"__READY__","appendEnter":true}),
+    );
+    for id in [author_id, review_id] {
+        let received = app.wait_text(id, "1 new or edited comment");
+        assert!(
+            received.contains("Source branch head changed: aaa → bbb"),
+            "{received}"
+        );
+        assert!(
+            received.contains("agtk detected activity on PR #42"),
+            "{received}"
+        );
+        assert!(received.contains("thread(s) 3"), "{received}");
+        assert!(!received.contains("draftagtk"), "{received}");
+    }
+    app.request("pr.list", json!({"projectRoot":project}));
+    thread::sleep(Duration::from_secs(3));
+    for id in [author_id, review_id] {
+        assert_eq!(
+            std::fs::read_to_string(app.directory.path().join(format!("received-{id}")))
+                .unwrap()
+                .matches("agtk detected activity on PR #42")
+                .count(),
+            1
+        );
+    }
 }
 
 #[test]

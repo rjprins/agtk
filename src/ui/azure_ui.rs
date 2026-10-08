@@ -17,6 +17,7 @@ struct LoadedPrContext {
     state: PrProjectState,
     context: PrContext,
     changed: Vec<u64>,
+    requested_at: std::time::Instant,
 }
 
 struct PreloadedPrContext {
@@ -25,7 +26,7 @@ struct PreloadedPrContext {
     context: PrContext,
 }
 
-/// How often the sidebar's PR buttons look for new activity.
+/// How often PR attention and linked agents look for new activity.
 const PR_POLL_INTERVAL: Duration = Duration::from_secs(120);
 
 /// Widest the PR list grows inside the dialog.
@@ -177,13 +178,13 @@ impl Workspace {
         let workspace = self.clone();
         // Tick faster than the interval so a poll is never a whole round late.
         glib::timeout_add_local(PR_POLL_INTERVAL / 4, move || {
-            workspace.poll_pull_requests_if_focused();
+            workspace.poll_pull_requests_if_due();
             glib::ControlFlow::Continue
         });
         // Catch up when the user comes back after the polls were paused.
         let workspace = self.clone();
         self.window
-            .connect_is_active_notify(move |_| workspace.poll_pull_requests_if_focused());
+            .connect_is_active_notify(move |_| workspace.poll_pull_requests_if_due());
         let workspace = self.clone();
         self.prs
             .refresh
@@ -763,6 +764,7 @@ impl Workspace {
 
     /// A poll runs in the background: it stays silent and leaves the dialog's spinner alone.
     fn list_prs(&self, params: PrListParams, pending: Option<PendingRequest>, poll: bool) {
+        let requested_at = std::time::Instant::now();
         let Some(store) = self.store.borrow().clone() else {
             self.report_failure(
                 pending,
@@ -787,6 +789,7 @@ impl Workspace {
                 workspace.update_pr_indicator();
                 workspace.cache_pr_context(&loaded.context);
                 workspace.match_sessions_to_prs(&loaded.context);
+                workspace.observe_pr_activity(&loaded.context, loaded.requested_at);
                 if pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                     == pr_cache_key(&loaded.context.project_root)
                 {
@@ -892,6 +895,7 @@ impl Workspace {
                     .collect();
                 Ok(LoadedPrContext {
                     root_key,
+                    requested_at,
                     context: PrContext {
                         project_root,
                         repository: list.repository,
@@ -1378,8 +1382,8 @@ impl Workspace {
         roots.iter().any(|root| !projects.contains_key(root))
     }
 
-    /// Polls pause while no agtk window has focus, and never run more often than the interval.
-    fn poll_pull_requests_if_focused(&self) {
+    /// Linked live agents keep polling even when no agtk window has focus.
+    fn poll_pull_requests_if_due(&self) {
         let focused = self
             .application
             .windows()
@@ -1389,8 +1393,141 @@ impl Workspace {
             .pr_polled_at
             .get()
             .is_none_or(|polled_at| polled_at.elapsed() >= PR_POLL_INTERVAL);
-        if focused && due {
+        let has_pr_agent = self.sessions.borrow().values().any(|session| {
+            status_ui::is_agent(session.record.kind)
+                && session.control.is_some()
+                && session.record.state != SessionState::Exited
+                && self
+                    .session_pr_cache
+                    .borrow()
+                    .contains_key(&session.record.id)
+        });
+        if (focused || has_pr_agent) && due {
             self.poll_pull_requests();
+        }
+    }
+
+    fn save_pr_activity(&self) {
+        if let Ok(value) = serde_json::to_value(&*self.pr_activity.borrow()) {
+            self.save_preference("prAgentActivity", value);
+        }
+    }
+
+    fn observe_pr_activity(&self, context: &PrContext, requested_at: std::time::Instant) {
+        // Manual refreshes and background polls use different workers. An older
+        // request that finishes late must not turn the head commit back into news.
+        let key = pr_cache_key(&context.project_root);
+        {
+            let mut snapshots = self.pr_activity_snapshots.borrow_mut();
+            if snapshots
+                .get(&key)
+                .is_some_and(|previous| *previous > requested_at)
+            {
+                return;
+            }
+            snapshots.insert(key, requested_at);
+        }
+        let records = self
+            .sessions
+            .borrow()
+            .values()
+            .map(|session| (session.record.clone(), session.control.is_some()))
+            .collect::<Vec<_>>();
+        let previous = self.pr_activity.borrow().clone();
+        {
+            let mut activity = self.pr_activity.borrow_mut();
+            activity.retain_sessions(
+                &records
+                    .iter()
+                    .map(|(record, _)| record.id.clone())
+                    .collect(),
+            );
+            for (record, connected) in records {
+                if !in_project(&record, context) {
+                    continue;
+                }
+                let linked = self.session_pr_cache.borrow().get(&record.id).cloned();
+                let pr = linked.and_then(|linked| {
+                    context
+                        .pull_requests
+                        .iter()
+                        .find(|item| item.pull_request.id == linked.id)
+                        .map(|item| &item.pull_request)
+                });
+                match pr {
+                    Some(pr)
+                        if status_ui::is_agent(record.kind)
+                            && connected
+                            && record.state != SessionState::Exited =>
+                    {
+                        activity.observe(&record.id, pr, context.current_user.as_deref());
+                    }
+                    _ => activity.forget(&record.id),
+                }
+            }
+        }
+        if *self.pr_activity.borrow() != previous {
+            self.save_pr_activity();
+        }
+        self.deliver_pr_activity();
+    }
+
+    /// A queued update becomes one agent prompt once a resting terminal is free.
+    pub(super) fn deliver_pr_activity(&self) {
+        let terminals = self
+            .sessions
+            .borrow()
+            .values()
+            .filter(|session| {
+                self.pr_activity.borrow().has_pending(&session.record.id)
+                    && status_ui::is_agent(session.record.kind)
+                    && session.control.is_some()
+                    && matches!(
+                        session.record.state,
+                        SessionState::Ready | SessionState::Idle
+                    )
+                    && now_millis().saturating_sub(session.record.state_changed_at) >= 2_000
+                    && !session.input_tracker.borrow().has_pending_input()
+                    && !(self.window.is_active() && session.terminal.has_focus())
+                    && {
+                        let rules = crate::agent_status::rules_for(session.record.kind);
+                        let screen = status_ui::screen_text(&session.terminal);
+                        rules.activity_region(&screen).is_some()
+                            && !matches!(
+                                rules.classify(&screen),
+                                Some(
+                                    crate::agent_status::Signal::Working
+                                        | crate::agent_status::Signal::Waiting
+                                )
+                            )
+                    }
+            })
+            .map(|session| {
+                (
+                    session.record.id.clone(),
+                    session.terminal.clone(),
+                    session.input_tracker.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut changed = false;
+        // Terminal input can re-enter session callbacks: all session borrows are released.
+        for (id, terminal, tracker) in terminals {
+            let message = self.pr_activity.borrow_mut().take_notification(&id);
+            if let Some(message) = message {
+                self.mark_agent_busy(&id);
+                terminal.paste_text(&message);
+                terminal.feed_child(b"\r");
+                let submitted = tracker.borrow_mut().push("\r");
+                self.remember_pending_input(&id, tracker.borrow().has_pending_input());
+                if let Some(input) = submitted {
+                    self.record_typed_input(&id, input);
+                }
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_pr_activity();
         }
     }
 
