@@ -10,6 +10,87 @@ fn pump(milliseconds: u64) {
     }
 }
 
+/// Run separately from the pointer test: GTK must stay on its initializing thread.
+#[test]
+#[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
+fn oversized_content_keeps_modals_within_the_screen() {
+    let display = std::env::var("AGTK_TEST_DISPLAY").expect("private display required");
+    assert!(display.contains("agtk-modal-test-"));
+    // SAFETY: run this GTK test alone with --test-threads=1.
+    unsafe {
+        std::env::set_var("WAYLAND_DISPLAY", display);
+        std::env::set_var("GDK_BACKEND", "wayland");
+    }
+    adw::init().unwrap();
+    let parent = adw::ApplicationWindow::builder().build();
+    parent.fullscreen();
+    parent.present();
+    pump(300);
+
+    let title = gtk::EditableLabel::new("Short title");
+    let modal = Modal::new(&parent, "Long content", 360, 240, &title);
+    modal.present();
+    pump(300);
+    let (max_width, max_height) = modal.screen_limit();
+    // GTK's allocation also includes window shadows outside the default size.
+    let assert_fits = |modal: &Modal| {
+        let (width, height) = modal.window.default_size();
+        assert!(width <= max_width, "requested width {width} > {max_width}");
+        assert!(
+            height <= max_height,
+            "requested height {height} > {max_height}"
+        );
+        assert!(
+            modal.window.width() <= parent.width(),
+            "allocated width {} > screen width {}",
+            modal.window.width(),
+            parent.width()
+        );
+        assert!(modal.window.height() <= parent.height());
+    };
+    // Selecting a session updates an already open dialog with its full title.
+    title.set_text(&"A very long session title ".repeat(100));
+    pump(300);
+    assert_fits(&modal);
+
+    // Content with a large minimum height must also remain reachable by scrolling.
+    title.set_size_request(-1, max_height * 3);
+    pump(300);
+    assert_fits(&modal);
+    let overflow = scrolled_windows(&modal.window.content().unwrap());
+    assert!(
+        overflow
+            .iter()
+            .any(|scroll| { scroll.hadjustment().upper() > scroll.hadjustment().page_size() })
+    );
+    assert!(
+        overflow
+            .iter()
+            .any(|scroll| { scroll.vadjustment().upper() > scroll.vadjustment().page_size() })
+    );
+    modal.hide();
+    modal.set_saved_size(Some((max_width * 3, max_height * 3)));
+    modal.present();
+    pump(300);
+    assert_fits(&modal);
+    modal.window.destroy();
+
+    let agents = crate::ui::agents_ui::AgentDialog::build(&parent);
+    agents.preview.append(&gtk::EditableLabel::new(
+        &"A long selected session title ".repeat(100),
+    ));
+    agents.restore_destination_choices.splice(
+        0,
+        1,
+        &[&format!("/home/user/{}", "long-directory/".repeat(100))],
+    );
+    agents.modal.present();
+    pump(300);
+    assert_fits(&agents.modal);
+    agents.modal.window.destroy();
+    parent.destroy();
+}
+
 /// Run with scripts/test-modals.sh on a private 1000x700 Mutter display and bus.
 #[test]
 #[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]

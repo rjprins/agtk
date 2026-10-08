@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercise modal dismissal with real pointer and keyboard input on a private display.
+# Exercise modal sizing and dismissal on a private display.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,4 +32,5 @@ done
 [[ -S "$AGTK_TEST_DISPLAY" ]] || { cat "$log" >&2; exit 1; }
 
 cd "$repo"
+cargo test --locked --lib oversized_content_keeps_modals -- --ignored --test-threads=1
 cargo test --locked --lib real_pointer_input_dismisses -- --ignored --test-threads=1

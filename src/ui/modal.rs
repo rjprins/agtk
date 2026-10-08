@@ -33,10 +33,18 @@ impl Modal {
         height: i32,
         content: &impl IsA<gtk::Widget>,
     ) -> Self {
+        // A window's default size cannot override its child's minimum size.
+        // Keep oversized content scrollable so it cannot force the dialog past
+        // the screen limit, including when content changes after opening.
+        let overflow = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .child(content)
+            .build();
         let header = adw::HeaderBar::new();
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
-        toolbar.set_content(Some(content));
+        toolbar.set_content(Some(&overflow));
         let window = adw::Window::builder()
             .title(title)
             .modal(true)
@@ -96,7 +104,7 @@ impl Modal {
             window,
             parent: parent.clone(),
             header,
-            content: content.clone().upcast(),
+            content: overflow.upcast(),
             default_size: (width, height),
             saved_size: Rc::default(),
             fitted_size: Rc::default(),
