@@ -3,7 +3,7 @@
 use serde_json::{Map, Value};
 
 use super::remote::percent_encode;
-use super::{AzurePr, AzureRepoRef, LinkedPbi};
+use super::{AzurePr, AzureRepoRef, LinkedPbi, PrComment};
 
 pub fn normalize_active_prs(reference: &AzureRepoRef, value: Value) -> Vec<AzurePr> {
     let Some(candidates) = value.as_array() else {
@@ -72,6 +72,7 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         unresolved_threads: 0,
         resolved_threads: 0,
         total_threads: None,
+        comments: None,
         linked_pbis: Vec::new(),
         url: format!(
             "{}/{}/_git/{}/pullrequest/{id}?_a=files",
@@ -159,15 +160,38 @@ pub(super) fn normalize_thread_summary(value: &Value) -> ThreadSummary {
             }
         }
         for comment in comments {
-            for key in ["lastUpdatedDate", "publishedDate"] {
+            let mut updated_at = 0;
+            for key in ["lastContentUpdatedDate", "lastUpdatedDate", "publishedDate"] {
                 if let Some(timestamp) = comment
                     .get(key)
                     .and_then(nonempty)
                     .and_then(parse_timestamp)
                 {
                     summary.latest_review_at = summary.latest_review_at.max(timestamp);
+                    updated_at = timestamp;
                     break;
                 }
+            }
+            if let (Some(thread_id), Some(id)) = (
+                thread
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .filter(|id| *id > 0),
+                comment
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .filter(|id| *id > 0),
+            ) {
+                summary.comments.push(PrComment {
+                    thread_id,
+                    id,
+                    updated_at,
+                    author_unique_name: comment
+                        .get("author")
+                        .and_then(|author| author.get("uniqueName"))
+                        .and_then(nonempty)
+                        .map(str::to_owned),
+                });
             }
         }
     }
@@ -180,6 +204,7 @@ pub(super) struct ThreadSummary {
     pub(super) resolved_threads: u32,
     pub(super) total_threads: u32,
     pub(super) latest_review_at: u64,
+    pub(super) comments: Vec<PrComment>,
 }
 
 fn nonempty(value: &Value) -> Option<&str> {

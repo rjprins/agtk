@@ -9,6 +9,34 @@ fn input_tracker_emits_a_compacted_prompt_on_submit() {
 }
 
 #[test]
+fn input_tracker_exposes_unsubmitted_text_and_incomplete_pastes() {
+    let mut tracker = InputTracker::default();
+    assert!(!tracker.has_pending_input());
+    tracker.push("draft");
+    assert!(tracker.has_pending_input());
+    tracker.push("\u{15}");
+    assert!(!tracker.has_pending_input());
+    tracker.push("\u{1b}[200~");
+    assert!(tracker.has_pending_input());
+    tracker.push("\u{1b}[201~submitted\r");
+    assert!(!tracker.has_pending_input());
+    tracker.push("\u{1b}[A");
+    assert!(tracker.has_pending_input());
+    tracker.push("\u{3}");
+    assert!(!tracker.has_pending_input());
+}
+
+#[test]
+fn a_restored_draft_blocks_automatic_input_until_the_user_clears_or_submits_it() {
+    for terminator in ["\r", "\u{15}", "\u{3}"] {
+        let mut tracker = InputTracker::with_pending_input(true);
+        assert!(tracker.has_pending_input());
+        tracker.push(terminator);
+        assert!(!tracker.has_pending_input());
+    }
+}
+
+#[test]
 fn input_tracker_handles_terminal_editing_controls() {
     let mut tracker = InputTracker::default();
 

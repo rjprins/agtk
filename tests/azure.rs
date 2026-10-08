@@ -170,7 +170,7 @@ case "$*" in
   "account show"*) printf 'rutger@example.com\n' ;;
   "repos pr list"*) printf '%s\n' '[{"pullRequestId":7,"title":"Review me","sourceRefName":"refs/heads/review-me","targetRefName":"refs/heads/main","creationDate":"2026-09-15T08:00:00Z","isDraft":false,"createdBy":{"displayName":"Other","uniqueName":"other@example.com"},"reviewers":[]}]' ;;
   "repos pr work-item list"*) [ -e "$0.fail-pbis" ] && exit 7; printf '%s\n' '[{"id":123,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Linked backlog item","System.TeamProject":"Project One"}},{"id":124,"fields":{"System.WorkItemType":"Bug","System.Title":"Linked bug"}},{"id":125,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Another backlog item"}}]' ;;
-  "devops invoke"*) [ -e "$0.fail-threads" ] && exit 7; printf '%s\n' '{"value":[{"id":3,"status":"active","comments":[{"id":1,"commentType":"text","content":"Please fix this","isDeleted":false,"publishedDate":"2026-09-15T09:00:00Z"}]},{"id":4,"status":"fixed","comments":[{"commentType":"text","content":"Fixed"},{"commentType":"text","content":"Thanks"}]}]}' ;;
+  "devops invoke"*) [ -e "$0.fail-threads" ] && exit 7; [ -e "$0.malformed-threads" ] && { printf '{}'; exit; }; printf '%s\n' '{"value":[{"id":3,"status":"active","comments":[{"id":1,"commentType":"text","content":"Please fix this","isDeleted":false,"publishedDate":"2026-09-15T09:00:00Z","author":{"uniqueName":"other@example.com"}}]},{"id":4,"status":"fixed","comments":[{"commentType":"text","content":"Fixed"},{"commentType":"text","content":"Thanks"}]}]}' ;;
   *) printf 'unexpected arguments: %s\n' "$*" >&2; exit 7 ;;
 esac
 "##,
@@ -189,6 +189,15 @@ esac
     assert_eq!(encoded["resolvedThreads"], 1);
     assert_eq!(encoded["totalThreads"], 2);
     assert_eq!(result.pull_requests[0].latest_review_at, 1_789_462_800_000);
+    let comments = result.pull_requests[0].comments.as_ref().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert_eq!(comments[0].thread_id, 3);
+    assert_eq!(comments[0].id, 1);
+    assert_eq!(comments[0].updated_at, 1_789_462_800_000);
+    assert_eq!(
+        comments[0].author_unique_name.as_deref(),
+        Some("other@example.com")
+    );
     let pbis = &result.pull_requests[0].linked_pbis;
     assert_eq!(pbis.len(), 2);
     assert_eq!(pbis[0].id, 123);
@@ -219,6 +228,15 @@ esac
         .unwrap();
     assert_eq!(result.pull_requests[0].linked_pbis.len(), 2);
     assert_eq!(result.pull_requests[0].total_threads, None);
+    assert!(result.pull_requests[0].comments.is_none());
+
+    fs::remove_file(directory.path().join("fake-az.fail-threads")).unwrap();
+    fs::write(directory.path().join("fake-az.malformed-threads"), "").unwrap();
+    let result = AzureClient::new(&az)
+        .list_active(&repository)
+        .unwrap()
+        .unwrap();
+    assert!(result.pull_requests[0].comments.is_none());
 }
 
 fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> AzurePr {
@@ -240,6 +258,7 @@ fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> Azur
         unresolved_threads,
         resolved_threads: 0,
         total_threads: Some(unresolved_threads),
+        comments: Some(Vec::new()),
         linked_pbis: Vec::new(),
         url: format!("https://example.test/{id}"),
     }

@@ -139,6 +139,7 @@ impl AzureClient {
                     pull_request.resolved_threads = summary.resolved_threads;
                     pull_request.total_threads = Some(summary.total_threads);
                     pull_request.latest_review_at = summary.latest_review_at;
+                    pull_request.comments = Some(summary.comments);
                     pull_request.updated_at = pull_request.updated_at.max(summary.latest_review_at);
                 }
                 if let Some(linked_pbis) = linked_pbis {
@@ -191,6 +192,9 @@ impl AzureClient {
             "-o",
             "json",
         ])?;
+        if !raw.is_array() && !raw.get("value").is_some_and(Value::is_array) {
+            return Err("Azure PR thread response is not an array".into());
+        }
         Ok(normalize_thread_summary(&raw))
     }
 

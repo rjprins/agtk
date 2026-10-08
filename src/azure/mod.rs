@@ -4,11 +4,13 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+mod activity;
 mod attention;
 mod client;
 mod normalize;
 mod remote;
 
+pub use activity::PrActivityTracker;
 pub use attention::{
     AttentionReconciliation, KnownPr, PrAttention, PrPreferences, PrProjectState, PrReviewSettings,
     acknowledge_attention, reconcile_attention,
@@ -50,9 +52,21 @@ pub struct AzurePr {
     /// None when thread details have not been fetched successfully.
     #[serde(default)]
     pub total_threads: Option<u32>,
+    /// None when thread details could not be fetched; IDs and dates only, no remote text.
+    #[serde(default)]
+    pub comments: Option<Vec<PrComment>>,
     #[serde(default)]
     pub linked_pbis: Vec<LinkedPbi>,
     pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrComment {
+    pub thread_id: u64,
+    pub id: u64,
+    pub updated_at: u64,
+    pub author_unique_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,6 +160,23 @@ mod tests {
         assert_eq!(summary.resolved_threads, 0);
         assert_eq!(summary.total_threads, 0);
         assert_eq!(summary.latest_review_at, 0);
+        assert!(summary.comments.is_empty());
+    }
+
+    #[test]
+    fn activity_comments_use_content_dates_and_ignore_deleted_and_system_comments() {
+        let summary = normalize_thread_summary(&json!({"value":[
+            {"id":4, "status":"fixed", "comments":[
+                {"id":1, "commentType":"text", "content":"Review", "lastContentUpdatedDate":"2026-10-01T10:00:00Z", "lastUpdatedDate":"2026-10-01T11:00:00Z", "author":{"uniqueName":"reviewer@example.com"}},
+                {"id":2, "commentType":"text", "content":"Deleted", "isDeleted":true},
+                {"id":3, "commentType":"system", "content":"Pushed"}
+            ]},
+            {"id":5, "isDeleted":true, "comments":[{"id":1, "commentType":"text", "content":"Hidden"}]}
+        ]}));
+        assert_eq!(summary.comments.len(), 1);
+        assert_eq!(summary.comments[0].thread_id, 4);
+        assert_eq!(summary.comments[0].id, 1);
+        assert_eq!(summary.comments[0].updated_at, 1_790_848_800_000);
     }
 
     #[test]
