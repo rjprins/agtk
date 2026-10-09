@@ -116,18 +116,7 @@ fn prepare_environment() -> io::Result<Vec<CString>> {
     // Preserve both display backends. Codex reads images through X11 even on a
     // Wayland desktop, so removing DISPLAY or XAUTHORITY breaks image paste.
     let mut environment = std::env::vars_os()
-        .filter(|(key, _)| {
-            !matches!(
-                key.as_bytes(),
-                b"TERM"
-                    | b"COLORTERM"
-                    | b"NO_COLOR"
-                    | b"TERM_PROGRAM"
-                    | b"TERM_PROGRAM_VERSION"
-                    | b"TMUX"
-                    | b"TMUX_PANE"
-            )
-        })
+        .filter(|(key, _)| !is_launcher_marker(key.as_bytes()))
         .map(|(key, value)| {
             let mut entry = key.as_bytes().to_vec();
             entry.push(b'=');
@@ -151,6 +140,32 @@ fn prepare_environment() -> io::Result<Vec<CString>> {
         .expect("package version cannot contain a NUL byte"),
     );
     Ok(environment)
+}
+
+/// Variables that describe the terminal or agent agtk was started from, not the session.
+/// An agent that starts agtk passes on its Claude Code session markers. Claude in a
+/// session would then run as that agent's child, without saving its transcript.
+fn is_launcher_marker(key: &[u8]) -> bool {
+    matches!(
+        key,
+        b"TERM"
+            | b"COLORTERM"
+            | b"NO_COLOR"
+            | b"TERM_PROGRAM"
+            | b"TERM_PROGRAM_VERSION"
+            | b"TMUX"
+            | b"TMUX_PANE"
+            | b"CLAUDECODE"
+            | b"CLAUDE_PID"
+            | b"CLAUDE_EFFORT"
+            | b"CLAUDE_CODE_ENTRYPOINT"
+            | b"CLAUDE_CODE_EXECPATH"
+            | b"CLAUDE_CODE_SESSION_ID"
+            | b"CLAUDE_CODE_CHILD_SESSION"
+            | b"CLAUDE_CODE_SESSION_ATTENDED"
+            | b"CLAUDE_CODE_MESSAGING_SOCKET"
+            | b"CLAUDE_CODE_MESSAGING_TOKEN"
+    )
 }
 
 fn prepare_command(command: &[String]) -> io::Result<Vec<CString>> {
@@ -265,5 +280,24 @@ struct SocketGuard(PathBuf);
 impl Drop for SocketGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_launcher_marker;
+
+    #[test]
+    fn sessions_drop_the_launching_agents_markers() {
+        assert!(is_launcher_marker(b"CLAUDE_CODE_CHILD_SESSION"));
+        assert!(is_launcher_marker(b"CLAUDECODE"));
+        assert!(is_launcher_marker(b"TMUX"));
+    }
+
+    #[test]
+    fn sessions_keep_claude_configuration() {
+        assert!(!is_launcher_marker(b"CLAUDE_CONFIG_DIR"));
+        assert!(!is_launcher_marker(b"CLAUDE_CODE_USE_BEDROCK"));
+        assert!(!is_launcher_marker(b"DISPLAY"));
     }
 }
