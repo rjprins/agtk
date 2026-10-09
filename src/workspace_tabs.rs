@@ -34,6 +34,8 @@ struct ContextTabs {
     file: Option<FileTabKey>,
     active: Option<WorkspaceTabId>,
     recent: Vec<WorkspaceTabId>,
+    /// Previously viewed files and diffs in first-opened order, without duplicates.
+    buffer_history: Vec<WorkspaceTabId>,
 }
 
 #[derive(Debug, Default)]
@@ -100,13 +102,7 @@ impl WorkspaceTabs {
             return None;
         }
         let tabs = self.contexts.entry(context.clone()).or_default();
-        match &tab {
-            WorkspaceTabId::Diff(key) => tabs.diff = Some(key.clone()),
-            WorkspaceTabId::File(key) => tabs.file = Some(key.clone()),
-            WorkspaceTabId::Session(_) => return None,
-        }
-        tabs.recent
-            .retain(|open| std::mem::discriminant(open) != std::mem::discriminant(&tab));
+        replace_buffer(tabs, &tab);
         self.selected_session = Some(context_owner.to_owned());
         self.record_visit(context_owner);
         self.active_context = Some(context.clone());
@@ -122,14 +118,16 @@ impl WorkspaceTabs {
                 let Some(context) = self.active_context.clone() else {
                     return false;
                 };
-                if &context != worktree_root
-                    || !self
-                        .contexts
-                        .get(&context)
-                        .is_some_and(|tabs| tab_exists(tabs, tab))
-                {
+                if &context != worktree_root {
                     return false;
                 }
+                let Some(tabs) = self.contexts.get_mut(&context) else {
+                    return false;
+                };
+                if !tab_exists(tabs, tab) && !tabs.buffer_history.contains(tab) {
+                    return false;
+                }
+                replace_buffer(tabs, tab);
                 self.activate(&context, tab.clone());
                 true
             }
@@ -157,6 +155,7 @@ impl WorkspaceTabs {
         let selected_session = self.selected_session.clone();
         let tabs = self.contexts.get_mut(context)?;
         tabs.recent.retain(|tab| tab != &closed);
+        tabs.buffer_history.retain(|tab| tab != &closed);
         if tabs.active == Some(closed) {
             tabs.active = tabs
                 .recent
@@ -230,6 +229,23 @@ impl WorkspaceTabs {
         self.active_context.as_deref()
     }
 
+    /// History for this viewer and worktree, newest first-opened file first.
+    /// Revisiting a file keeps its position in the list.
+    pub fn buffer_history(&self, tab: &WorkspaceTabId) -> Vec<WorkspaceTabId> {
+        let context = match tab {
+            WorkspaceTabId::Diff(key) => &key.worktree_root,
+            WorkspaceTabId::File(key) => &key.worktree_root,
+            WorkspaceTabId::Session(_) => return Vec::new(),
+        };
+        self.contexts
+            .get(context)
+            .into_iter()
+            .flat_map(|tabs| tabs.buffer_history.iter().rev())
+            .filter(|previous| std::mem::discriminant(*previous) == std::mem::discriminant(tab))
+            .cloned()
+            .collect()
+    }
+
     pub fn selected_session(&self) -> Option<&str> {
         self.selected_session.as_deref()
     }
@@ -278,12 +294,25 @@ impl WorkspaceTabs {
 
     fn activate(&mut self, context: &str, tab: WorkspaceTabId) {
         if let Some(tabs) = self.contexts.get_mut(context) {
+            if !matches!(tab, WorkspaceTabId::Session(_)) && !tabs.buffer_history.contains(&tab) {
+                tabs.buffer_history.push(tab.clone());
+            }
             tabs.recent.retain(|previous| previous != &tab);
             tabs.recent.push(tab.clone());
             tabs.active = Some(tab.clone());
             self.visible_tab = Some(tab);
         }
     }
+}
+
+fn replace_buffer(tabs: &mut ContextTabs, tab: &WorkspaceTabId) {
+    match tab {
+        WorkspaceTabId::Diff(key) => tabs.diff = Some(key.clone()),
+        WorkspaceTabId::File(key) => tabs.file = Some(key.clone()),
+        WorkspaceTabId::Session(_) => return,
+    }
+    tabs.recent
+        .retain(|open| std::mem::discriminant(open) != std::mem::discriminant(tab));
 }
 
 fn tab_exists(tabs: &ContextTabs, tab: &WorkspaceTabId) -> bool {
@@ -296,7 +325,8 @@ fn tab_exists(tabs: &ContextTabs, tab: &WorkspaceTabId) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileTabKey, WorkspaceTabId, WorkspaceTabs};
+    use super::{DiffTabKey, FileTabKey, WorkspaceTabId, WorkspaceTabs};
+    use crate::changes::DiffScope;
     use std::path::PathBuf;
 
     fn tabs_with(sessions: &[&str]) -> WorkspaceTabs {
@@ -352,6 +382,117 @@ mod tests {
                 .iter()
                 .all(|tab| matches!(tab, WorkspaceTabId::Session(_)))
         );
+    }
+
+    #[test]
+    fn history_reopens_files_without_reordering_and_lists_new_files_first() {
+        let mut tabs = tabs_with(&["a"]);
+        let first = WorkspaceTabId::File(file("/repo/src/main.rs"));
+        let second = WorkspaceTabId::File(file("/repo/examples/main.rs"));
+        tabs.open_file(file("/repo/src/main.rs"), "a");
+        tabs.open_file(file("/repo/examples/main.rs"), "a");
+        assert_eq!(
+            tabs.buffer_history(&second),
+            [second.clone(), first.clone()]
+        );
+
+        tabs.select_session("a");
+        assert!(tabs.select_tab(&first));
+        assert_eq!(tabs.buffer_history(&first), [second.clone(), first.clone()]);
+        assert_eq!(tabs.visible_tab(), Some(&first));
+        assert_eq!(
+            tabs.context_tabs("/repo"),
+            [WorkspaceTabId::Session("a".to_owned()), first.clone()]
+        );
+        assert!(tabs.select_tab(&first));
+        assert_eq!(tabs.buffer_history(&first), [second.clone(), first.clone()]);
+        tabs.open_file(file("/repo/examples/main.rs"), "a");
+        assert_eq!(
+            tabs.buffer_history(&second),
+            [second.clone(), first.clone()]
+        );
+        let third = WorkspaceTabId::File(file("/repo/README.md"));
+        tabs.open_file(file("/repo/README.md"), "a");
+        assert!(tabs.select_tab(&first));
+        assert_eq!(tabs.buffer_history(&first), [third, second, first.clone()]);
+        assert_eq!(
+            tabs.close_file(&file("/repo/src/main.rs")),
+            Some(WorkspaceTabId::Session("a".to_owned()))
+        );
+        assert!(!tabs.select_tab(&first));
+        assert!(!tabs.select_tab(&WorkspaceTabId::File(file("/repo/unopened.rs"))));
+    }
+
+    #[test]
+    fn diff_history_preserves_scopes_and_stays_separate_from_files() {
+        let mut tabs = tabs_with(&["a"]);
+        let staged = DiffTabKey {
+            worktree_root: "/repo".to_owned(),
+            scope: DiffScope::Staged,
+            old_path: Some(b"main.rs".to_vec()),
+            new_path: Some(b"main.rs".to_vec()),
+        };
+        let unstaged = DiffTabKey {
+            scope: DiffScope::Unstaged,
+            ..staged.clone()
+        };
+        let staged_tab = WorkspaceTabId::Diff(staged.clone());
+        let unstaged_tab = WorkspaceTabId::Diff(unstaged.clone());
+        let file_tab = WorkspaceTabId::File(file("/repo/main.rs"));
+        tabs.open_diff(staged.clone(), "a");
+        tabs.open_file(file("/repo/main.rs"), "a");
+        tabs.open_diff(unstaged, "a");
+        assert_eq!(
+            tabs.buffer_history(&file_tab),
+            std::slice::from_ref(&file_tab)
+        );
+        assert_eq!(
+            tabs.buffer_history(&unstaged_tab),
+            [unstaged_tab.clone(), staged_tab.clone()]
+        );
+        assert!(tabs.select_tab(&staged_tab));
+        assert_eq!(
+            tabs.context_tabs("/repo"),
+            [
+                WorkspaceTabId::Session("a".to_owned()),
+                staged_tab.clone(),
+                file_tab.clone()
+            ]
+        );
+        assert_eq!(
+            tabs.buffer_history(&staged_tab),
+            [unstaged_tab, staged_tab.clone()]
+        );
+        assert_eq!(tabs.close_diff(&staged), Some(file_tab));
+        assert!(!tabs.select_tab(&staged_tab));
+    }
+
+    #[test]
+    fn buffer_history_is_shared_within_a_worktree_and_removed_with_its_last_session() {
+        let mut tabs = tabs_with(&["a", "b"]);
+        let first = WorkspaceTabId::File(file("/repo/one.rs"));
+        let second = WorkspaceTabId::File(file("/repo/two.rs"));
+        tabs.open_file(file("/repo/one.rs"), "a");
+        tabs.open_file(file("/repo/two.rs"), "b");
+        tabs.attach_session("other", "/other");
+        let other = FileTabKey {
+            worktree_root: "/other".to_owned(),
+            path: PathBuf::from("/other/main.rs"),
+        };
+        tabs.open_file(other.clone(), "other");
+        let other_tab = WorkspaceTabId::File(other);
+        assert_eq!(
+            tabs.buffer_history(&other_tab),
+            std::slice::from_ref(&other_tab)
+        );
+        assert!(!tabs.select_tab(&first));
+        tabs.select_session("a");
+        assert_eq!(tabs.buffer_history(&first), [second, first.clone()]);
+        tabs.remove_session("a");
+        assert!(tabs.select_tab(&first));
+        tabs.remove_session("b");
+        assert!(tabs.buffer_history(&first).is_empty());
+        assert_eq!(tabs.buffer_history(&other_tab), [other_tab]);
     }
 
     #[test]

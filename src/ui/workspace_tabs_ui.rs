@@ -93,26 +93,13 @@ impl Workspace {
             old_path: file.old_path.clone(),
             new_path: file.new_path.clone(),
         };
-        let previous_diffs = self
-            .workspace_tabs
-            .borrow()
-            .context_tabs(&key.worktree_root)
-            .into_iter()
-            .filter_map(|tab| match tab {
-                WorkspaceTabId::Diff(open) if open != key => Some(open),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
         let same_diff_is_visible = self
             .workspace_tabs
             .borrow()
             .visible_tab()
             .is_some_and(|tab| tab == &WorkspaceTabId::Diff(key.clone()))
             && self.stack.visible_child_name().as_deref() == Some("changes-diff");
-        if previous_diffs.is_empty()
-            && same_diff_is_visible
-            && !self.stale_diff_tabs.borrow().contains(&key)
-        {
+        if same_diff_is_visible && !self.stale_diff_tabs.borrow().contains(&key) {
             if let Some(viewer) = self.code_viewer.borrow().as_ref() {
                 viewer.focus();
             }
@@ -126,13 +113,6 @@ impl Workspace {
         {
             self.show_error("Could not open this diff in the selected worktree");
             return None;
-        }
-        for previous in previous_diffs {
-            self.diff_tab_data.borrow_mut().remove(&previous);
-            self.diff_document_signatures.borrow_mut().remove(&previous);
-            self.stale_diff_tabs.borrow_mut().remove(&previous);
-            let previous_tab_id = crate::workspace_tabs::WorkspaceTabs::diff_tab_id(&previous);
-            self.diff_view_states.borrow_mut().remove(&previous_tab_id);
         }
         let tab_id = crate::workspace_tabs::WorkspaceTabs::diff_tab_id(&key);
         self.diff_tab_data
@@ -1064,6 +1044,54 @@ impl Workspace {
         }
     }
 
+    fn buffer_history_menu(&self, tab: &WorkspaceTabId) -> gtk::MenuButton {
+        let history = self.workspace_tabs.borrow().buffer_history(tab);
+        let button = gtk::MenuButton::builder()
+            .icon_name("pan-down-symbolic")
+            .tooltip_text(if matches!(tab, WorkspaceTabId::Diff(_)) {
+                "Previously opened diffs"
+            } else {
+                "Previously opened files"
+            })
+            .build();
+        let menu = gio::Menu::new();
+        for (index, previous) in history.iter().enumerate() {
+            let title = match previous {
+                WorkspaceTabId::Diff(key) => diff_tab_tooltip(key),
+                WorkspaceTabId::File(key) => file_tabs_ui::file_tab_title(key),
+                WorkspaceTabId::Session(_) => continue,
+            };
+            let item = gio::MenuItem::new(Some(&title.replace('_', "__")), None);
+            item.set_icon(&gio::ThemedIcon::new("text-x-generic-symbolic"));
+            item.set_action_and_target_value(
+                Some("history.select"),
+                Some(&(index as u32).to_variant()),
+            );
+            menu.append_item(&item);
+        }
+        let action = gio::SimpleAction::new("select", Some(&u32::static_variant_type()));
+        let workspace = self.clone();
+        let weak_button = button.downgrade();
+        action.connect_activate(move |_, target| {
+            let Some(index) = target.and_then(|target| target.get::<u32>()) else {
+                return;
+            };
+            if let Some(button) = weak_button.upgrade() {
+                button.popdown();
+            }
+            match history.get(index as usize) {
+                Some(WorkspaceTabId::Diff(key)) => workspace.activate_diff_tab(key),
+                Some(WorkspaceTabId::File(key)) => workspace.activate_file_tab(key),
+                _ => {}
+            }
+        });
+        let actions = gio::SimpleActionGroup::new();
+        actions.add_action(&action);
+        button.insert_action_group("history", Some(&actions));
+        button.set_menu_model(Some(&menu));
+        button
+    }
+
     pub(super) fn render_workspace_tabs(&self) {
         while let Some(child) = self.center_tabs.first_child() {
             self.center_tabs.remove(&child);
@@ -1128,6 +1156,7 @@ impl Workspace {
                     let workspace = self.clone();
                     let key_for_close = key.clone();
                     close.connect_clicked(move |_| workspace.close_diff_tab(&key_for_close));
+                    row.append(&self.buffer_history_menu(&tab));
                     row.append(&button);
                     row.append(&close);
                     self.center_tabs.append(&row);
@@ -1150,6 +1179,7 @@ impl Workspace {
                     let workspace = self.clone();
                     let key_for_close = key.clone();
                     close.connect_clicked(move |_| workspace.close_file_tab(&key_for_close));
+                    row.append(&self.buffer_history_menu(&tab));
                     row.append(&button);
                     row.append(&close);
                     self.center_tabs.append(&row);
@@ -1227,7 +1257,13 @@ fn diff_tab_tooltip(key: &DiffTabKey) -> String {
         .or(key.old_path.as_deref())
         .map(escape_path)
         .unwrap_or_else(|| "Diff".to_owned());
-    format!("{} · {}", scope_label(&key.scope), path)
+    match &key.scope {
+        DiffScope::Commit { oid } => format!(
+            "Commit {} · {path}",
+            oid.chars().take(8).collect::<String>()
+        ),
+        scope => format!("{} · {path}", scope_label(scope)),
+    }
 }
 
 fn scope_label(scope: &DiffScope) -> &'static str {

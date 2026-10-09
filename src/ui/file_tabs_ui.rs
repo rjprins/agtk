@@ -80,16 +80,6 @@ impl Workspace {
             }
             return Some(tab_id);
         }
-        let previous = self
-            .workspace_tabs
-            .borrow()
-            .context_tabs(&key.worktree_root)
-            .into_iter()
-            .filter_map(|tab| match tab {
-                WorkspaceTabId::File(open) if open != key => Some(open),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
         if self
             .workspace_tabs
             .borrow_mut()
@@ -98,12 +88,6 @@ impl Workspace {
         {
             self.show_error("Could not open this file in the selected worktree");
             return None;
-        }
-        for open in previous {
-            self.file_tabs.borrow_mut().remove(&open);
-            self.diff_view_states
-                .borrow_mut()
-                .remove(&WorkspaceTabs::file_tab_id(&open));
         }
         self.file_tabs.borrow_mut().insert(
             key.clone(),
