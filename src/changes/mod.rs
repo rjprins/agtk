@@ -9,7 +9,8 @@ pub use content::{
     read_file_document,
 };
 pub use git::{
-    ChangeStatus, DiffScope, GitStatusFile, parse_name_status_z, parse_status_porcelain_v2_z,
+    ChangeStatus, DiffScope, GitStatusFile, parse_name_status_z, parse_numstat_z,
+    parse_status_porcelain_v2_z,
 };
 
 pub fn list_base_refs(root: &Path) -> Result<Vec<String>, String> {
@@ -84,6 +85,23 @@ pub struct ChangedFile {
     pub new_mode: Option<String>,
     pub old_blob: Option<String>,
     pub new_blob: Option<String>,
+    /// Added and deleted lines, or `None` for binary files and when Git could not count them.
+    pub lines: Option<LineCounts>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct LineCounts {
+    pub added: u64,
+    pub deleted: u64,
+}
+
+impl std::iter::Sum for LineCounts {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), |total, lines| Self {
+            added: total.added + lines.added,
+            deleted: total.deleted + lines.deleted,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,6 +312,7 @@ fn assemble_snapshot(
             new_mode: None,
             old_blob: None,
             new_blob: None,
+            lines: content::disk_line_counts(&context.root, &file.path),
         })
         .collect::<Vec<_>>();
     let mut all_paths = all_changes
@@ -317,6 +336,7 @@ fn assemble_snapshot(
                     new_mode: None,
                     old_blob: None,
                     new_blob: None,
+                    lines: file.lines,
                 });
             }
         }
@@ -335,6 +355,7 @@ fn assemble_snapshot(
                     new_mode: None,
                     old_blob: None,
                     new_blob: None,
+                    lines: file.lines,
                 });
             }
         }
@@ -355,6 +376,7 @@ fn assemble_snapshot(
                 .map(|mode| String::from_utf8_lossy(mode).into_owned()),
             old_blob: None,
             new_blob: None,
+            lines: None,
         })
         .collect::<Vec<_>>();
     let conflict_paths = conflicts
@@ -450,6 +472,7 @@ fn unborn_worktree_files(
             continue;
         };
         if fs::symlink_metadata(path).is_ok() {
+            let lines = content::disk_line_counts(root, &raw_path);
             files.push(ChangedFile {
                 old_path: None,
                 new_path: Some(raw_path),
@@ -459,6 +482,7 @@ fn unborn_worktree_files(
                 new_mode: None,
                 old_blob: None,
                 new_blob: None,
+                lines,
             });
         }
     }

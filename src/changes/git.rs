@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::command_runner::BoundedByteOutput;
 
-use super::{ChangedFile, CommitSummary};
+use super::{ChangedFile, CommitSummary, LineCounts};
 
 pub(super) const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 pub(super) const GIT_OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
@@ -109,8 +110,26 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = run_checked(root, arguments)?;
-    parse_name_status_z(&output.stdout, scope)
+    let arguments = arguments.into_iter().map(git_argument).collect::<Vec<_>>();
+    let output = run_checked(root, &arguments)?;
+    let mut files = parse_name_status_z(&output.stdout, scope)?;
+    // The counts only decorate the list, so a numstat that fails or times out leaves them out.
+    let numstat = arguments.iter().map(|argument| {
+        if argument == "--name-status" {
+            git_argument("--numstat")
+        } else {
+            argument.clone()
+        }
+    });
+    if let Ok(output) = run_checked(root, numstat)
+        && let Ok(counts) = parse_numstat_z(&output.stdout)
+    {
+        for file in &mut files {
+            let path = file.new_path.as_ref().or(file.old_path.as_ref());
+            file.lines = path.and_then(|path| counts.get(path).copied().flatten());
+        }
+    }
+    Ok(files)
 }
 
 pub(super) fn indexed_paths(root: &Path) -> Result<Vec<Vec<u8>>, String> {
@@ -401,9 +420,53 @@ pub fn parse_name_status_z(
             new_mode: None,
             old_blob: None,
             new_blob: None,
+            lines: None,
         });
     }
     Ok(files)
+}
+
+/// Line counts from `git diff --numstat -z`, keyed by the new path, or the old path of a
+/// deletion. Binary files map to `None`.
+pub fn parse_numstat_z(input: &[u8]) -> Result<HashMap<Vec<u8>, Option<LineCounts>>, String> {
+    let mut records = input.split(|byte| *byte == 0);
+    let mut counts = HashMap::new();
+    while let Some(record) = records.next() {
+        if record.is_empty() {
+            continue;
+        }
+        let mut fields = record.splitn(3, |byte| *byte == b'\t');
+        let (Some(added), Some(deleted), Some(mut path)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            return Err("malformed git numstat record".to_owned());
+        };
+        if path.is_empty() {
+            // A rename or copy: the old and the new path follow as records of their own.
+            records.next();
+            path = records
+                .next()
+                .filter(|path| !path.is_empty())
+                .ok_or_else(|| "git numstat rename has no destination path".to_owned())?;
+        }
+        let lines = match (numstat_count(added)?, numstat_count(deleted)?) {
+            (Some(added), Some(deleted)) => Some(LineCounts { added, deleted }),
+            _ => None,
+        };
+        counts.insert(path.to_vec(), lines);
+    }
+    Ok(counts)
+}
+
+fn numstat_count(value: &[u8]) -> Result<Option<u64>, String> {
+    if value == b"-" {
+        return Ok(None);
+    }
+    std::str::from_utf8(value)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .map(Some)
+        .ok_or_else(|| "malformed git numstat count".to_owned())
 }
 
 pub(super) fn output_text(output: &BoundedByteOutput) -> String {

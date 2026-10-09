@@ -15,7 +15,7 @@ use nix::sys::stat::{Mode, fstat, fstatat};
 use serde::{Deserialize, Serialize};
 
 use super::git::{DiffScope, git_argument, git_path_argument, run_checked};
-use super::{ChangeStatus, ChangedFile, DiffDocument, WorktreeContext};
+use super::{ChangeStatus, ChangedFile, DiffDocument, LineCounts, WorktreeContext};
 
 const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
@@ -387,6 +387,22 @@ pub fn read_diff_document(
         identity,
         metadata,
     }))
+}
+
+/// The lines of a file on disk, counted the way `git diff --numstat` counts an added file.
+/// Binary, oversized and non-regular files have no count.
+pub(super) fn disk_line_counts(root: &Path, raw_path: &[u8]) -> Option<LineCounts> {
+    let content = read_disk_file(root, raw_path, false).ok()?;
+    if content.special.is_some() || content.bytes.contains(&0) {
+        return None;
+    }
+    let bytes = &content.bytes;
+    let unterminated = !bytes.is_empty() && !bytes.ends_with(b"\n");
+    let newlines = bytes.iter().filter(|byte| **byte == b'\n').count();
+    Some(LineCounts {
+        added: (newlines + usize::from(unterminated)) as u64,
+        deleted: 0,
+    })
 }
 
 pub(super) fn capture_file_metadata(

@@ -7,7 +7,8 @@ use adw::prelude::*;
 use super::explorer_ui::{CHANGES_PAGE, FILES_PAGE, FileExplorer};
 use super::sidebar::{DEFAULT_CHANGES_WIDTH, MAX_CHANGES_WIDTH, MIN_CHANGES_WIDTH};
 use crate::changes::{
-    ChangeStatus, ChangedFile, ChangesSnapshot, CommitSummary, DiffScope, display_changed_path,
+    ChangeStatus, ChangedFile, ChangesSnapshot, CommitSummary, DiffScope, LineCounts,
+    display_changed_path,
 };
 
 const INITIAL_FILE_LIMIT: usize = 200;
@@ -641,7 +642,16 @@ fn append_file_group(
     scope: DiffScope,
     open_file: impl Fn(ChangedFile) + Clone + 'static,
 ) -> gtk::Expander {
-    let expander = gtk::Expander::new(Some(&format!("{title} ({})", files.len())));
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    header.append(&gtk::Label::new(Some(&format!(
+        "{title} ({})",
+        files.len()
+    ))));
+    if let Some(counts) = line_counts_label(files.iter().filter_map(|file| file.lines).sum()) {
+        header.append(&counts);
+    }
+    let expander = gtk::Expander::new(None);
+    expander.set_label_widget(Some(&header));
     expander.set_expanded(expanded);
     let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let shown = files.len().min(INITIAL_FILE_LIMIT);
@@ -677,16 +687,44 @@ pub(super) fn append_file_button(
     let status = status_glyph(file.status);
     let label = gtk::Label::new(Some(&format!("{status}  {path}")));
     label.set_xalign(0.0);
+    label.set_hexpand(true);
     label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     label.set_tooltip_text(Some(&path));
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    content.append(&label);
+    if let Some(counts) = file.lines.and_then(line_counts_label) {
+        content.append(&counts);
+    }
     let button = gtk::Button::new();
-    button.set_child(Some(&label));
+    button.set_child(Some(&content));
     button.set_halign(gtk::Align::Fill);
     button.add_css_class("flat");
     button.set_accessible_role(gtk::AccessibleRole::Button);
     let file = file.clone();
     button.connect_clicked(move |_| open_file(file.clone()));
     parent.append(&button);
+}
+
+/// `+added −deleted` in the diff colors, leaving out a side that is zero.
+fn line_counts_label(lines: LineCounts) -> Option<gtk::Box> {
+    if lines == LineCounts::default() {
+        return None;
+    }
+    let counts = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    for (count, sign, class) in [(lines.added, '+', "success"), (lines.deleted, '−', "error")] {
+        if count > 0 {
+            let label = gtk::Label::new(Some(&format!("{sign}{count}")));
+            label.add_css_class("caption");
+            label.add_css_class("numeric");
+            label.add_css_class(class);
+            counts.append(&label);
+        }
+    }
+    counts.set_tooltip_text(Some(&format!(
+        "{} added, {} deleted lines",
+        lines.added, lines.deleted
+    )));
+    Some(counts)
 }
 
 fn status_glyph(status: ChangeStatus) -> &'static str {

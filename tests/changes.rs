@@ -2,7 +2,10 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use agtk::changes::{DiffDocumentResult, read_changes_snapshot, read_diff_document};
+use agtk::changes::{
+    ChangedFile, DiffDocumentResult, LineCounts, parse_numstat_z, read_changes_snapshot,
+    read_commit_files, read_diff_document,
+};
 
 fn git(root: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -302,4 +305,64 @@ fn a_commit_without_a_message_still_lists_every_commit() {
     assert_eq!(snapshot.commits.len(), 2);
     assert_eq!(snapshot.commits[0].subject, "");
     assert_eq!(snapshot.commits[1].subject, "Change");
+}
+
+#[test]
+fn changed_files_carry_their_line_counts() {
+    let dir = repository();
+    let root = dir.path();
+    fs::write(root.join("file.txt"), "committed\nstaged\n").unwrap();
+    git(root, &["add", "."]);
+    fs::write(root.join("file.txt"), "working\nstaged\nmore\n").unwrap();
+    fs::write(root.join("new.txt"), "one\ntwo\nno newline").unwrap();
+    fs::write(root.join("blob.bin"), b"\0binary").unwrap();
+    let snapshot = read_changes_snapshot(root, Some("HEAD~1"), 0, 0)
+        .unwrap()
+        .unwrap();
+    let lines = |files: &[ChangedFile], path: &str| {
+        files
+            .iter()
+            .find(|file| file.new_path.as_deref() == Some(path.as_bytes()))
+            .unwrap()
+            .lines
+    };
+    let counts = |added, deleted| Some(LineCounts { added, deleted });
+
+    assert_eq!(lines(&snapshot.staged, "file.txt"), counts(1, 0));
+    assert_eq!(lines(&snapshot.unstaged, "file.txt"), counts(2, 1));
+    assert_eq!(lines(&snapshot.branch_changes, "file.txt"), counts(1, 1));
+    assert_eq!(lines(&snapshot.all_changes, "file.txt"), counts(3, 1));
+    assert_eq!(lines(&snapshot.untracked, "new.txt"), counts(3, 0));
+    assert_eq!(lines(&snapshot.all_changes, "new.txt"), counts(3, 0));
+    assert_eq!(lines(&snapshot.untracked, "blob.bin"), None);
+    let commit = read_commit_files(&snapshot.context, &snapshot.commits[0].oid).unwrap();
+    assert_eq!(lines(&commit, "file.txt"), counts(1, 1));
+}
+
+#[test]
+fn numstat_records_key_counts_by_new_path_and_leave_binaries_uncounted() {
+    let input = [
+        b"3\t1\tsrc/a.rs\0".as_slice(),
+        b"-\t-\timage.png\0",
+        b"1\t0\t\0old.rs\0new.rs\0",
+    ]
+    .concat();
+    let counts = parse_numstat_z(&input).unwrap();
+    assert_eq!(counts.len(), 3);
+    assert_eq!(
+        counts[b"src/a.rs".as_slice()],
+        Some(LineCounts {
+            added: 3,
+            deleted: 1
+        })
+    );
+    assert_eq!(counts[b"image.png".as_slice()], None);
+    assert_eq!(
+        counts[b"new.rs".as_slice()],
+        Some(LineCounts {
+            added: 1,
+            deleted: 0
+        })
+    );
+    assert!(parse_numstat_z(b"3\tsrc/a.rs\0").is_err());
 }

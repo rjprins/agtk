@@ -109,7 +109,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 
 ### Changes and files
 
-- The Changes sidebar shows staged, unstaged, untracked, branch, and commit diffs. It is read only.
+- The Changes sidebar shows staged, unstaged, untracked, branch, and commit diffs, with added and deleted line counts per file and per group. It is read only.
 - Choose what to compare with: a branch, or a number of commits back.
 - The Files page lists every file in the worktree, with a filter. Files open read only in the same viewer.
 - Open an image from Files or a path in the terminal to view it in agtk. Use **Fit to window** or **Actual size (100%)**, with scrolling for large images. PNG, JPEG, GIF, WebP, SVG, BMP, ICO, and AVIF files up to 20 MiB are supported; decoding depends on WebKit's installed codecs. Transparent areas show a checkerboard, and changed images get the same reload banner as text files.

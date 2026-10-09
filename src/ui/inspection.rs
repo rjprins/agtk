@@ -321,6 +321,7 @@ impl Workspace {
                         new_mode: None,
                         old_blob: None,
                         new_blob: None,
+                        lines: None,
                     });
                     UiNode {
                         id: crate::workspace_tabs::WorkspaceTabs::diff_tab_id(key),
@@ -1038,8 +1039,13 @@ fn changed_file_node(
     visible: bool,
     bounds: Bounds,
 ) -> UiNode {
+    // Line counts change with every edit, so they stay out of the node identity.
+    let identity = crate::changes::ChangedFile {
+        lines: None,
+        ..file.clone()
+    };
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    std::hash::Hash::hash(file, &mut hasher);
+    std::hash::Hash::hash(&identity, &mut hasher);
     UiNode {
         id: format!(
             "{prefix}-{index}-{:016x}",
