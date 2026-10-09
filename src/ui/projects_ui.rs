@@ -223,6 +223,15 @@ impl Workspace {
                     .unwrap_or_default();
                 workspace.sidebar_row(&key).upcast()
             });
+        let workspace = self.clone();
+        self.inactive_list
+            .bind_model(Some(&self.inactive_sidebar_model), move |item| {
+                let key = item
+                    .downcast_ref::<gtk::StringObject>()
+                    .map(|key| key.string().to_string())
+                    .unwrap_or_default();
+                workspace.sidebar_row(&key).upcast()
+            });
     }
 
     /// Builds the row for a key; session rows are the long-lived rows the sessions own.
@@ -298,11 +307,12 @@ impl Workspace {
                 }
             }
         }
+        let mut inactive_keys = Vec::new();
         if !inactive.is_empty() {
             let is_expanded = self.inactive_projects_expanded.get();
-            keys.push(SidebarKey::inactive_key(inactive.len(), is_expanded));
+            inactive_keys.push(SidebarKey::inactive_key(inactive.len(), is_expanded));
             if is_expanded {
-                keys.extend(
+                inactive_keys.extend(
                     inactive
                         .iter()
                         .map(|project| SidebarKey::inactive_project_key(&project.root)),
@@ -310,6 +320,7 @@ impl Workspace {
             }
         }
         self.splice_sidebar(&keys);
+        self.splice_inactive_sidebar(&inactive_keys);
 
         let selected = self.selected_session_id().and_then(|id| {
             self.sessions
@@ -399,7 +410,14 @@ impl Workspace {
 
     /// Replaces only the changed middle of the key list, so untouched rows keep focus.
     fn splice_sidebar(&self, keys: &[String]) {
-        let model = &self.sidebar_model;
+        Self::splice_model(&self.sidebar_model, keys);
+    }
+
+    fn splice_inactive_sidebar(&self, keys: &[String]) {
+        Self::splice_model(&self.inactive_sidebar_model, keys);
+    }
+
+    fn splice_model(model: &gio::ListStore, keys: &[String]) {
         let current = (0..model.n_items())
             .filter_map(|index| model.item(index).and_downcast::<gtk::StringObject>())
             .map(|key| key.string().to_string())

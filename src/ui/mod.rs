@@ -94,6 +94,8 @@ struct Workspace {
     list: gtk::ListBox,
     /// One key per sidebar row; the list is bound to it so updates only touch changed rows.
     sidebar_model: gio::ListStore,
+    inactive_list: gtk::ListBox,
+    inactive_sidebar_model: gio::ListStore,
     stack: gtk::Stack,
     center_tabs: gtk::Box,
     workspace_tabs: Rc<RefCell<crate::workspace_tabs::WorkspaceTabs>>,
@@ -261,10 +263,21 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     list.add_css_class("navigation-sidebar");
     list.add_css_class("session-list");
 
+    let inactive_list = gtk::ListBox::new();
+    inactive_list.set_selection_mode(gtk::SelectionMode::None);
+    inactive_list.add_css_class("navigation-sidebar");
+    let sidebar_content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    sidebar_content.set_vexpand(true);
+    sidebar_content.append(&list);
+    let sidebar_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    sidebar_spacer.set_vexpand(true);
+    sidebar_content.append(&sidebar_spacer);
+    sidebar_content.append(&inactive_list);
+
     let sidebar = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vexpand(true)
-        .child(&list)
+        .child(&sidebar_content)
         .build();
     let sidebar_brand_icon = provider_icons::brand_icon();
     let sidebar_heading = gtk::Label::new(Some("agtk"));
@@ -616,6 +629,8 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         window: window.clone(),
         list: list.clone(),
         sidebar_model: gio::ListStore::new::<gtk::StringObject>(),
+        inactive_list: inactive_list.clone(),
+        inactive_sidebar_model: gio::ListStore::new::<gtk::StringObject>(),
         stack: stack.clone(),
         center_tabs: center_tabs.clone(),
         workspace_tabs: Rc::new(RefCell::new(crate::workspace_tabs::WorkspaceTabs::default())),
