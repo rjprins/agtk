@@ -1774,6 +1774,11 @@ mod tests {
             // A fresh TUI enables these modes, but must receive the same normalized input.
             terminal.feed(b"\x1b[?1049h\x1b[?1000h\x1b[?1003h\x1b[?1006h\x1b[?1007l");
             pump(100);
+            call(
+                "NotifyPointerMotionRelative",
+                Some((100.0_f64, 100.0_f64).to_variant()),
+            );
+            pump(100);
             read_input(&mut slave);
             scroll(-height * 2.0);
             let input = read_input(&mut slave);
@@ -1781,6 +1786,30 @@ mod tests {
                 input.matches("\x1b[<64;").count(),
                 1,
                 "{kind:?}: fresh TUI must not amplify touchpad pixels: {input:?}"
+            );
+            let wheel_position = |input: &str| {
+                input
+                    .split("\x1b[<64;")
+                    .nth(1)
+                    .unwrap()
+                    .split('M')
+                    .next()
+                    .unwrap()
+                    .to_owned()
+            };
+            let before_motion = wheel_position(&input);
+            call(
+                "NotifyPointerMotionRelative",
+                Some((100.0_f64, 100.0_f64).to_variant()),
+            );
+            pump(100);
+            read_input(&mut slave);
+            scroll(-height * 2.0);
+            let input = read_input(&mut slave);
+            assert_ne!(
+                wheel_position(&input),
+                before_motion,
+                "{kind:?}: fullscreen wheel events must follow pointer motion: {input:?}"
             );
             window.set_child(None::<&gtk::Widget>);
         }
