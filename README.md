@@ -290,7 +290,7 @@ Run `scripts/test-image-viewer.sh` to check image rendering, sizing, errors, and
 
 ## Acknowledgements
 
-- [Orca](https://github.com/stablyai/orca) inspired the idea. agtk puts agent sessions first and treats the worktree as their context.
+- agtk grew out of [agmux](https://github.com/rjprins/agmux), my earlier web UI for managing coding-agent terminal sessions.
 - The Codex and Gemini status rules are ported from [agent-manager](https://github.com/YoanWai/agent-manager).
 
 ## License
