@@ -123,22 +123,82 @@ fn unavailable_ancestor_keeps_selection_instead_of_falling_back_to_main() {
 }
 
 #[test]
-fn worktree_files_list_tracked_and_untracked_but_not_ignored_paths() {
+fn worktree_files_list_existing_tracked_untracked_and_ignored_paths() {
     let dir = repository();
     let root = dir.path();
     fs::create_dir_all(root.join("src/nested")).unwrap();
     fs::write(root.join("src/nested/new.rs"), "fn main() {}\n").unwrap();
-    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::write(root.join(".gitignore"), "target/\n.env\n").unwrap();
+    fs::write(root.join(".env"), "LOCAL=value\n").unwrap();
     fs::create_dir_all(root.join("target")).unwrap();
     fs::write(root.join("target/ignored.txt"), "ignored\n").unwrap();
+    fs::write(root.join("deleted.txt"), "deleted\n").unwrap();
+    git(root, &["add", "deleted.txt"]);
+    fs::remove_file(root.join("deleted.txt")).unwrap();
     let mut files = agtk::changes::list_worktree_files(root).unwrap();
     files.sort();
     assert_eq!(
         files,
         [
+            b".env".to_vec(),
             b".gitignore".to_vec(),
             b"file.txt".to_vec(),
             b"src/nested/new.rs".to_vec(),
+            b"target/ignored.txt".to_vec(),
+        ]
+    );
+}
+
+#[test]
+fn worktree_files_list_nested_repositories_without_git_metadata() {
+    let dir = repository();
+    let root = dir.path();
+    let nested = root.join("vendor/library");
+    fs::create_dir_all(&nested).unwrap();
+    git(&nested, &["init", "-b", "main"]);
+    fs::write(nested.join("source.rs"), "fn library() {}\n").unwrap();
+    let linked = root.join("linked");
+    fs::create_dir(&linked).unwrap();
+    fs::write(linked.join(".git"), "gitdir: /elsewhere\n").unwrap();
+    fs::write(linked.join("notes.txt"), "linked worktree\n").unwrap();
+
+    let mut files = agtk::changes::list_worktree_files(root).unwrap();
+    files.sort();
+    assert_eq!(
+        files,
+        [
+            b"file.txt".to_vec(),
+            b"linked/notes.txt".to_vec(),
+            b"vendor/library/source.rs".to_vec(),
+        ]
+    );
+}
+
+#[test]
+fn worktree_files_preserve_path_bytes_and_list_links_without_following_them() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let unusual_name = b"new\nfile-\xff.txt";
+    fs::write(root.join(OsStr::from_bytes(unusual_name)), "content\n").unwrap();
+    symlink(".", root.join("loop")).unwrap();
+    symlink("missing.txt", root.join("broken-link")).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("outside.txt"), "outside\n").unwrap();
+    symlink(outside.path(), root.join("external")).unwrap();
+
+    let mut files = agtk::changes::list_worktree_files(root).unwrap();
+    files.sort();
+    assert_eq!(
+        files,
+        [
+            b"broken-link".to_vec(),
+            b"external".to_vec(),
+            b"loop".to_vec(),
+            unusual_name.to_vec(),
         ]
     );
 }

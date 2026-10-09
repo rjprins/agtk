@@ -13,7 +13,7 @@ pub const MAX_FILTER_MATCHES: usize = 500;
 pub struct FileNode {
     /// The last path component, shown as the row label.
     pub name: String,
-    /// The worktree-relative path exactly as Git printed it.
+    /// The worktree-relative path with its original filesystem bytes.
     pub path: Vec<u8>,
     pub is_dir: bool,
     /// Directories first, then files, both in case-insensitive order.

@@ -17,9 +17,50 @@ pub fn list_base_refs(root: &Path) -> Result<Vec<String>, String> {
     git::base_refs(root)
 }
 
-/// Every tracked or untracked, not ignored file below `root`, for the Files page.
+/// Every file on disk below `root`, including hidden and Git-ignored files.
+/// Git metadata is excluded and directory symlinks are listed without following them.
 pub fn list_worktree_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
-    git::worktree_files(root)
+    let mut files = Vec::new();
+    let mut directories = vec![PathBuf::new()];
+    while let Some(directory) = directories.pop() {
+        let absolute = root.join(&directory);
+        let entries = match fs::read_dir(&absolute) {
+            Ok(entries) => entries,
+            // Build output may disappear while the tree is being refreshed.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    && !directory.as_os_str().is_empty() =>
+            {
+                continue;
+            }
+            Err(error) => return Err(format!("Could not read {}: {error}", absolute.display())),
+        };
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| format!("Could not read {}: {error}", absolute.display()))?;
+            let name = entry.file_name();
+            if name == ".git" {
+                continue;
+            }
+            let path = directory.join(name);
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "Could not inspect {}: {error}",
+                        entry.path().display()
+                    ));
+                }
+            };
+            if file_type.is_dir() {
+                directories.push(path);
+            } else {
+                files.push(path.as_os_str().as_bytes().to_vec());
+            }
+        }
+    }
+    Ok(files)
 }
 
 pub fn commit_is_in_branch(context: &WorktreeContext, commit_oid: &str) -> Result<bool, String> {

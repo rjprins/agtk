@@ -14,7 +14,7 @@ The Changes sidebar only reaches files that changed. Reading the rest of the wor
 
 ## Decision
 
-The right sidebar gets two pages in an `AdwViewStack` with an `AdwInlineViewSwitcher`: Changes and Files. Files is a `GtkListView` over a `GtkTreeListModel`, so rows are recycled and folders build their children only when expanded. The tree comes from one `git ls-files --cached --others --exclude-standard` per refresh, so ignored build output stays out. Change marks come from the Changes snapshot. A filter entry swaps the tree for a flat list of matching paths.
+The right sidebar gets two pages in an `AdwViewStack` with an `AdwInlineViewSwitcher`: Changes and Files. Files is a `GtkListView` over a `GtkTreeListModel`, so rows are recycled and folders build their children only when expanded. The tree comes from a filesystem walk per refresh, including untracked, hidden and ignored files such as build output. Git metadata (`.git`) stays out, and directory symlinks appear without traversing their targets. Change marks come from the Changes snapshot. A filter entry swaps the tree for a flat list of matching paths.
 
 Files open read only in the same Monaco WebView as diffs. It now holds a diff editor and a plain editor and shows one of them. Each worktree has one reusable file buffer next to its diff buffer. A file on disk that changes while shown gets the same reload banner as a diff.
 

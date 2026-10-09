@@ -112,7 +112,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 
 - The Changes sidebar shows staged, unstaged, untracked, branch, and commit diffs, with added and deleted line counts per file and per group. It is read only.
 - Choose what to compare with: a branch, or a number of commits back.
-- The Files page lists every file in the worktree, with a filter. Files open read only in the same viewer.
+- The Files page lists every file on disk in the worktree, including untracked, hidden and ignored files, with a filter. Git metadata stays hidden. Files open read only in the same viewer.
 - Relative file links in terminal output try the session's associated worktree first, then the terminal's current and launch directories and their Git roots. Changing a session's worktree also changes where these links look first.
 - Open an image from Files or a path in the terminal to view it in agtk. Use **Fit to window** or **Actual size (100%)**, with scrolling for large images. PNG, JPEG, GIF, WebP, SVG, BMP, ICO, and AVIF files up to 20 MiB are supported; decoding depends on WebKit's installed codecs. Transparent areas show a checkerboard, and changed images get the same reload banner as text files.
 - Markdown files show rendered, with a switch between Source and Preview. File tabs start in Preview and diffs in Source, and agtk remembers your choice for each. Links to other files open them in the viewer, at the line for links like `main.rs#L12`. Web links open in the browser. Images show as placeholders, because the viewer cannot read files or reach the network.

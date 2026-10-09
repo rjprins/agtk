@@ -3419,11 +3419,18 @@ fn files_page_lists_the_worktree_and_opens_files_read_only() {
         }
         panic!("{id} never showed {needle}: {last}");
     };
-    // .gitignore, notes.md and src/lib.rs; target/ is ignored.
-    let page = wait_for("files-page", "3 files");
+    // Ignored build output is browsable alongside tracked and untracked files.
+    let page = wait_for("files-page", "4 files");
     assert_eq!(page["isVisible"], true);
     assert_eq!(wait_for("changes-header", "Files")["role"], "tablist");
-    wait_for("files-tree", "tree: 3 rows");
+    wait_for("files-tree", "tree: 4 rows");
+
+    let ignored = app.request(
+        "ui.open_file",
+        json!({"sessionId":id,"path":"target/ignored"}),
+    );
+    assert_eq!(ignored["opened"], true);
+    wait_for("diff-viewer", "rendered: 1 lines");
 
     let opened = app.request(
         "ui.open_file",

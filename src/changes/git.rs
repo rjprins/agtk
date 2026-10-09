@@ -142,26 +142,6 @@ pub(super) fn indexed_paths(root: &Path) -> Result<Vec<Vec<u8>>, String> {
         .collect())
 }
 
-/// Tracked and untracked files that are not ignored, as worktree-relative paths.
-pub(super) fn worktree_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
-    let output = run_checked(
-        root,
-        [
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ],
-    )?;
-    Ok(output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .map(<[u8]>::to_vec)
-        .collect())
-}
-
 pub(super) fn base_refs(root: &Path) -> Result<Vec<String>, String> {
     let output = run_checked(
         root,
