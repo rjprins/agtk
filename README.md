@@ -1,6 +1,10 @@
 # agtk
 
-A native GNOME workspace for running many coding agents at once.
+My native GNOME workspace for running many coding agents at once.
+
+agtk is personal software. I built it for myself, together with the coding agents it runs, and it fits how I work: Arch Linux, GNOME on Wayland, Claude Code and Codex, Azure DevOps pull requests, and Emacs. It is not a product or a community project. There is no issue tracker and no roadmap, and I don't take pull requests.
+
+If you want to use it, fork it and make it yours. agtk is built to be changed by its own agents: when it starts with nothing open, it opens Claude Code in its own source code and asks what you want to know or change. See [Make it yours](#make-it-yours).
 
 agtk runs Claude Code, Codex, Gemini and plain shells side by side in one window, grouped by project and git worktree. It shows which agent needs you, what each one changed, and keeps every session running even when the window closes.
 
@@ -17,22 +21,33 @@ agtk runs Claude Code, Codex, Gemini and plain shells side by side in one window
 - **Native, not Electron.** Built in Rust with GTK 4 and libadwaita. Each session is a real VTE terminal with true color, search and prompt history.
 - **Zero agent setup.** Claude Code reports its state through hooks that agtk generates on the fly. The installer adds the agtk MCP server to Claude Code and Codex, so agents can use agtk right away.
 
-## Project status
-
-agtk is developed and used daily on Arch Linux with GNOME on Wayland. Other distributions and desktops are untested, and the interface and command line may change between versions.
-
-## Install
+## Make it yours
 
 Paste this into Claude Code, Codex, or another coding agent:
 
 ```text
-Check out https://github.com/rjprins/agtk into a directory I can keep.
+Make me my own copy of https://github.com/rjprins/agtk in a directory I can keep:
+fork it with the GitHub CLI if I use it, or else clone it.
 Before running anything, inspect the repository and its dependencies.
 Look for suspicious or malicious behavior.
-If it appears safe, install and run it so I can try it out and make my own changes.
+If it appears safe, install and run it.
 ```
 
-To install by hand, install the [requirements](#requirements), clone the repository, and run:
+agtk then starts with Claude Code open in its own source code, or Codex when Claude Code is not installed. The agent welcomes you and asks what you want to know or change. For example:
+
+- "How do sessions keep running when I close the window?"
+- "Rename agtk to ..."
+- "Add a dialog that lists my open GitHub pull requests"
+- "Remove the 'Open this file in Emacs' button"
+- "Add OpenCode as an agent I can launch"
+
+After a change, the agent runs the checks and rebuilds agtk. Restart agtk to use the new build: your sessions keep running while it restarts. The agent opens again whenever agtk starts with nothing open, and you can always launch one in the checkout yourself. Without Claude Code or Codex, or when the checkout agtk was built from is gone, agtk opens a shell instead.
+
+From then on your copy is yours. Commit to it like any other repository. My later changes stay here; ask your agent to merge them in if you want them.
+
+I use agtk every day on Arch Linux with GNOME on Wayland. Other distributions and desktops are untested. If yours differs, tell the agent what breaks.
+
+To install by hand, install the [requirements](#requirements), fork or clone the repository, and run:
 
 ```sh
 ./scripts/install-local.sh
@@ -74,12 +89,6 @@ Optional tools:
 - `claude`, `codex`, or `gemini` for the agents you want to run
 - The Azure CLI with the Azure DevOps extension, signed in, for pull requests
 - `emacsclient` for the Emacs actions
-
-## Your agtk
-
-agtk is meant to keep changing to fit how you work. When it starts with nothing open, it opens Claude Code in its own source code, or Codex when Claude Code is not installed. That agent explains any feature, helps set up the integrations, and changes or adds features when you ask. After a change it rebuilds agtk. Restart agtk to use the new build: your sessions keep running while it restarts.
-
-Without Claude Code or Codex, or when the source directory agtk was built from is gone, agtk opens a shell instead.
 
 ## Features
 

@@ -10,11 +10,17 @@ use crate::session::SessionKind;
 /// The welcome agent's first prompt. The user reads it as their own first message.
 pub const PROMPT: &str = "\
 agtk just started with nothing open, so it opened you in its own source code. \
-Read README.md, then welcome me to agtk in a few short lines. Tell me you can:
-- explain any agtk feature, or help me set up the optional integrations
-- change agtk or add features to it: agtk is meant to keep changing to fit my workflow, \
-and this checkout is where that happens
-Also mention that Ctrl+Shift+` launches more agents and shells, in any project.
+This checkout is my own copy of agtk, personal software that I change to fit how I work. \
+Read README.md, then welcome me in a few short lines: you can explain any part of agtk, \
+and change it or add to it when I ask. Mention that Ctrl+Shift+Backquote launches more \
+agents and shells, in any project. Then ask what I want to know or change, \
+and offer these as examples:
+- \"How do sessions keep running when I close the window?\"
+- \"Rename agtk to ...\"
+- \"Add a dialog that lists my open GitHub pull requests\"
+- \"Remove the 'Open this file in Emacs' button\"
+- \"Add OpenCode as an agent I can launch\"
+
 Don't change any files until I ask. After a change, run the checks from the README, \
 rebuild with ./scripts/install-local.sh, and ask me to restart agtk. \
 Sessions keep running while it restarts.";
