@@ -1109,15 +1109,21 @@ impl Workspace {
         for tab in tabs {
             match &tab {
                 WorkspaceTabId::Session(session_id) => {
-                    let Some(session_name) = self
+                    let Some((session_name, session_kind)) = self
                         .sessions
                         .borrow()
                         .get(session_id)
-                        .map(|session| session.record.name.clone())
+                        .map(|session| (session.record.name.clone(), session.record.kind))
                     else {
                         continue;
                     };
                     let button = gtk::ToggleButton::with_label(&session_name);
+                    button.add_css_class("workspace-tab");
+                    button.add_css_class(if session_kind == crate::session::SessionKind::Shell {
+                        "workspace-tab-shell"
+                    } else {
+                        "workspace-tab-agent"
+                    });
                     button.set_active(active.as_ref() == Some(&tab));
                     button.set_tooltip_text(Some(&session_name));
                     button.set_accessible_role(gtk::AccessibleRole::Tab);
@@ -1142,6 +1148,7 @@ impl Workspace {
                     row.add_css_class("linked");
                     let label = diff_tab_label(key);
                     let button = gtk::ToggleButton::with_label(&label);
+                    button.add_css_class("workspace-tab-file");
                     button.set_active(active.as_ref() == Some(&tab));
                     button.set_tooltip_text(Some(&diff_tab_tooltip(key)));
                     button.set_accessible_role(gtk::AccessibleRole::Tab);
@@ -1165,6 +1172,7 @@ impl Workspace {
                     let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
                     row.add_css_class("linked");
                     let button = gtk::ToggleButton::with_label(&file_tabs_ui::file_tab_label(key));
+                    button.add_css_class("workspace-tab-file");
                     button.set_active(active.as_ref() == Some(&tab));
                     button.set_tooltip_text(Some(&file_tabs_ui::file_tab_title(key)));
                     button.set_accessible_role(gtk::AccessibleRole::Tab);
