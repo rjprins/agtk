@@ -45,6 +45,7 @@ const CHROME_CSS: &str = r#"
   font-variant-numeric: tabular-nums;
 }
 .usage-status-bar image { -gtk-icon-size: 14px; }
+.context-meter.warning { color: var(--warning-color); }
 .navigation-sidebar row.session-ready:not(:selected) {
   background: color-mix(in srgb, var(--success-color) 12%, transparent);
 }

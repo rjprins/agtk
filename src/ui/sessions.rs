@@ -3,12 +3,13 @@ use super::sidebar::{
 };
 use super::*;
 use crate::persist::now_millis;
+use crate::providers::DiscoveryRoots;
 use crate::session::Attachment;
 use std::ffi::OsString;
 use std::process::Command;
 use std::time::Instant;
 
-use crate::agent_hooks::ensure_claude_hook_settings;
+use crate::agent_hooks::{ensure_claude_hook_settings, has_own_status_line};
 use crate::agent_status::ScreenTracker;
 use crate::emacs::EmacsIntegration;
 use crate::instance::ensure_private_dir;
@@ -520,7 +521,16 @@ impl Workspace {
                 record.state = SessionState::Reconnecting;
                 store.save_session(&record)?;
                 let mut hook_args: Vec<OsString> = if record.kind == SessionKind::Claude {
-                    let settings = ensure_claude_hook_settings(paths.runtime_dir(), &agtkctl)?;
+                    // agtk's status line would hide the user's own.
+                    let claude_config_dir = DiscoveryRoots::from_environment().claude_config_dir;
+                    let sessions_dir = paths.sessions_dir();
+                    let report_context = (!has_own_status_line(
+                        &claude_config_dir,
+                        record.cwd.as_deref(),
+                    ))
+                    .then_some(sessions_dir.as_path());
+                    let settings =
+                        ensure_claude_hook_settings(paths.runtime_dir(), &agtkctl, report_context)?;
                     vec!["--settings".into(), settings.into_os_string()]
                 } else {
                     Vec::new()

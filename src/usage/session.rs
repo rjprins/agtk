@@ -191,6 +191,15 @@ impl UsageReader {
     }
 }
 
+/// The context window in a Claude Code status line report. Claude's transcripts
+/// never record it, so agtk's status line saves that input for each session.
+pub fn reported_context_window(report: &[u8]) -> Option<u64> {
+    let report: Value = serde_json::from_slice(report).ok()?;
+    report["context_window"]["context_window_size"]
+        .as_u64()
+        .filter(|size| *size > 0)
+}
+
 fn count(value: &Value, key: &str) -> u64 {
     value[key].as_u64().unwrap_or(0)
 }
@@ -313,6 +322,19 @@ mod tests {
         assert_eq!(usage.total(), 278);
         assert_eq!(usage.cached, 200);
         assert_eq!(usage.context_remaining(), None);
+    }
+
+    #[test]
+    fn status_line_reports_supply_the_context_window() {
+        let report = json!({"session_id":"a","context_window":{
+            "total_input_tokens":0,"context_window_size":1_000_000,"used_percentage":null}});
+        assert_eq!(
+            reported_context_window(report.to_string().as_bytes()),
+            Some(1_000_000)
+        );
+        let empty = json!({"context_window":{"context_window_size":0}});
+        assert_eq!(reported_context_window(empty.to_string().as_bytes()), None);
+        assert_eq!(reported_context_window(b"{\"context_window\":"), None);
     }
 
     #[test]

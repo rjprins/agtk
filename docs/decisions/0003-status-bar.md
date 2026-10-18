@@ -14,8 +14,11 @@ a background worker. An unavailable reading must not appear as zero usage.
 Read selected-session tokens from local transcripts on a background worker.
 Codex reports cumulative tokens and the most recent context window. Claude
 transcripts report per-message usage; deduplicate streaming updates. Only show
-a context percentage when the log supplies the capacity. Do not infer account
-quota from cumulative token usage. Bound reads and retain incomplete lines.
+a context percentage when the capacity is reported, never inferred from a model
+name. Claude Code reports it only to a status line, so agtk's `--settings` adds
+one that saves its input beside the session socket and prints nothing; skip it
+when the user's or project's settings have their own status line. Do not infer
+account quota from cumulative token usage. Bound reads and retain incomplete lines.
 Detect replacements, truncation and changed append boundaries immediately.
 Reconcile changed transcripts from the beginning once a minute, in bounded
 background chunks, to catch in-place edits outside those boundaries without

@@ -13,7 +13,7 @@ agtk runs Claude Code, Codex, Gemini and plain shells side by side in one window
 ## Highlights
 
 - **Know which agent needs you.** Every session shows a live state: busy, waiting for input, ready for review, or idle. `Ctrl+Shift+Space` jumps to the next session that is ready.
-- **Usage at a glance.** The bottom bar shows account quota on the left, selected-session tokens and available context in the middle, and whole-machine CPU/RAM on the right. Click a section for details and quota reset times. Claude and Codex token usage comes from local logs; context remaining appears when the log reports its capacity.
+- **Usage at a glance.** The bottom bar shows account quota on the left, selected-session tokens and a ring showing how full its context window is in the middle, and whole-machine CPU/RAM on the right. Click a section for details and quota reset times. Claude and Codex token usage comes from local logs. Codex logs report the context window size; Claude Code reports it to a silent status line that agtk adds, unless you have a status line of your own.
 - **Sessions outlive the window.** Each terminal runs in its own process. Close, crash, or rebuild agtk and it reattaches to every running agent. After a reboot it offers to resume each conversation where it stopped.
 - **Worktree-native.** Launch an agent in a fresh worktree with a generated branch in one step. Removing a worktree saves uncommitted work and tags the branch tip first, so nothing is lost.
 - **Review without leaving the window.** The Changes sidebar shows staged, unstaged, branch and commit diffs for the session's worktree. File paths in the terminal open in the built-in viewer at the right line.

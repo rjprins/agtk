@@ -280,6 +280,7 @@ struct SocketGuard(PathBuf);
 impl Drop for SocketGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(crate::agent_hooks::context_report_path(&self.0));
     }
 }
 

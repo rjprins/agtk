@@ -1,18 +1,24 @@
 //! Bottom-row presentation and background collection for usage measurements.
 
 use super::*;
+use crate::agent_hooks::context_report_path;
 use crate::providers::{AgentProvider, DiscoveryRoots};
 use crate::usage::quota::{self, AccountQuota};
-use crate::usage::session::{SessionUsage, UsageReader};
+use crate::usage::session::{SessionUsage, UsageReader, reported_context_window};
 use crate::usage::system::{CpuSample, Memory};
 
 type UsageSelection = Option<(String, Option<String>)>;
+use std::f64::consts::{FRAC_PI_2, TAU};
 use std::time::Instant;
+
+/// Context use that turns the ring to the warning color, in percent.
+const CONTEXT_WARNING: f64 = 80.0;
 
 #[derive(Clone)]
 pub(super) struct Segment {
     pub button: gtk::MenuButton,
     pub label: gtk::Label,
+    content: gtk::Box,
     details: gtk::Label,
 }
 
@@ -58,6 +64,7 @@ impl Segment {
         Self {
             button,
             label,
+            content,
             details,
         }
     }
@@ -70,6 +77,86 @@ impl Segment {
         self.button.set_tooltip_text(Some(details));
         self.button
             .update_property(&[gtk::accessible::Property::Label(text)]);
+    }
+}
+
+/// A ring that fills with the selected session's context, as in Claude's apps.
+#[derive(Clone)]
+pub(super) struct ContextMeter {
+    root: gtk::Box,
+    label: gtk::Label,
+    ring: gtk::DrawingArea,
+    used: Rc<Cell<f64>>,
+}
+
+impl ContextMeter {
+    fn new() -> Self {
+        let used = Rc::new(Cell::new(0.0));
+        let ring = gtk::DrawingArea::builder()
+            .content_width(14)
+            .content_height(14)
+            .valign(gtk::Align::Center)
+            .build();
+        let percent = used.clone();
+        ring.set_draw_func(move |ring, cr, width, height| {
+            let color = ring.color();
+            let paint = |alpha: f32| {
+                cr.set_source_rgba(
+                    color.red().into(),
+                    color.green().into(),
+                    color.blue().into(),
+                    (color.alpha() * alpha).into(),
+                );
+            };
+            let line = 2.0;
+            let (x, y) = (f64::from(width) / 2.0, f64::from(height) / 2.0);
+            let radius = x.min(y) - line / 2.0;
+            cr.set_line_width(line);
+            paint(0.25);
+            cr.arc(x, y, radius, 0.0, TAU);
+            let _ = cr.stroke();
+            if percent.get() > 0.0 {
+                paint(1.0);
+                cr.set_line_cap(gtk::cairo::LineCap::Round);
+                cr.arc(
+                    x,
+                    y,
+                    radius,
+                    -FRAC_PI_2,
+                    -FRAC_PI_2 + TAU * percent.get() / 100.0,
+                );
+                let _ = cr.stroke();
+            }
+        });
+        let label = gtk::Label::new(None);
+        let root = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        root.add_css_class("context-meter");
+        root.set_margin_start(8);
+        root.append(&ring);
+        root.append(&label);
+        root.set_visible(false);
+        Self {
+            root,
+            label,
+            ring,
+            used,
+        }
+    }
+
+    fn set(&self, used: Option<f64>) {
+        self.root.set_visible(used.is_some());
+        let Some(used) = used.map(|used| used.clamp(0.0, 100.0)) else {
+            return;
+        };
+        if self.used.replace(used) != used {
+            self.ring.queue_draw();
+        }
+        self.label.set_text(&format!("{used:.0}%"));
+        if used >= CONTEXT_WARNING {
+            self.root.add_css_class("warning");
+        } else {
+            self.root.remove_css_class("warning");
+        }
     }
 }
 
@@ -86,6 +173,7 @@ pub(super) struct StatusBar {
     pub root: gtk::Box,
     pub account: Segment,
     pub session: Segment,
+    context: ContextMeter,
     pub system: Segment,
     collector: Rc<RefCell<Option<Collector>>>,
     io: IoWorker,
@@ -109,6 +197,8 @@ impl StatusBar {
             "avatar-default-symbolic",
         );
         let session = Segment::new("session-usage", "No session", "utilities-terminal-symbolic");
+        let context = ContextMeter::new();
+        session.content.append(&context.root);
         let system = Segment::new("system-usage", "CPU — · RAM —", "computer-symbolic");
         root.append(&account.button);
         root.append(&session.button);
@@ -126,6 +216,7 @@ impl StatusBar {
             root,
             account,
             session,
+            context,
             system,
             collector: Rc::new(RefCell::new(Some(Collector::default()))),
             io: IoWorker::default(),
@@ -134,6 +225,18 @@ impl StatusBar {
             quotas: Rc::new(RefCell::new(Vec::new())),
             quota_checked: Rc::new(Cell::new(None)),
             displayed_session: Rc::new(RefCell::new(None)),
+        }
+    }
+
+    fn set_session(&self, text: &str, details: &str, context_used: Option<f64>) {
+        self.session.set(text, details);
+        self.context.set(context_used);
+        if let Some(used) = context_used {
+            self.session
+                .button
+                .update_property(&[gtk::accessible::Property::Label(&format!(
+                    "{text}, {used:.0}% of context used"
+                ))]);
         }
     }
 }
@@ -170,13 +273,14 @@ impl Workspace {
             .map(|record| (record.id.clone(), record.conversation_id.clone()));
         if *self.status_bar.displayed_session.borrow() != key {
             *self.status_bar.displayed_session.borrow_mut() = key.clone();
-            self.status_bar.session.set(
+            self.status_bar.set_session(
                 if key.is_some() {
                     "Session · loading…"
                 } else {
                     "No session"
                 },
                 "Usage belongs to the selected agent session.",
+                None,
             );
         }
         let Some(mut collector) = self.status_bar.collector.borrow_mut().take() else {
@@ -220,12 +324,20 @@ impl Workspace {
                     .flatten()
                     .map(|path| UsageReader::new(path, provider));
             }
-            let usage = collector
+            let mut usage = collector
                 .reader
                 .as_mut()
                 .and_then(|reader| reader.read_new().ok());
             if usage.is_none() {
                 collector.reader = None;
+            }
+            if let Some(usage) = usage.as_mut()
+                && usage.context_capacity.is_none()
+                && let Some(record) = &record
+            {
+                usage.context_capacity = fs::read(context_report_path(&record.socket_path))
+                    .ok()
+                    .and_then(|report| reported_context_window(&report));
             }
             (collector, key, record, usage, cpu, memory)
         });
@@ -253,18 +365,20 @@ impl Workspace {
     }
 
     fn render_session_usage(&self, record: Option<&SessionRecord>, usage: Option<&SessionUsage>) {
-        let segment = &self.status_bar.session;
+        let status_bar = &self.status_bar;
         let Some(record) = record else {
-            segment.set(
+            status_bar.set_session(
                 "No session",
                 "Select an agent session to see its token usage.",
+                None,
             );
             return;
         };
         if !matches!(record.kind, SessionKind::Codex | SessionKind::Claude) {
-            segment.set(
+            status_bar.set_session(
                 "Session · —",
                 "Token usage is available for Claude and Codex sessions.",
+                None,
             );
             return;
         }
@@ -274,23 +388,21 @@ impl Workspace {
             } else {
                 "Session · waiting for usage"
             };
-            segment.set(
+            status_bar.set_session(
                 text,
                 "Usage appears after the agent writes token counts to its local conversation log.",
+                None,
             );
             return;
         };
-        let context = usage
-            .context_remaining()
-            .map(|left| format!(" · Context {left:.0}% left"))
-            .unwrap_or_default();
-        segment.set(
+        status_bar.set_session(
             &format!(
-                "Session {}{} tokens{context}",
+                "Session {}{} tokens",
                 if usage.incomplete { "≥ " } else { "" },
                 compact(usage.total())
             ),
             &session_details(&record.name, usage),
+            usage.context_remaining().map(|left| 100.0 - left),
         );
     }
 
@@ -412,7 +524,7 @@ fn session_details(name: &str, usage: &SessionUsage) -> String {
             compact(capacity),
             100.0 - left,
         ),
-        _ => "Context capacity is not reported by this agent's log.".to_owned(),
+        _ => "Context capacity is not reported for this session.".to_owned(),
     };
     let mut details = format!(
         "{name}\n\nSession tokens: {}\nInput: {} ({:.1}% of total)\nCached input: {} ({:.1}% of input)\nOutput: {} ({:.1}% of total)\n\n{context}\nToken totals are separate from account quota.",
