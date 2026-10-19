@@ -610,14 +610,19 @@ fn with_canonical_parent(path: &Path) -> WorktreeResult<PathBuf> {
         .join(path.file_name().ok_or("invalid worktree target")?))
 }
 
-fn validate_branch(branch: &str) -> WorktreeResult<()> {
-    let valid = (1..=120).contains(&branch.len())
+/// Whether `branch` is a concise lowercase kebab-case slug, the only shape
+/// agtk creates worktrees for.
+pub fn is_valid_branch_name(branch: &str) -> bool {
+    (1..=120).contains(&branch.len())
         && branch.bytes().enumerate().all(|(index, byte)| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || (byte == b'-' && index > 0)
         })
         && !branch.ends_with('-')
-        && !branch.contains("--");
-    if !valid {
+        && !branch.contains("--")
+}
+
+fn validate_branch(branch: &str) -> WorktreeResult<()> {
+    if !is_valid_branch_name(branch) {
         return Err("branch must be a concise lowercase kebab-case slug".into());
     }
     Ok(())

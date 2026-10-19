@@ -10,7 +10,7 @@ use crate::history::submitted_prompt;
 use crate::providers::AgentProvider;
 use crate::session::SessionKind;
 use crate::shortcuts::ShortcutAction;
-use crate::worktrees::DeleteBranch;
+use crate::worktrees::{DeleteBranch, is_valid_branch_name};
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub(crate) const MAX_REQUEST_BYTES: usize = 1024 * 1024;
@@ -975,13 +975,7 @@ fn validate_project(params: &ProjectSetParams) -> Result<(), ControlError> {
 
 fn validate_worktree_create(params: &WorktreeCreateParams) -> Result<(), ControlError> {
     validate_absolute_path(&params.project_root, "project root")?;
-    let valid_branch = (1..=120).contains(&params.branch.len())
-        && params.branch.bytes().enumerate().all(|(index, byte)| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || (byte == b'-' && index > 0)
-        })
-        && !params.branch.ends_with('-')
-        && !params.branch.contains("--");
-    if !valid_branch {
+    if !is_valid_branch_name(&params.branch) {
         return Err(invalid_params(
             "branch must be a concise lowercase kebab-case slug",
         ));

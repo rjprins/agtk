@@ -3,7 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use agtk::worktrees::{
-    DeleteBranch, ReapClass, ReapRequest, WorktreeManager, WorktreeState, parse_worktree_porcelain,
+    DeleteBranch, ReapClass, ReapRequest, WorktreeManager, WorktreeState, is_valid_branch_name,
+    parse_worktree_porcelain,
 };
 
 #[test]
@@ -444,6 +445,26 @@ fn pr_branch_checkout_fetches_a_remote_branch_and_tracks_it() {
         manager.branch_for_worktree(&path).unwrap().as_deref(),
         Some("feature/remote")
     );
+}
+
+#[test]
+fn new_branch_names_must_be_lowercase_kebab_case() {
+    for branch in ["fix-login", "work-1760000000", "a", "v2-api"] {
+        assert!(is_valid_branch_name(branch), "{branch}");
+    }
+    for branch in [
+        "",
+        "Fix-login",
+        "fix login",
+        "fix_login",
+        "feature/login",
+        "-fix",
+        "fix-",
+        "fix--login",
+        &"a".repeat(121),
+    ] {
+        assert!(!is_valid_branch_name(branch), "{branch}");
+    }
 }
 
 #[test]

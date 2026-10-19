@@ -3,7 +3,7 @@
 use super::*;
 use crate::azure::PrItem;
 use crate::launch_model::{self, DEFAULT_BASE_BRANCH};
-use crate::worktrees::WorktreeManager;
+use crate::worktrees::{WorktreeManager, is_valid_branch_name};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -11,6 +11,9 @@ const PROJECT_PLACEHOLDER: &str = "Search projects or type a path…";
 const WORKTREE_PLACEHOLDER: &str = "Search worktrees…";
 // One width for every location control so their edges line up.
 const LOCATION_CONTROL_WIDTH: i32 = 320;
+const BRANCH_TOOLTIP: &str = "Used as the branch and worktree name";
+const INVALID_BRANCH_TOOLTIP: &str =
+    "Use lowercase letters, digits and single hyphens, like fix-login-timeout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WorktreeMode {
@@ -254,7 +257,7 @@ impl LaunchDialog {
         existing_worktree_mode.add_suffix(&worktree_control);
 
         let branch = path_entry("New worktree name", "concise-kebab-case", 26);
-        branch.set_tooltip_text(Some("Used as the branch and worktree name"));
+        branch.set_tooltip_text(Some(BRANCH_TOOLTIP));
         let base_branch = path_entry("Base branch", DEFAULT_BASE_BRANCH, 22);
         base_branch.set_text(DEFAULT_BASE_BRANCH);
         let base_branch_choices = gtk::StringList::new(&[]);
@@ -487,6 +490,26 @@ impl Workspace {
             self.launch.cwd.set_text(&worktree);
             self.launch.existing_worktree_radio.set_active(true);
         }
+        self.refresh_launch_branch_validity();
+    }
+
+    /// Marks a new worktree name that worktree creation would reject, and
+    /// holds back Launch, so the dialog does not close on a doomed name.
+    fn refresh_launch_branch_validity(&self) {
+        let invalid = self.launch.worktree_mode.get() == WorktreeMode::New
+            && optional_text(&self.launch.branch)
+                .is_some_and(|branch| !is_valid_branch_name(&branch));
+        if invalid {
+            self.launch.branch.add_css_class("error");
+        } else {
+            self.launch.branch.remove_css_class("error");
+        }
+        self.launch.branch.set_tooltip_text(Some(if invalid {
+            INVALID_BRANCH_TOOLTIP
+        } else {
+            BRANCH_TOOLTIP
+        }));
+        self.launch.submit.set_sensitive(!invalid);
     }
 
     pub(super) fn prepare_launch_panel(&self) {
@@ -1016,6 +1039,11 @@ impl Workspace {
                 worktree_workspace.launch.worktree.set_text(&path);
                 worktree_workspace.launch.cwd.set_text(&path);
             });
+
+        let branch_workspace = self.clone();
+        self.launch
+            .branch
+            .connect_changed(move |_| branch_workspace.refresh_launch_branch_validity());
 
         let worktree_entry_workspace = self.clone();
         self.launch.worktree.connect_changed(move |entry| {
