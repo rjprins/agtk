@@ -12,7 +12,7 @@ const WORKTREE_PLACEHOLDER: &str = "Search worktrees…";
 // One width for every location control so their edges line up.
 const LOCATION_CONTROL_WIDTH: i32 = 320;
 const BRANCH_TOOLTIP: &str = "Used as the branch and worktree name";
-const INVALID_BRANCH_TOOLTIP: &str =
+pub(super) const INVALID_BRANCH_TOOLTIP: &str =
     "Use lowercase letters, digits and single hyphens, like fix-login-timeout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

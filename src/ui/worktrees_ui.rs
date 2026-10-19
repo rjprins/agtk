@@ -1,8 +1,12 @@
+use super::launch_ui::INVALID_BRANCH_TOOLTIP;
 use super::*;
 use crate::control::{WorktreeCreateParams, WorktreeListParams, WorktreeReapParams};
 use crate::worktrees::{
     DeleteBranch, ReapRequest, WorktreeInfo, WorktreeInventory, WorktreeManager, WorktreeState,
+    is_valid_branch_name,
 };
+
+const BRANCH_TOOLTIP: &str = "A concise kebab-case slug";
 
 /// The worktree dialog: inventory, guarded reap, and creation.
 #[derive(Clone)]
@@ -34,7 +38,7 @@ impl WorktreeDialog {
         inventory.add(&list);
 
         let branch = adw::EntryRow::builder().title("Branch").build();
-        branch.set_tooltip_text(Some("A concise kebab-case slug"));
+        branch.set_tooltip_text(Some(BRANCH_TOOLTIP));
         let base = adw::EntryRow::builder()
             .title("Base (default branch when empty)")
             .build();
@@ -90,10 +94,38 @@ impl Workspace {
         self.worktrees
             .create
             .connect_activated(move |_| workspace.create_worktree_from_panel());
+        for entry in [&self.worktrees.branch, &self.worktrees.purpose] {
+            let workspace = self.clone();
+            entry.connect_changed(move |_| workspace.refresh_worktree_form_validity());
+        }
+        self.refresh_worktree_form_validity();
         let workspace = self.clone();
         self.worktrees
             .modal
             .connect_show(move || workspace.prepare_worktree_panel());
+    }
+
+    /// Marks a branch name that worktree creation would reject, and holds
+    /// back Create until the branch and purpose would both pass.
+    fn refresh_worktree_form_validity(&self) {
+        let branch = self.worktrees.branch.text();
+        let branch = branch.trim();
+        let invalid_branch = !branch.is_empty() && !is_valid_branch_name(branch);
+        if invalid_branch {
+            self.worktrees.branch.add_css_class("error");
+        } else {
+            self.worktrees.branch.remove_css_class("error");
+        }
+        self.worktrees
+            .branch
+            .set_tooltip_text(Some(if invalid_branch {
+                INVALID_BRANCH_TOOLTIP
+            } else {
+                BRANCH_TOOLTIP
+            }));
+        self.worktrees.create.set_sensitive(
+            is_valid_branch_name(branch) && !self.worktrees.purpose.text().trim().is_empty(),
+        );
     }
 }
 
