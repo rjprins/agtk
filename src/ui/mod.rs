@@ -181,8 +181,6 @@ struct Workspace {
     slow_io: IoWorker,
     // Background PR polls get their own queue so they never delay the selected session.
     pr_poll_io: IoWorker,
-    /// State hooks run one at a time here, so a slow one delays only the next.
-    hook_io: IoWorker,
     /// Poll steps still running; a new poll waits until this is zero.
     pr_polls: Rc<Cell<usize>>,
     pr_polled_at: Rc<Cell<Option<std::time::Instant>>>,
@@ -712,7 +710,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         io: IoWorker::default(),
         slow_io: IoWorker::default(),
         pr_poll_io: IoWorker::default(),
-        hook_io: IoWorker::default(),
         pr_polls: Rc::new(Cell::new(0)),
         pr_polled_at: Rc::new(Cell::new(None)),
         azure_projects: Rc::new(RefCell::new(HashMap::new())),

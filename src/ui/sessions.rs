@@ -173,6 +173,9 @@ impl Workspace {
                 let loaded_changes_width =
                     changes_width(store.preference(CHANGES_WIDTH_PREFERENCE)?.as_ref());
                 let shortcuts = store.preference_or_default::<ShortcutPreferences>("shortcuts")?;
+                let state_hook = store.preference_or_default::<StateHookPreferences>(
+                    crate::state_hook::PREFERENCE_KEY,
+                )?;
                 let projects = store.preference_or_default::<ProjectPreferences>("projects")?;
                 let inactive_projects_expanded = store
                     .preference(projects_ui::INACTIVE_PROJECTS_PREFERENCE)?
@@ -278,6 +281,7 @@ impl Workspace {
                     loaded_sidebar_width,
                     loaded_changes_width,
                     shortcuts,
+                    state_hook,
                     projects,
                     inactive_projects_expanded,
                     quick_launch,
@@ -303,6 +307,7 @@ impl Workspace {
                     sidebar_width,
                     changes_width,
                     shortcuts,
+                    state_hook,
                     projects,
                     inactive_projects_expanded,
                     quick_launch,
@@ -321,7 +326,7 @@ impl Workspace {
                 )) => {
                     *workspace.store.borrow_mut() = Some(store);
                     workspace.load_dialog_sizes();
-                    workspace.load_state_hook();
+                    *workspace.state_hook.borrow_mut() = state_hook;
                     workspace.sidebar_split.set_position(sidebar_width);
                     workspace
                         .changes

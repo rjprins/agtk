@@ -95,14 +95,10 @@ impl ProviderDiscovery {
         provider_session_id: &str,
     ) -> PersistResult<bool> {
         validate_provider_session_id(provider_session_id)?;
-        let named = self.candidates()?.iter().any(|candidate| {
-            candidate.provider == provider
-                && candidate
-                    .path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .is_some_and(|stem| stem.ends_with(provider_session_id))
-        });
+        let named = self
+            .candidates()?
+            .iter()
+            .any(|candidate| candidate.is_named_for(provider, provider_session_id));
         Ok(named || self.preview(provider, provider_session_id, 1).is_ok())
     }
 
@@ -112,14 +108,7 @@ impl ProviderDiscovery {
         Ok(self
             .candidates()?
             .into_iter()
-            .find(|candidate| {
-                candidate.provider == provider
-                    && candidate
-                        .path
-                        .file_stem()
-                        .and_then(|stem| stem.to_str())
-                        .is_some_and(|stem| stem.ends_with(id))
-            })
+            .find(|candidate| candidate.is_named_for(provider, id))
             .map(|candidate| candidate.path))
     }
 
@@ -142,13 +131,7 @@ impl ProviderDiscovery {
             validate_provider_session_id(conversation_id)?;
             return Ok(candidates
                 .into_iter()
-                .find(|candidate| {
-                    candidate
-                        .path
-                        .file_stem()
-                        .and_then(|stem| stem.to_str())
-                        .is_some_and(|stem| stem.ends_with(conversation_id))
-                })
+                .find(|candidate| candidate.is_named_for(AgentProvider::Codex, conversation_id))
                 .map(|candidate| (conversation_id.to_owned(), candidate.path)));
         }
         candidates.retain(|candidate| candidate.modified_at + CLOCK_SLACK_MILLIS >= launched_at);
@@ -187,14 +170,10 @@ impl ProviderDiscovery {
             if validate_provider_session_id(id).is_err() {
                 continue;
             }
-            let Some(candidate) = candidates.iter().find(|candidate| {
-                candidate.provider == *provider
-                    && candidate
-                        .path
-                        .file_stem()
-                        .and_then(|stem| stem.to_str())
-                        .is_some_and(|stem| stem.ends_with(id.as_str()))
-            }) else {
+            let Some(candidate) = candidates
+                .iter()
+                .find(|candidate| candidate.is_named_for(*provider, id))
+            else {
                 continue;
             };
             // A log can vanish between the scan and the read.
@@ -413,6 +392,18 @@ pub(super) struct LogCandidate {
     pub(super) provider: AgentProvider,
     pub(super) path: PathBuf,
     pub(super) modified_at: u64,
+}
+
+impl LogCandidate {
+    /// Both providers name a log after its conversation.
+    fn is_named_for(&self, provider: AgentProvider, conversation_id: &str) -> bool {
+        self.provider == provider
+            && self
+                .path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| stem.ends_with(conversation_id))
+    }
 }
 
 fn scan_jsonl(

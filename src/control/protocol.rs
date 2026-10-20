@@ -996,7 +996,7 @@ fn validate_state_hook(params: &StateHookSetParams) -> Result<(), ControlError> 
             || command.contains('\0'))
     {
         return Err(invalid_params(
-            "hook command must not be blank and must contain at most 4096 characters",
+            "hook command must not be blank or contain NUL, and at most 4096 characters",
         ));
     }
     if params.states.is_empty() {

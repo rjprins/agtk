@@ -200,7 +200,7 @@ agtkctl hook clear
 | `AGTK_OLD_STATE`, `AGTK_NEW_STATE` | The states before and after, such as `busy` and `ready` |
 | `AGTK_INSTANCE`, `AGTK_CONTROL_SOCKET` | Where `agtkctl` reaches this agtk |
 
-Hooks run in the background, one at a time, so the window never waits for them. A ready turn you are already looking at becomes idle at once, so it runs the hook only if you chose `idle`. Restarting agtk does not run it again for sessions that were already ready. A hook that runs longer than 30 seconds is stopped. Failures go to agtk's output in the user journal, with the exit status and stderr. A hook that starts a background process should detach it from stdout and stderr, or agtk waits for it. The hook is saved with agtk's settings and is set only through `agtkctl`, not over MCP.
+Each hook runs in the background on its own, so neither the window nor the next hook waits for it. A ready turn you are already looking at becomes idle at once, so it runs the hook only if you chose `idle`. Restarting agtk does not run it again for sessions that were already ready. A hook that runs longer than 30 seconds is stopped. Failures go to agtk's output in the user journal, with the exit status and stderr. A hook that starts a background process should detach it from stdout and stderr, or agtk waits for it. The hook is saved with agtk's settings and is set only through `agtkctl`, not over MCP.
 
 ## Control from the command line
 

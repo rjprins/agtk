@@ -3,19 +3,6 @@ use crate::control::StateHookSetParams;
 use crate::state_hook::{self, HookContext, StateChange};
 
 impl Workspace {
-    pub(super) fn load_state_hook(&self) {
-        let Some(store) = self.store.borrow().clone() else {
-            return;
-        };
-        self.run_io(
-            move || store.preference_or_default::<StateHookPreferences>(state_hook::PREFERENCE_KEY),
-            |workspace, result| match result {
-                Ok(preferences) => *workspace.state_hook.borrow_mut() = preferences,
-                Err(error) => eprintln!("agtk: could not load the state hook: {error}"),
-            },
-        );
-    }
-
     pub(super) fn state_hook_summary(&self) -> serde_json::Value {
         serde_json::json!({ "stateHook": *self.state_hook.borrow() })
     }
@@ -63,8 +50,9 @@ impl Workspace {
         );
     }
 
-    /// Runs the user's hook for a state change in the background. A failure
-    /// only goes to the log: nobody is waiting on it.
+    /// Runs the user's hook for a state change on a thread of its own, so a
+    /// slow hook delays neither the window nor the next hook. A failure only
+    /// goes to the log: nobody is waiting on it.
     pub(super) fn run_state_hook(&self, change: StateChange) {
         let Some(command) = self
             .state_hook
@@ -76,8 +64,7 @@ impl Workspace {
         };
         let instance = self.paths.name().as_str().to_owned();
         let control_socket = self.paths.control_socket();
-        // Nothing waits on the result, so the receiver is dropped.
-        drop(self.hook_io.submit(move || {
+        thread::spawn(move || {
             let context = HookContext {
                 instance,
                 control_socket,
@@ -91,6 +78,6 @@ impl Workspace {
                     state_hook::state_name(change.new_state),
                 );
             }
-        }));
+        });
     }
 }
