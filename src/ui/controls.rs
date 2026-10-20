@@ -48,6 +48,10 @@ impl Workspace {
             self.set_shortcut(params.clone(), Some(pending));
             return;
         }
+        if let ControlCommand::StateHookSet(params) = &pending.request.command {
+            self.set_state_hook(params.clone(), pending);
+            return;
+        }
         if let ControlCommand::ProjectSet(params) = &pending.request.command {
             self.set_project_preferences(
                 params.root.to_string_lossy().to_string(),
@@ -382,6 +386,7 @@ impl Workspace {
                     None => session_not_found(id, &params.session_id),
                 }
             }
+            ControlCommand::StateHookGet => ControlResponse::success(id, self.state_hook_summary()),
             ControlCommand::ClaudePresetsGet => ControlResponse::success(
                 id,
                 serde_json::json!({ "presets": self.claude_presets.borrow().presets }),
@@ -391,6 +396,7 @@ impl Workspace {
             | ControlCommand::UiOpenFile(_)
             | ControlCommand::AppearanceSet(_)
             | ControlCommand::ShortcutSet(_)
+            | ControlCommand::StateHookSet(_)
             | ControlCommand::ProjectSet(_)
             | ControlCommand::ProjectRemove(_)
             | ControlCommand::WorktreeList(_)

@@ -39,6 +39,7 @@ use crate::session::{
     SessionHostLaunchPlan, SessionLaunchPlan, receive_attachment, warm_shell_path,
 };
 use crate::shortcuts::{ShortcutAction, ShortcutPreferences};
+use crate::state_hook::StateHookPreferences;
 use crate::terminal_text::{bounded_terminal_text, copyable_selection};
 
 mod agents_ui;
@@ -72,6 +73,7 @@ mod session_worktree_ui;
 mod sessions;
 mod shortcuts_ui;
 mod sidebar;
+mod state_hook_ui;
 mod status_bar;
 mod status_bar_layout;
 mod status_ui;
@@ -179,6 +181,8 @@ struct Workspace {
     slow_io: IoWorker,
     // Background PR polls get their own queue so they never delay the selected session.
     pr_poll_io: IoWorker,
+    /// State hooks run one at a time here, so a slow one delays only the next.
+    hook_io: IoWorker,
     /// Poll steps still running; a new poll waits until this is zero.
     pr_polls: Rc<Cell<usize>>,
     pr_polled_at: Rc<Cell<Option<std::time::Instant>>>,
@@ -191,6 +195,7 @@ struct Workspace {
     chrome_style: style::ChromeStyle,
     style_manager: adw::StyleManager,
     shortcuts: Rc<RefCell<ShortcutPreferences>>,
+    state_hook: Rc<RefCell<StateHookPreferences>>,
     projects: Rc<RefCell<ProjectPreferences>>,
     /// Whether the sidebar lists the projects under Inactive Projects.
     inactive_projects_expanded: Rc<Cell<bool>>,
@@ -707,6 +712,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         io: IoWorker::default(),
         slow_io: IoWorker::default(),
         pr_poll_io: IoWorker::default(),
+        hook_io: IoWorker::default(),
         pr_polls: Rc::new(Cell::new(0)),
         pr_polled_at: Rc::new(Cell::new(None)),
         azure_projects: Rc::new(RefCell::new(HashMap::new())),
@@ -716,6 +722,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         chrome_style,
         style_manager: style_manager.clone(),
         shortcuts: Rc::new(RefCell::new(ShortcutPreferences::default())),
+        state_hook: Rc::new(RefCell::new(StateHookPreferences::default())),
         projects: Rc::new(RefCell::new(ProjectPreferences::default())),
         inactive_projects_expanded: Rc::new(Cell::new(false)),
         quick_launch: Rc::new(RefCell::new(QuickLaunchPreferences::default())),

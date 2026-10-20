@@ -4,6 +4,7 @@ use super::*;
 use crate::agent_status::{self, Signal};
 use crate::control::{AgentSignalState, SessionSetStateParams};
 use crate::persist::now_millis;
+use crate::state_hook::StateChange;
 
 /// How long a ready session must stay in front of the user before it counts as viewed.
 pub(super) const VIEWED_AFTER: Duration = Duration::from_secs(7);
@@ -233,19 +234,29 @@ impl Workspace {
         } else {
             next
         };
-        let record = {
+        let (record, previous) = {
             let mut sessions = self.sessions.borrow_mut();
             let Some(session) = sessions.get_mut(id) else {
                 return;
             };
-            if session.record.state == next || session.record.state == SessionState::Exited {
+            let previous = session.record.state;
+            if previous == next || previous == SessionState::Exited {
                 return;
             }
             session.record.state = next;
             session.record.state_changed_at = now_millis();
-            session.record.clone()
+            (session.record.clone(), previous)
         };
         self.apply_session_state(id);
+        self.run_state_hook(StateChange {
+            session_id: record.id.clone(),
+            name: record.name.clone(),
+            kind: record.kind,
+            cwd: record.cwd.clone(),
+            conversation_id: record.conversation_id.clone(),
+            old_state: previous,
+            new_state: next,
+        });
         self.persist_record(record);
         self.send_pending_agent_name(id);
     }

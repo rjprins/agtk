@@ -260,6 +260,12 @@ pub fn warm_shell_path() {
     });
 }
 
+/// The PATH sessions get, for other commands agtk runs on the user's behalf.
+/// Blocks for a login shell the first time.
+pub fn login_shell_path() -> Option<OsString> {
+    cached_shell_path().ok()
+}
+
 fn cached_shell_path() -> Result<OsString, LaunchPlanError> {
     if let Some(path) = SHELL_PATH.get() {
         return Ok(path.clone());

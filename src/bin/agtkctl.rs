@@ -13,9 +13,9 @@ use agtk::control::{
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectRemoveParams, ProjectSetParams, RenameSessionParams,
     ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionSetStateParams,
-    SessionState, SetSessionWorktreeParams, ShortcutSetParams, UiDiffScope, UiOpenDiffParams,
-    UiOpenFileParams, UiShowParams, UiSurface, WaitCondition, WorktreeCreateParams,
-    WorktreeListParams, WorktreeReapParams,
+    SessionState, SetSessionWorktreeParams, ShortcutSetParams, StateHookSetParams, UiDiffScope,
+    UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WaitCondition,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agtk::history::submitted_prompt;
 use agtk::instance::{InstanceName, InstancePaths};
@@ -90,6 +90,7 @@ fn run() -> Result<(), Failure> {
             parse_appearance_set(rest)?
         }
         [group, action, rest @ ..] if group == "shortcut" => parse_shortcut_command(action, rest)?,
+        [group, action, rest @ ..] if group == "hook" => parse_hook_command(action, rest)?,
         [group, action, rest @ ..] if group == "project" && action == "set" => {
             parse_project_set(rest)?
         }
@@ -713,6 +714,46 @@ fn parse_shortcut_command(action: &str, arguments: &[String]) -> Result<ControlC
     }
 }
 
+fn parse_hook_command(action: &str, arguments: &[String]) -> Result<ControlCommand, Failure> {
+    match (action, arguments) {
+        ("show", []) => return Ok(ControlCommand::StateHookGet),
+        ("clear", []) => {
+            return Ok(ControlCommand::StateHookSet(StateHookSetParams {
+                command: None,
+                states: agtk::state_hook::default_states(),
+            }));
+        }
+        ("set", _) => {}
+        _ => return Err(usage_failure()),
+    }
+    let mut command = None;
+    let mut states = agtk::state_hook::default_states();
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| Failure::Usage(format!("{option} requires a value")))?;
+        match option {
+            "--command" => command = Some(value.clone()),
+            "--states" => {
+                states = value
+                    .split(',')
+                    .map(parse_agent_signal_state)
+                    .collect::<Result<_, _>>()?;
+            }
+            _ => return Err(Failure::Usage(format!("unknown hook option: {option}"))),
+        }
+        index += 2;
+    }
+    let command =
+        command.ok_or_else(|| Failure::Usage("hook set requires --command".to_owned()))?;
+    Ok(ControlCommand::StateHookSet(StateHookSetParams {
+        command: Some(command),
+        states,
+    }))
+}
+
 fn parse_shortcut_action(value: &str) -> Result<ShortcutAction, Failure> {
     ShortcutAction::ALL
         .into_iter()
@@ -1090,7 +1131,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|project set ROOT OPTIONS|project remove ROOT|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session fork ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes and files, SCOPE is all|staged|unstaged|untracked|committed|commit)"
+    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|hook show|hook set --command CMD [--states STATE,...]|hook clear|project set ROOT OPTIONS|project remove ROOT|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session fork ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes and files, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

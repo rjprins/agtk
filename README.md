@@ -177,6 +177,31 @@ Staying on a ready session for 7 seconds marks it as viewed, so a quick pass thr
 
 Claude sessions report their state through hooks that agtk generates. You do not need to change your Claude configuration. Codex and Gemini sessions are read from the screen once a second, with status rules ported from [agent-manager](https://github.com/YoanWai/agent-manager).
 
+### State hook
+
+agtk can run a command of yours whenever an agent becomes ready or waiting, so a script hears about it right away instead of polling:
+
+```sh
+agtkctl hook set --command 'notify-send "$AGTK_SESSION_NAME" "$AGTK_NEW_STATE"'
+agtkctl hook set --states ready,waiting,idle --command '~/bin/agent-event'
+agtkctl hook show
+agtkctl hook clear
+```
+
+`--states` takes any of `busy`, `waiting`, `ready` and `idle`, and defaults to `ready,waiting`. The hook runs once per state change, through `sh -c`, with the PATH your sessions get. It gets these variables; unknown values are empty:
+
+| Variable | Value |
+|---|---|
+| `AGTK_SESSION_ID` | The session ID, as `list_sessions` and `agtkctl` use it |
+| `AGTK_SESSION_NAME` | The name in the sidebar |
+| `AGTK_SESSION_KIND` | `claude`, `codex`, `gemini`, `shell` or `custom` |
+| `AGTK_SESSION_CWD` | The session's working directory |
+| `AGTK_CONVERSATION_ID` | The Claude or Codex conversation, once agtk knows it |
+| `AGTK_OLD_STATE`, `AGTK_NEW_STATE` | The states before and after, such as `busy` and `ready` |
+| `AGTK_INSTANCE`, `AGTK_CONTROL_SOCKET` | Where `agtkctl` reaches this agtk |
+
+Hooks run in the background, one at a time, so the window never waits for them. A ready turn you are already looking at becomes idle at once, so it runs the hook only if you chose `idle`. Restarting agtk does not run it again for sessions that were already ready. A hook that runs longer than 30 seconds is stopped. Failures go to agtk's output in the user journal, with the exit status and stderr. A hook that starts a background process should detach it from stdout and stderr, or agtk waits for it. The hook is saved with agtk's settings and is set only through `agtkctl`, not over MCP.
+
 ## Control from the command line
 
 `agtkctl` prints JSON to stdout.

@@ -39,6 +39,8 @@ pub enum ControlCommand {
     UiOpenFile(UiOpenFileParams),
     AppearanceSet(AppearanceSetParams),
     ShortcutSet(ShortcutSetParams),
+    StateHookGet,
+    StateHookSet(StateHookSetParams),
     ProjectSet(ProjectSetParams),
     ProjectRemove(ProjectRemoveParams),
     WorktreeList(WorktreeListParams),
@@ -156,6 +158,15 @@ pub struct ShortcutSetParams {
     pub accelerator: Option<String>,
     #[serde(default)]
     pub reset: bool,
+}
+
+/// Replaces the state hook. Without a command, no hook runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StateHookSetParams {
+    pub command: Option<String>,
+    #[serde(default = "crate::state_hook::default_states")]
+    pub states: Vec<AgentSignalState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -485,6 +496,15 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             validate_shortcut(&params)?;
             ControlCommand::ShortcutSet(params)
         }
+        "state_hook.get" => {
+            decode_empty_params(wire.params)?;
+            ControlCommand::StateHookGet
+        }
+        "state_hook.set" => {
+            let params: StateHookSetParams = decode_params(wire.params)?;
+            validate_state_hook(&params)?;
+            ControlCommand::StateHookSet(params)
+        }
         "project.set" => {
             let params: ProjectSetParams = decode_params(wire.params)?;
             validate_project(&params)?;
@@ -716,6 +736,8 @@ impl ControlCommand {
             Self::UiOpenFile(_) => "ui.open_file",
             Self::AppearanceSet(_) => "appearance.set",
             Self::ShortcutSet(_) => "shortcut.set",
+            Self::StateHookGet => "state_hook.get",
+            Self::StateHookSet(_) => "state_hook.set",
             Self::ProjectSet(_) => "project.set",
             Self::ProjectRemove(_) => "project.remove",
             Self::WorktreeList(_) => "worktree.list",
@@ -757,6 +779,8 @@ impl ControlCommand {
             Self::UiOpenFile(params) => Ok(("ui.open_file", serde_json::to_value(params)?)),
             Self::AppearanceSet(params) => Ok(("appearance.set", serde_json::to_value(params)?)),
             Self::ShortcutSet(params) => Ok(("shortcut.set", serde_json::to_value(params)?)),
+            Self::StateHookGet => Ok(("state_hook.get", empty_params())),
+            Self::StateHookSet(params) => Ok(("state_hook.set", serde_json::to_value(params)?)),
             Self::ProjectSet(params) => Ok(("project.set", serde_json::to_value(params)?)),
             Self::ProjectRemove(params) => Ok(("project.remove", serde_json::to_value(params)?)),
             Self::WorktreeList(params) => Ok(("worktree.list", serde_json::to_value(params)?)),
@@ -961,6 +985,30 @@ fn validate_shortcut(params: &ShortcutSetParams) -> Result<(), ControlError> {
         return Err(invalid_params(
             "accelerator must be trimmed and contain between 1 and 120 characters",
         ));
+    }
+    Ok(())
+}
+
+fn validate_state_hook(params: &StateHookSetParams) -> Result<(), ControlError> {
+    if let Some(command) = &params.command
+        && (command.trim().is_empty()
+            || command.chars().count() > crate::state_hook::MAX_COMMAND_CHARS
+            || command.contains('\0'))
+    {
+        return Err(invalid_params(
+            "hook command must not be blank and must contain at most 4096 characters",
+        ));
+    }
+    if params.states.is_empty() {
+        return Err(invalid_params("hook needs at least one state"));
+    }
+    if params
+        .states
+        .iter()
+        .enumerate()
+        .any(|(index, state)| params.states[..index].contains(state))
+    {
+        return Err(invalid_params("hook states must not repeat"));
     }
     Ok(())
 }

@@ -7,7 +7,8 @@ mod session_host;
 
 pub use kind::{SessionKind, SessionState};
 pub use launch::{
-    LaunchPlanError, SessionHostLaunchPlan, SessionLaunchPlan, is_installed, warm_shell_path,
+    LaunchPlanError, SessionHostLaunchPlan, SessionLaunchPlan, is_installed, login_shell_path,
+    warm_shell_path,
 };
 pub use protocol::{Attachment, receive_attachment, send_attachment};
 pub use session_host::run_session_host;

@@ -321,6 +321,7 @@ impl Workspace {
                 )) => {
                     *workspace.store.borrow_mut() = Some(store);
                     workspace.load_dialog_sizes();
+                    workspace.load_state_hook();
                     workspace.sidebar_split.set_position(sidebar_width);
                     workspace
                         .changes

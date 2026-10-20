@@ -10,8 +10,9 @@ use agtk::control::{
     ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, GetTextParams, PrAcknowledgeParams,
     ProjectRemoveParams, ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams,
-    SessionKind, SessionSetStateParams, SetSessionWorktreeParams, ShortcutSetParams, UiShowParams,
-    UiSurface, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
+    SessionKind, SessionSetStateParams, SetSessionWorktreeParams, ShortcutSetParams,
+    StateHookSetParams, UiShowParams, UiSurface, WorktreeCreateParams, WorktreeListParams,
+    WorktreeReapParams,
 };
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -395,6 +396,44 @@ fn shortcut_commands_have_typed_protocol_mappings() {
             action: ShortcutAction::ToggleSidebar,
             accelerator: None,
             reset: true,
+        }),
+    );
+}
+
+#[test]
+fn hook_commands_have_typed_protocol_mappings() {
+    assert_fixture_command(&["hook", "show"], ControlCommand::StateHookGet);
+    assert_fixture_command(
+        &[
+            "hook",
+            "set",
+            "--command",
+            "notify-send \"$AGTK_SESSION_NAME\"",
+        ],
+        ControlCommand::StateHookSet(StateHookSetParams {
+            command: Some("notify-send \"$AGTK_SESSION_NAME\"".to_owned()),
+            states: vec![AgentSignalState::Ready, AgentSignalState::Waiting],
+        }),
+    );
+    assert_fixture_command(
+        &[
+            "hook",
+            "set",
+            "--states",
+            "waiting,idle",
+            "--command",
+            "true",
+        ],
+        ControlCommand::StateHookSet(StateHookSetParams {
+            command: Some("true".to_owned()),
+            states: vec![AgentSignalState::Waiting, AgentSignalState::Idle],
+        }),
+    );
+    assert_fixture_command(
+        &["hook", "clear"],
+        ControlCommand::StateHookSet(StateHookSetParams {
+            command: None,
+            states: vec![AgentSignalState::Ready, AgentSignalState::Waiting],
         }),
     );
 }

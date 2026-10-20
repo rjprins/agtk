@@ -3,9 +3,9 @@ use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, PrListParams,
     ProjectRemoveParams, ProjectSetParams, ResponseBody, SessionIdParams, SessionKind,
-    SessionSetStateParams, ShortcutSetParams, WorktreeCreateParams, WorktreeListParams,
-    WorktreeReapParams, control_timeout, decode_request, decode_response, encode_request,
-    encode_response,
+    SessionSetStateParams, ShortcutSetParams, StateHookSetParams, WorktreeCreateParams,
+    WorktreeListParams, WorktreeReapParams, control_timeout, decode_request, decode_response,
+    encode_request, encode_response,
 };
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -453,6 +453,45 @@ fn shortcut_updates_decode_to_typed_commands() {
         br#"{"version":1,"id":"key","method":"shortcut.set","params":{"action":"toggle-sidebar"}}"#.as_slice(),
         br#"{"version":1,"id":"key","method":"shortcut.set","params":{"action":"toggle-sidebar","accelerator":"x","reset":true}}"#.as_slice(),
         br#"{"version":1,"id":"key","method":"shortcut.set","params":{"action":"missing","reset":true}}"#.as_slice(),
+    ] {
+        assert_eq!(
+            decode_request(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams
+        );
+    }
+}
+
+#[test]
+fn state_hook_updates_default_to_the_states_that_need_someone() {
+    let request = decode_request(br#"{"version":1,"id":"hook","method":"state_hook.set","params":{"command":"notify-send done"}}"#)
+        .expect("decode state hook update");
+    assert_eq!(
+        request.command,
+        ControlCommand::StateHookSet(StateHookSetParams {
+            command: Some("notify-send done".to_owned()),
+            states: vec![AgentSignalState::Ready, AgentSignalState::Waiting],
+        })
+    );
+    let clear = decode_request(
+        br#"{"version":1,"id":"hook","method":"state_hook.set","params":{"command":null}}"#,
+    )
+    .expect("decode state hook removal");
+    assert!(matches!(
+        clear.command,
+        ControlCommand::StateHookSet(StateHookSetParams { command: None, .. })
+    ));
+    assert_eq!(
+        decode_request(br#"{"version":1,"id":"hook","method":"state_hook.get","params":{}}"#)
+            .expect("decode state hook read")
+            .command,
+        ControlCommand::StateHookGet
+    );
+
+    for invalid in [
+        br#"{"version":1,"id":"hook","method":"state_hook.set","params":{"command":"  "}}"#.as_slice(),
+        br#"{"version":1,"id":"hook","method":"state_hook.set","params":{"command":"x","states":[]}}"#.as_slice(),
+        br#"{"version":1,"id":"hook","method":"state_hook.set","params":{"command":"x","states":["ready","ready"]}}"#.as_slice(),
+        br#"{"version":1,"id":"hook","method":"state_hook.set","params":{"command":"x","states":["exited"]}}"#.as_slice(),
     ] {
         assert_eq!(
             decode_request(invalid).unwrap_err().code,

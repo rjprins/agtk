@@ -29,6 +29,7 @@ pub mod rebuild;
 pub mod session;
 mod session_names;
 pub mod shortcuts;
+pub mod state_hook;
 pub mod terminal_text;
 mod text;
 mod timestamps;
