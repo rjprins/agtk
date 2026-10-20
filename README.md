@@ -257,6 +257,8 @@ Sessions that agtk starts run outside any sandbox the agent has. An agent with t
 
 The tools cover sessions, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, and screenshots of the agtk window. The server never captures the rest of the desktop.
 
+`list_sessions` gives each session's `conversationId`, and for Claude and Codex agents `lastAgentMessage`: the agent's last message from its Claude or Codex log, cut to 500 characters, with `lastAgentMessageAt` in Unix milliseconds. Both are null until agtk knows the conversation and the agent has answered. So a caller can tell what an agent finished or asks without reading its terminal with `snapshot`. Together with the [state hook](#state-hook), a supervising agent hears about a finished turn right away and reads what it said.
+
 ## Where things are stored
 
 - Settings and session data: `$XDG_STATE_HOME/agtk/default`, or `~/.local/state/agtk/default`

@@ -48,6 +48,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
             cwd: None,
             project_root: None,
             worktree_path: None,
+            conversation_id: None,
             created_at: 0,
             state_changed_at: 0,
             position: 0,
@@ -110,6 +111,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 "cwd": null,
                 "projectRoot": null,
                 "worktreePath": null,
+                "conversationId": null,
                 "createdAt": 0,
                 "stateChangedAt": 0,
                 "position": 0

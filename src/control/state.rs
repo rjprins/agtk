@@ -81,6 +81,8 @@ pub struct SessionSummary {
     pub cwd: Option<PathBuf>,
     pub project_root: Option<PathBuf>,
     pub worktree_path: Option<PathBuf>,
+    /// The provider conversation an agent is on, once agtk knows it.
+    pub conversation_id: Option<String>,
     pub created_at: u64,
     pub state_changed_at: u64,
     pub position: i64,

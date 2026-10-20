@@ -8,18 +8,20 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
+use crate::control::SessionKind;
 use crate::control::{
     CloseSessionParams, ControlClient, ControlCommand, ControlRequest, CreateSessionParams,
     PROTOCOL_VERSION, ResponseBody, SessionIdParams, UiOpenDiffParams, UiOpenFileParams,
     WorktreeCreateParams, WorktreeListParams,
 };
-use crate::providers::AgentProvider;
+use crate::providers::{AgentProvider, ProviderDiscovery};
 
 pub const MODERN_MCP_VERSION: &str = "2026-07-28";
 pub const LEGACY_MCP_VERSION: &str = "2025-11-25";
 const SERVER_NAME: &str = "agtk";
 const MAX_MCP_MESSAGE_BYTES: usize = 1024 * 1024;
 const MAX_CAPTURE_BYTES: u64 = 32 * 1024 * 1024;
+const LAST_AGENT_MESSAGE_CHARS: usize = 500;
 const SUPPORTED_VERSIONS: [&str; 5] = [
     MODERN_MCP_VERSION,
     LEGACY_MCP_VERSION,
@@ -74,11 +76,21 @@ impl ControlBackend for SocketControlBackend {
 
 pub struct McpServer<B> {
     backend: B,
+    discovery: ProviderDiscovery,
 }
 
 impl<B: ControlBackend> McpServer<B> {
     pub fn new(backend: B) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            discovery: ProviderDiscovery::from_environment(),
+        }
+    }
+
+    /// Reads agent logs from these roots instead of the environment's.
+    pub fn with_discovery(mut self, discovery: ProviderDiscovery) -> Self {
+        self.discovery = discovery;
+        self
     }
 
     pub fn backend(&self) -> &B {
@@ -282,13 +294,58 @@ impl<B: ControlBackend> McpServer<B> {
         let value = self.backend.call(command)?;
         let value = match name {
             "list_sessions" => json!({
-                "sessions":value.get("sessions").cloned().unwrap_or(Value::Array(Vec::new())),
+                "sessions":self.with_last_agent_messages(value.get("sessions").cloned().unwrap_or(Value::Array(Vec::new()))),
                 "selectedSessionId":value.get("selectedSessionId").cloned().unwrap_or(Value::Null),
                 "attention":value.get("attention").cloned().unwrap_or_else(|| json!({"count":0}))
             }),
             _ => value,
         };
         Ok(ToolOutput::Json(value))
+    }
+
+    /// Adds what each Claude or Codex agent last said, read from its log, so
+    /// callers need not parse the screen. Null when there is no log or answer yet.
+    fn with_last_agent_messages(&self, mut sessions: Value) -> Value {
+        let Some(sessions_list) = sessions.as_array_mut() else {
+            return sessions;
+        };
+        let conversation = |session: &Value| {
+            let provider = session
+                .get("kind")
+                .and_then(Value::as_str)?
+                .parse::<SessionKind>()
+                .ok()
+                .and_then(AgentProvider::from_kind)?;
+            let id = session.get("conversationId")?.as_str()?;
+            Some((provider, id.to_owned()))
+        };
+        let conversations = sessions_list
+            .iter()
+            .filter_map(conversation)
+            .collect::<Vec<_>>();
+        let messages = if conversations.is_empty() {
+            Default::default()
+        } else {
+            self.discovery
+                .last_agent_messages(&conversations, LAST_AGENT_MESSAGE_CHARS)
+                .unwrap_or_default()
+        };
+        for session in sessions_list {
+            let message = conversation(session).and_then(|key| messages.get(&key).cloned());
+            if let Some(session) = session.as_object_mut() {
+                session.insert(
+                    "lastAgentMessage".to_owned(),
+                    message
+                        .as_ref()
+                        .map_or(Value::Null, |message| json!(message.text)),
+                );
+                session.insert(
+                    "lastAgentMessageAt".to_owned(),
+                    json!(message.and_then(|message| message.timestamp)),
+                );
+            }
+        }
+        sessions
     }
 
     /// Creates the worktree first, so the agent starts inside it and the
@@ -614,7 +671,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "list_sessions",
             "List sessions",
-            "List live native terminal sessions and attention state.",
+            "List live native terminal sessions and attention state. Claude and Codex sessions include lastAgentMessage, the agent's last message from its log truncated to 500 characters, and lastAgentMessageAt in Unix milliseconds; both are null until the agent answers.",
             empty_schema(),
         ),
         tool(

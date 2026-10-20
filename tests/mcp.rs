@@ -7,6 +7,7 @@ use agtk::control::{
     SessionIdParams, SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
 };
 use agtk::mcp::{ControlBackend, McpServer};
+use agtk::providers::{DiscoveryRoots, ProviderDiscovery};
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -116,6 +117,54 @@ fn modern_discovery_and_tool_results_include_required_result_shape() {
     assert_eq!(listed["result"]["resultType"], "complete");
     assert_eq!(listed["result"]["ttlMs"], 300_000);
     assert_eq!(listed["result"]["cacheScope"], "public");
+}
+
+#[test]
+fn listed_sessions_carry_the_last_agent_message_from_the_log() {
+    let fixture = tempfile::tempdir().unwrap();
+    let claude = fixture.path().join("claude");
+    fs::create_dir_all(claude.join("projects/demo")).unwrap();
+    fs::write(
+        claude.join("projects/demo/conversation-1.jsonl"),
+        format!(
+            "{}\n",
+            json!({"type":"assistant","timestamp":"2026-10-20T12:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"All tests pass."}]}})
+        ),
+    )
+    .unwrap();
+    let backend = MockBackend::default();
+    backend.results.borrow_mut().push_back(Ok(json!({
+        "sessions":[
+            {"id":"claude-1","kind":"claude","state":"ready","conversationId":"conversation-1"},
+            {"id":"claude-2","kind":"claude","state":"busy","conversationId":"conversation-2"},
+            {"id":"shell-1","kind":"shell","state":"running","conversationId":null}
+        ],
+        "selectedSessionId":null,
+        "attention":{"count":1}
+    })));
+    let discovery = ProviderDiscovery::new(
+        DiscoveryRoots {
+            claude_config_dir: claude,
+            codex_home_dir: fixture.path().join("codex"),
+        },
+        50,
+        90 * 24 * 60 * 60 * 1_000,
+    );
+    let mut server = McpServer::new(backend).with_discovery(discovery);
+    let response = server
+        .handle(request(
+            7,
+            "tools/call",
+            json!({"name":"list_sessions","arguments":{}}),
+        ))
+        .unwrap();
+    let sessions = &response["result"]["structuredContent"]["sessions"];
+    assert_eq!(sessions[0]["lastAgentMessage"], "All tests pass.");
+    assert_eq!(sessions[0]["lastAgentMessageAt"], 1_792_497_600_000_u64);
+    for session in [&sessions[1], &sessions[2]] {
+        assert_eq!(session["lastAgentMessage"], Value::Null);
+        assert_eq!(session["lastAgentMessageAt"], Value::Null);
+    }
 }
 
 #[test]

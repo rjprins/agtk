@@ -11,11 +11,14 @@ use serde::{Deserialize, Serialize};
 
 use super::codex::codex_session_meta;
 use super::conversation::{
-    conversation_messages, jsonl_entries, read_tail, recent_mutated_paths, string_field,
-    validate_provider_session_id,
+    conversation_messages, jsonl_entries, last_agent_message, read_tail, recent_mutated_paths,
+    string_field, validate_provider_session_id,
 };
 use super::facts::{LogFacts, read_log_facts, session_from_facts};
-use super::{AgentProvider, DiscoveryRoots, LOG_PREVIEW_BYTES, ProviderPreview, ProviderSession};
+use super::{
+    AgentProvider, ConversationMessage, DiscoveryRoots, LOG_PREVIEW_BYTES, ProviderPreview,
+    ProviderSession,
+};
 use crate::persist::PersistResult;
 
 #[derive(Debug, Clone)]
@@ -168,6 +171,38 @@ impl ProviderDiscovery {
             }
         }
         Ok(best.map(|(_, session_id, path)| (session_id, path)))
+    }
+
+    /// The last thing each agent said, from the end of its log. Conversations
+    /// without a log, or without an answer yet, are left out.
+    pub fn last_agent_messages(
+        &self,
+        conversations: &[(AgentProvider, String)],
+        max_chars: usize,
+    ) -> PersistResult<BTreeMap<(AgentProvider, String), ConversationMessage>> {
+        let mut candidates = self.candidates()?;
+        candidates.sort_by_key(|candidate| Reverse(candidate.modified_at));
+        let mut messages = BTreeMap::new();
+        for (provider, id) in conversations {
+            if validate_provider_session_id(id).is_err() {
+                continue;
+            }
+            let Some(candidate) = candidates.iter().find(|candidate| {
+                candidate.provider == *provider
+                    && candidate
+                        .path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .is_some_and(|stem| stem.ends_with(id.as_str()))
+            }) else {
+                continue;
+            };
+            // A log can vanish between the scan and the read.
+            if let Ok(Some(message)) = last_agent_message(&candidate.path, max_chars) {
+                messages.insert((*provider, id.clone()), message);
+            }
+        }
+        Ok(messages)
     }
 
     pub fn preview(

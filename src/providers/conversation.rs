@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use super::{ConversationMessage, ConversationRole, LOG_PREVIEW_BYTES, MAX_MESSAGE_CHARS};
+
+const LAST_MESSAGE_TAIL_BYTES: u64 = 256 * 1024;
 use crate::persist::PersistResult;
 use crate::text::truncate_chars;
 use crate::timestamps::parse_utc_millis;
@@ -96,6 +98,40 @@ pub(super) fn conversation_messages(content: &str) -> Vec<ConversationMessage> {
             })
         })
         .collect()
+}
+
+/// The last thing the agent said, read from the end of the log. A short tail
+/// usually holds it; a long run of tool output after it needs the longer one.
+pub(super) fn last_agent_message(
+    path: &Path,
+    max_chars: usize,
+) -> PersistResult<Option<ConversationMessage>> {
+    for limit in [LAST_MESSAGE_TAIL_BYTES, LOG_PREVIEW_BYTES] {
+        let content = read_tail(path, limit)?;
+        let found = content.text.lines().rev().find_map(|line| {
+            let Ok(Value::Object(entry)) = serde_json::from_str::<Value>(line) else {
+                return None;
+            };
+            // Older Claude logs keep subagent turns in the main log.
+            if entry.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+                return None;
+            }
+            let (role, text) = message(&entry)?;
+            let text = text.trim();
+            (role == ConversationRole::Assistant && !text.is_empty()).then(|| ConversationMessage {
+                role,
+                text: truncate_chars(text, max_chars),
+                timestamp: entry
+                    .get("timestamp")
+                    .and_then(Value::as_str)
+                    .and_then(|stamp| parse_utc_millis(stamp.as_bytes())),
+            })
+        });
+        if found.is_some() || !content.is_truncated {
+            return Ok(found);
+        }
+    }
+    Ok(None)
 }
 
 pub(super) fn message(entry: &Map<String, Value>) -> Option<(ConversationRole, String)> {

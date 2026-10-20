@@ -474,3 +474,89 @@ fn codex_log_is_located_by_conversation_or_by_directory_and_launch_time() {
         None
     );
 }
+
+#[test]
+fn the_last_agent_message_skips_tools_thinking_and_subagents() {
+    let fixture = tempfile::tempdir().unwrap();
+    let claude = fixture.path().join("claude");
+    let codex = fixture.path().join("codex");
+    fs::create_dir_all(claude.join("projects/demo")).unwrap();
+    fs::create_dir_all(codex.join("sessions/2026/10/20")).unwrap();
+    let lines = |entries: &[serde_json::Value]| {
+        entries
+            .iter()
+            .map(|entry| format!("{entry}\n"))
+            .collect::<String>()
+    };
+    let assistant = |content: serde_json::Value, timestamp: &str| serde_json::json!({"type":"assistant","timestamp":timestamp,"message":{"role":"assistant","content":content}});
+    fs::write(
+        claude.join("projects/demo/claude-7.jsonl"),
+        lines(&[
+            serde_json::json!({"type":"user","sessionId":"claude-7","message":{"role":"user","content":"Fix the sidebar"}}),
+            assistant(serde_json::json!([{"type":"text","text":"Done: the sidebar scrolls again."}]), "2026-10-20T12:00:00.000Z"),
+            serde_json::json!({"type":"assistant","isSidechain":true,"timestamp":"2026-10-20T12:00:01.000Z","message":{"content":[{"type":"text","text":"subagent chatter"}]}}),
+            assistant(serde_json::json!([{"type":"thinking","thinking":"hmm"}]), "2026-10-20T12:00:02.000Z"),
+            assistant(serde_json::json!([{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]), "2026-10-20T12:00:03.000Z"),
+            serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"x".repeat(300 * 1024)}]}}),
+        ]),
+    )
+    .unwrap();
+    fs::write(
+        claude.join("projects/demo/claude-8.jsonl"),
+        lines(&[
+            serde_json::json!({"type":"user","sessionId":"claude-8","message":{"role":"user","content":"Explain"}}),
+            assistant(serde_json::json!([{"type":"text","text":"é".repeat(600)}]), "2026-10-20T12:00:00.000Z"),
+        ]),
+    )
+    .unwrap();
+    fs::write(
+        claude.join("projects/demo/claude-9.jsonl"),
+        lines(&[
+            serde_json::json!({"type":"user","sessionId":"claude-9","message":{"role":"user","content":"Not answered yet"}}),
+        ]),
+    )
+    .unwrap();
+    fs::write(
+        codex.join("sessions/2026/10/20/rollout-2026-10-20T12-00-00-codex-3.jsonl"),
+        lines(&[
+            serde_json::json!({"type":"session_meta","payload":{"id":"codex-3"}}),
+            serde_json::json!({"type":"response_item","timestamp":"2026-10-20T12:05:00.000Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Which branch should I use?"}]}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"token_count"}}),
+        ]),
+    )
+    .unwrap();
+    let discovery = ProviderDiscovery::new(
+        DiscoveryRoots {
+            claude_config_dir: claude,
+            codex_home_dir: codex,
+        },
+        50,
+        90 * 24 * 60 * 60 * 1_000,
+    );
+
+    let key = |provider, id: &str| (provider, id.to_owned());
+    let messages = discovery
+        .last_agent_messages(
+            &[
+                key(AgentProvider::Claude, "claude-7"),
+                key(AgentProvider::Claude, "claude-8"),
+                key(AgentProvider::Claude, "claude-9"),
+                key(AgentProvider::Claude, "never-started"),
+                key(AgentProvider::Codex, "codex-3"),
+                key(AgentProvider::Claude, "codex-3"),
+            ],
+            500,
+        )
+        .unwrap();
+
+    let claude_7 = &messages[&key(AgentProvider::Claude, "claude-7")];
+    assert_eq!(claude_7.text, "Done: the sidebar scrolls again.");
+    assert_eq!(claude_7.timestamp, Some(1_792_497_600_000));
+    let claude_8 = &messages[&key(AgentProvider::Claude, "claude-8")];
+    assert_eq!(claude_8.text, format!("{}…", "é".repeat(500)));
+    assert_eq!(
+        messages[&key(AgentProvider::Codex, "codex-3")].text,
+        "Which branch should I use?"
+    );
+    assert_eq!(messages.len(), 3);
+}
