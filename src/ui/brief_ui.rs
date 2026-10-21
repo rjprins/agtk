@@ -60,6 +60,9 @@ impl Workspace {
         self.add_target_action("brief-read", |workspace, id| {
             workspace.change_brief(|brief| brief.mark_read(id));
         });
+        self.add_target_action("brief-done", |workspace, id| {
+            workspace.change_brief(|brief| brief.toggle_done(id, now_millis()));
+        });
         self.add_target_action("brief-remove", |workspace, id| {
             workspace.change_brief(|brief| brief.remove(id));
         });
@@ -219,24 +222,49 @@ fn brief_row(item: &BriefItem) -> gtk::Box {
     text.set_hexpand(true);
     text.set_wrap(true);
     text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    text.set_selectable(true);
     if !item.read {
         text.add_css_class("heading");
     }
+    if item.done {
+        let strikethrough = gtk::pango::AttrList::new();
+        strikethrough.insert(gtk::pango::AttrInt::new_strikethrough(true));
+        text.set_attributes(Some(&strikethrough));
+        text.add_css_class("dim-label");
+    }
     row.append(&text);
     let target = item.id.to_variant();
+    if !item.read {
+        row.set_tooltip_text(Some("Click to mark read"));
+        row.set_cursor_from_name(Some("pointer"));
+        // Buttons claim their own clicks, so only the rest of the row marks it read.
+        let click = gtk::GestureClick::new();
+        let click_target = target.clone();
+        click.connect_released(move |gesture, _, _, _| {
+            if let Some(row) = gesture.widget() {
+                let _ = row.activate_action("win.brief-read", Some(&click_target));
+            }
+        });
+        row.add_controller(click);
+    }
     if item.link.is_some() {
         let open = brief_button("web-browser-symbolic", "Open the link and mark it read");
         open.set_action_name(Some("win.brief-open"));
         open.set_action_target_value(Some(&target));
         row.append(&open);
     }
-    if !item.read {
-        let read = brief_button("object-select-symbolic", "Mark read");
-        read.set_action_name(Some("win.brief-read"));
-        read.set_action_target_value(Some(&target));
-        row.append(&read);
-    }
+    let done = if item.done {
+        let button = brief_button("object-select-symbolic", "Done. Click to undo.");
+        button.add_css_class("success");
+        button
+    } else {
+        brief_button(
+            "object-select-symbolic",
+            "Mark done. Your assistant completes the task.",
+        )
+    };
+    done.set_action_name(Some("win.brief-done"));
+    done.set_action_target_value(Some(&target));
+    row.append(&done);
     let remove = brief_button(
         "window-close-symbolic",
         "Remove from the brief. The task or mail itself is not changed.",

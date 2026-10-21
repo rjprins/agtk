@@ -963,7 +963,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "post_brief",
             "Post to the daily brief",
-            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text and an optional http(s) link. Posting an existing id updates it in place and keeps its read and removed marks; a new id shows as unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it. retireIds takes items out. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Removing an item in the panel only hides it. Returns the brief and the added, updated and retired ids.",
+            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text and an optional http(s) link. Posting an existing id updates it in place and keeps its read, removed and done marks; a new id shows as unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it. retireIds takes items out. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Removing an item in the panel only hides it. Returns the brief and the added, updated and retired ids.",
             schema(
                 &[
                     (
@@ -999,7 +999,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "get_brief",
             "Read the daily brief",
-            "Return the daily brief: items in panel order with their read and removed marks, the section order, and retired, the marks agtk still remembers for items no longer in the brief. Skip or leave out items that are read or removed.",
+            "Return the daily brief: items in panel order with their read, removed and done marks, the section order, and retired, the marks agtk still remembers for items no longer in the brief. done means the user marked the item done in the panel, at doneAt in Unix milliseconds; agtk changes nothing else, so complete the underlying task yourself. Skip or leave out items that are read, removed or done.",
             empty_schema(),
         ),
         tool(

@@ -893,7 +893,12 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
         .map(|item| UiNode {
             id: format!("brief-item:{}", item.id),
             role: "listitem".to_owned(),
-            label: Some(format!("{}: {}", item.section, item.text)),
+            label: Some(format!(
+                "{}: {}{}",
+                item.section,
+                item.text,
+                if item.done { " (done)" } else { "" }
+            )),
             is_visible: page_visible,
             is_enabled: true,
             is_selected: !item.read,

@@ -186,8 +186,8 @@ fn retired_marks_come_back_on_a_repost_and_are_forgotten_after_thirty_days() {
     assert_eq!(
         serde_json::to_value(&brief.retired).unwrap(),
         json!([
-            {"id":"todoist:1","read":false,"removed":true,"retiredAt":2_000},
-            {"id":"gmail:abc","read":true,"removed":false,"retiredAt":2_000}
+            {"id":"todoist:1","read":false,"removed":true,"done":false,"doneAt":null,"retiredAt":2_000},
+            {"id":"gmail:abc","read":true,"removed":false,"done":false,"doneAt":null,"retiredAt":2_000}
         ])
     );
 
@@ -311,4 +311,97 @@ fn a_damaged_saved_brief_loads_empty() {
     brief.mark_read("a");
     let saved = serde_json::to_value(&brief).unwrap();
     assert_eq!(Brief::from_value_lossy(saved), brief);
+}
+
+#[test]
+fn done_toggles_with_its_time_and_also_marks_read() {
+    let mut brief = Brief::default();
+    brief
+        .post(
+            &post(vec![item("todoist:7", "Tasks", "Renew passport")]),
+            1_000,
+        )
+        .unwrap();
+    assert!(!brief.toggle_done("missing", 2_000));
+
+    assert!(brief.toggle_done("todoist:7", 2_000));
+    let done = get(&brief, "todoist:7");
+    assert!(done.done && done.read);
+    assert_eq!(done.done_at, Some(2_000));
+    assert_eq!(brief.unread_count(), 0);
+    assert_eq!(brief.summary()["items"][0]["doneAt"], 2_000);
+
+    // Undoing clears the mark and its time, but the item stays read.
+    assert!(brief.toggle_done("todoist:7", 3_000));
+    let undone = get(&brief, "todoist:7");
+    assert!(!undone.done && undone.read);
+    assert_eq!(undone.done_at, None);
+    assert_eq!(brief.summary()["items"][0]["done"], false);
+}
+
+#[test]
+fn done_survives_reposts_and_retirement() {
+    let mut brief = Brief::default();
+    brief
+        .post(
+            &post(vec![
+                item("todoist:7", "Tasks", "Renew passport"),
+                item("todoist:8", "Tasks", "Book dentist"),
+            ]),
+            1_000,
+        )
+        .unwrap();
+    brief.toggle_done("todoist:7", 2_000);
+    brief
+        .post(
+            &replace(
+                &["Tasks"],
+                vec![item("todoist:7", "Tasks", "Renew passport!")],
+            ),
+            3_000,
+        )
+        .unwrap();
+    assert_eq!(get(&brief, "todoist:7").done_at, Some(2_000));
+
+    // The assistant completes the task and retires it; the mark is kept.
+    brief
+        .post(
+            &BriefPostParams {
+                retire_ids: vec!["todoist:7".to_owned()],
+                ..BriefPostParams::default()
+            },
+            4_000,
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&brief.retired).unwrap(),
+        json!([{
+            "id":"todoist:7","read":true,"removed":false,
+            "done":true,"doneAt":2_000,"retiredAt":4_000
+        }])
+    );
+    brief
+        .post(
+            &post(vec![item("todoist:7", "Tasks", "Renew passport")]),
+            5_000,
+        )
+        .unwrap();
+    let back = get(&brief, "todoist:7");
+    assert!(back.done);
+    assert_eq!(back.done_at, Some(2_000));
+}
+
+#[test]
+fn a_brief_saved_before_done_existed_still_loads() {
+    let saved = json!({
+        "items":[{"id":"a","section":"Today","text":"A","link":null,
+                  "postedAt":1,"updatedAt":1,"read":true,"removed":false}],
+        "sections":["Today"],
+        "retired":[{"id":"b","read":false,"removed":true,"retiredAt":1}]
+    });
+    let brief = Brief::from_value_lossy(saved);
+    assert_eq!(brief.items.len(), 1);
+    assert!(brief.items[0].read && !brief.items[0].done);
+    assert_eq!(brief.items[0].done_at, None);
+    assert!(brief.retired[0].removed && !brief.retired[0].done);
 }

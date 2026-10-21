@@ -3592,3 +3592,146 @@ fn brief_read_and_removed_marks_survive_reposts_and_restarts() {
     app.activate_action("brief-read-all");
     assert_eq!(app.request("brief.get", json!({}))["unreadCount"], 0);
 }
+
+#[test]
+#[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
+fn clicking_a_brief_row_marks_it_read_and_done_toggles_and_survives_restarts() {
+    use glib::variant::ToVariant;
+
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
+    // scripts/test-terminal-scroll.sh's small monitor puts the window at (0, 0).
+    let display = std::env::var("AGTK_TEST_DISPLAY").unwrap();
+    assert!(display.contains("agtk-scroll-"));
+    assert_eq!(
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap(),
+        std::env::var("AGTK_TEST_BUS").unwrap()
+    );
+    let mut app = App::new();
+    let items = json!([
+        {"id":"todoist:7","section":"Tasks","text":"Renew passport"},
+        {"id":"gmail:abc","section":"Waiting on you","text":"Reply to the landlord",
+         "link":"https://mail.google.com/mail/u/0/#inbox/abc"}
+    ]);
+    app.request("brief.post", json!({"items":items}));
+    app.request("ui.show", json!({"surface":"brief"}));
+
+    let bus = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>).unwrap();
+    let destination = "org.gnome.Mutter.RemoteDesktop";
+    let remote = bus
+        .call_sync(
+            Some(destination),
+            "/org/gnome/Mutter/RemoteDesktop",
+            destination,
+            "CreateSession",
+            None,
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    let path = remote.child_value(0).str().unwrap().to_owned();
+    let call = |method: &str, parameters: Option<glib::Variant>| {
+        bus.call_sync(
+            Some(destination),
+            &path,
+            "org.gnome.Mutter.RemoteDesktop.Session",
+            method,
+            parameters.as_ref(),
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    };
+    call("Start", None);
+    let key = |code: u32, state: bool| {
+        call("NotifyKeyboardKeycode", Some((code, state).to_variant()));
+    };
+    let click = |x: f64, y: f64| {
+        call(
+            "NotifyPointerMotionRelative",
+            Some((-10000.0_f64, -10000.0_f64).to_variant()),
+        );
+        call("NotifyPointerMotionRelative", Some((x, y).to_variant()));
+        thread::sleep(Duration::from_millis(100));
+        call("NotifyPointerButton", Some((272_i32, true).to_variant()));
+        call("NotifyPointerButton", Some((272_i32, false).to_variant()));
+    };
+    thread::sleep(Duration::from_millis(300));
+    // Super+Up maximizes the disposable window so coordinates start at (0, 0).
+    key(125, true);
+    key(103, true);
+    key(103, false);
+    key(125, false);
+    thread::sleep(Duration::from_millis(500));
+
+    let inspection = app.request("ui.inspect", json!({}));
+    let row = find(&inspection["root"], "brief-item:gmail:abc").unwrap();
+    let bounds = &row["bounds"];
+    // The first click in a headless session only activates the window.
+    click(160.0, 400.0);
+    thread::sleep(Duration::from_millis(200));
+    // The row's text, left of its buttons.
+    click(
+        bounds["x"].as_f64().unwrap() + 40.0,
+        bounds["y"].as_f64().unwrap() + bounds["height"].as_f64().unwrap() / 2.0,
+    );
+    let item = |brief: &Value, id: &str| {
+        brief["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let brief = app.request("brief.get", json!({}));
+        if item(&brief, "gmail:abc")["read"] == true {
+            assert_eq!(item(&brief, "todoist:7")["read"], false);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "a row click did not mark it read: {brief}"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+
+    app.activate_target_action("brief-done", "todoist:7");
+    let brief = app.request("brief.get", json!({}));
+    let done = item(&brief, "todoist:7");
+    assert_eq!((&done["done"], &done["read"]), (&json!(true), &json!(true)));
+    let done_at = done["doneAt"].as_u64().unwrap();
+    let inspection = app.request("ui.inspect", json!({}));
+    assert_eq!(
+        find(&inspection["root"], "brief-item:todoist:7").unwrap()["label"],
+        "Tasks: Renew passport (done)"
+    );
+
+    app.stop();
+    app.start();
+    let reposted = app.request(
+        "brief.post",
+        json!({"items":items,"replaceSections":["Tasks","Waiting on you"]}),
+    );
+    assert_eq!(item(&reposted, "todoist:7")["doneAt"], done_at);
+    app.activate_target_action("brief-done", "todoist:7");
+    let undone = item(&app.request("brief.get", json!({})), "todoist:7");
+    assert_eq!(
+        (&undone["done"], &undone["doneAt"]),
+        (&json!(false), &Value::Null)
+    );
+}

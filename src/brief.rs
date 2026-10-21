@@ -81,6 +81,12 @@ pub struct BriefItem {
     pub read: bool,
     /// Hidden in the panel; the underlying task or mail is untouched.
     pub removed: bool,
+    /// Marked done in the panel. The assistant completes the task itself.
+    #[serde(default)]
+    pub done: bool,
+    /// When it was marked done, in Unix milliseconds.
+    #[serde(default)]
+    pub done_at: Option<u64>,
 }
 
 /// The marks of an item that left the brief, kept so a re-post restores them.
@@ -90,6 +96,10 @@ pub struct RetiredItem {
     pub id: String,
     pub read: bool,
     pub removed: bool,
+    #[serde(default)]
+    pub done: bool,
+    #[serde(default)]
+    pub done_at: Option<u64>,
     pub retired_at: u64,
 }
 
@@ -185,6 +195,8 @@ impl Brief {
                     updated_at: now,
                     read: marks.as_ref().is_some_and(|marks| marks.read),
                     removed: marks.as_ref().is_some_and(|marks| marks.removed),
+                    done: marks.as_ref().is_some_and(|marks| marks.done),
+                    done_at: marks.and_then(|marks| marks.done_at),
                 });
                 changes.added.push(input.id.clone());
             }
@@ -197,12 +209,14 @@ impl Brief {
         }
         for item in taken {
             changes.retired.push(item.id.clone());
-            if item.read || item.removed {
+            if item.read || item.removed || item.done {
                 next.retired.retain(|retired| retired.id != item.id);
                 next.retired.push(RetiredItem {
                     id: item.id,
                     read: item.read,
                     removed: item.removed,
+                    done: item.done,
+                    done_at: item.done_at,
                     retired_at: now,
                 });
             }
@@ -229,6 +243,17 @@ impl Brief {
             item.read = true;
         }
         changed
+    }
+
+    /// Marks one item done, or not done again. Done also means read.
+    pub fn toggle_done(&mut self, id: &str, now: u64) -> bool {
+        let Some(item) = self.items.iter_mut().find(|item| item.id == id) else {
+            return false;
+        };
+        item.done = !item.done;
+        item.done_at = item.done.then_some(now);
+        item.read |= item.done;
+        true
     }
 
     /// Hides one item. It stays in the brief, so a re-post keeps it hidden.
