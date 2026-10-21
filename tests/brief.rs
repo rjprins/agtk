@@ -1,5 +1,5 @@
 use agtk::brief::{
-    Brief, BriefItemInput, BriefPostParams, BriefSession, REMEMBER_MILLIS, SessionTarget,
+    Brief, BriefItemInput, BriefLink, BriefPostParams, BriefSession, REMEMBER_MILLIS, SessionTarget,
 };
 use agtk::providers::AgentProvider;
 use serde_json::json;
@@ -674,4 +674,80 @@ fn the_open_button_names_the_links_domain() {
         Some("localhost")
     );
     assert_eq!(domain(None), None);
+}
+
+#[test]
+fn header_links_are_kept_until_a_post_replaces_them() {
+    let calendar = BriefLink {
+        label: "Google Calendar".to_owned(),
+        url: "https://calendar.google.com/calendar/u/0/r".to_owned(),
+    };
+    let todoist = BriefLink {
+        label: "Todoist".to_owned(),
+        url: "https://app.todoist.com/app/today".to_owned(),
+    };
+    let mut brief = Brief::default();
+    brief
+        .post(
+            &BriefPostParams {
+                links: Some(vec![calendar.clone(), todoist.clone()]),
+                ..BriefPostParams::default()
+            },
+            1_000,
+        )
+        .unwrap();
+    assert_eq!(brief.links, [calendar.clone(), todoist.clone()]);
+    assert_eq!(calendar.domain().as_deref(), Some("calendar.google.com"));
+    assert_eq!(
+        brief.summary()["links"],
+        json!([
+            {"label":"Google Calendar","url":"https://calendar.google.com/calendar/u/0/r"},
+            {"label":"Todoist","url":"https://app.todoist.com/app/today"}
+        ])
+    );
+
+    // A post without links leaves them; one with links replaces them all.
+    brief
+        .post(&post(vec![item("a", "Today", "A")]), 2_000)
+        .unwrap();
+    assert_eq!(brief.links.len(), 2);
+    brief
+        .post(
+            &BriefPostParams {
+                links: Some(vec![todoist.clone()]),
+                ..BriefPostParams::default()
+            },
+            3_000,
+        )
+        .unwrap();
+    assert_eq!(brief.links, std::slice::from_ref(&todoist));
+
+    let link = |label: &str, url: &str| BriefLink {
+        label: label.to_owned(),
+        url: url.to_owned(),
+    };
+    for links in [
+        vec![link("Files", "file:///home")],
+        vec![link(" Calendar", "https://calendar.google.com/")],
+        vec![link(&"x".repeat(31), "https://calendar.google.com/")],
+        vec![todoist.clone(); 9],
+    ] {
+        let invalid = BriefPostParams {
+            links: Some(links),
+            ..BriefPostParams::default()
+        };
+        assert!(brief.post(&invalid, 4_000).is_err());
+        assert_eq!(brief.links, std::slice::from_ref(&todoist));
+    }
+
+    brief
+        .post(
+            &BriefPostParams {
+                links: Some(Vec::new()),
+                ..BriefPostParams::default()
+            },
+            5_000,
+        )
+        .unwrap();
+    assert!(brief.links.is_empty());
 }

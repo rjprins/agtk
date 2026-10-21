@@ -664,6 +664,10 @@ fn brief_posts_are_validated_and_round_trip() {
             replace_sections: vec!["Mail".to_owned()],
             retire_ids: vec!["gmail:old".to_owned()],
             unhide_ids: vec!["gmail:hidden".to_owned()],
+            links: Some(vec![agtk::brief::BriefLink {
+                label: "Calendar".to_owned(),
+                url: "https://calendar.google.com/".to_owned(),
+            }]),
         }),
     })
     .unwrap();
@@ -679,6 +683,8 @@ fn brief_posts_are_validated_and_round_trip() {
         r#"{"items":[{"id":"a","section":"Today","text":"A","link":"javascript:alert(1)"}]}"#,
         r#"{"items":[{"id":"a","section":"Today","text":"A","extra":true}]}"#,
         r#"{"replaceSections":[""]}"#,
+        r#"{"links":[{"label":"Mail","url":"mailto:me@example.com"}]}"#,
+        r#"{"links":[{"label":"","url":"https://calendar.google.com/"}]}"#,
     ] {
         let wire = format!(r#"{{"version":1,"id":"req","method":"brief.post","params":{params}}}"#);
         let error = decode_request(wire.as_bytes()).expect_err(params);

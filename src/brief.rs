@@ -14,6 +14,7 @@ pub const PREFERENCE_KEY: &str = "brief";
 const MAX_ITEMS: usize = 500;
 const MAX_POSTED_ITEMS: usize = 200;
 const MAX_REMEMBERED: usize = 2000;
+const MAX_LINKS: usize = 8;
 /// How long agtk remembers the marks of an item the assistant took out.
 pub const REMEMBER_MILLIS: u64 = 30 * 24 * 60 * 60 * 1000;
 
@@ -117,6 +118,24 @@ pub struct BriefPostParams {
     /// Hidden items the assistant shows again because they need attention.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unhide_ids: Vec<String>,
+    /// Replaces the links at the top of the page; left out, they stay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<BriefLink>>,
+}
+
+/// A fixed link at the top of the Brief page, such as the calendar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BriefLink {
+    pub label: String,
+    pub url: String,
+}
+
+impl BriefLink {
+    /// The host the link goes to, for its tooltip.
+    pub fn domain(&self) -> Option<String> {
+        link_domain(&self.url)
+    }
 }
 
 impl BriefPostParams {
@@ -144,6 +163,20 @@ impl BriefPostParams {
         }
         for id in &self.unhide_ids {
             validate_id(id)?;
+        }
+        if let Some(links) = &self.links {
+            if links.len() > MAX_LINKS {
+                return Err("no more than 8 links are allowed".into());
+            }
+            for link in links {
+                if link.label.trim() != link.label
+                    || !(1..=30).contains(&link.label.chars().count())
+                    || link.label.chars().any(char::is_control)
+                {
+                    return Err("link label must be 1 to 30 printable characters".into());
+                }
+                validate_link(&link.url)?;
+            }
         }
         for id in &self.retire_ids {
             validate_id(id)?;
@@ -213,6 +246,9 @@ pub struct Brief {
     pub sections: Vec<String>,
     #[serde(default)]
     pub retired: Vec<RetiredItem>,
+    /// Links at the top of the page, kept until a post replaces them.
+    #[serde(default)]
+    pub links: Vec<BriefLink>,
 }
 
 impl Brief {
@@ -320,6 +356,9 @@ impl Brief {
             if next.unhide(id) {
                 changes.unhidden.push(id.clone());
             }
+        }
+        if let Some(links) = &params.links {
+            next.links = links.clone();
         }
         next.forget_old(now);
         *self = next;
@@ -452,8 +491,7 @@ impl Brief {
 impl BriefItem {
     /// The host the link goes to, for the open button's tooltip.
     pub fn link_domain(&self) -> Option<String> {
-        let uri = glib::Uri::parse(self.link.as_deref()?, glib::UriFlags::NONE).ok()?;
-        uri.host().map(|host| host.to_string())
+        link_domain(self.link.as_deref()?)
     }
 
     /// Takes the posted fields; true when any of them changed.
@@ -471,6 +509,11 @@ impl BriefItem {
         }
         changed
     }
+}
+
+fn link_domain(url: &str) -> Option<String> {
+    let uri = glib::Uri::parse(url, glib::UriFlags::NONE).ok()?;
+    uri.host().map(|host| host.to_string())
 }
 
 fn validate_id(id: &str) -> BriefResult<()> {

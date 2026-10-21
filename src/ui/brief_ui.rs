@@ -15,6 +15,8 @@ const EMPTY_TEXT: &str = "No brief yet. Your assistant posts it with the post_br
 pub(super) struct BriefPage {
     pub root: gtk::Box,
     pub mark_all_read: gtk::Button,
+    /// The assistant's fixed links, such as the calendar.
+    pub links: adw::WrapBox,
     pub rows: gtk::Box,
     /// Hidden items, kept at the bottom like Inactive Projects in the sidebar.
     pub hidden: gtk::Box,
@@ -26,22 +28,30 @@ impl BriefPage {
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         toolbar.set_margin_start(12);
         toolbar.set_margin_end(12);
-        toolbar.set_margin_bottom(4);
-        let hint = gtk::Label::new(Some("Click an item to mark it read or unread."));
-        hint.set_xalign(0.0);
-        hint.set_hexpand(true);
-        hint.set_wrap(true);
-        hint.add_css_class("caption");
-        hint.add_css_class("dim-label");
+        // Links wrap onto more lines in a narrow sidebar.
+        let links = adw::WrapBox::new();
+        links.set_child_spacing(4);
+        links.set_line_spacing(4);
+        links.set_hexpand(true);
         let mark_all_read = gtk::Button::builder()
             .label("Mark all read")
             .action_name("win.brief-read-all")
+            .valign(gtk::Align::Start)
             .sensitive(false)
             .build();
         mark_all_read.add_css_class("flat");
-        toolbar.append(&hint);
+        toolbar.append(&links);
         toolbar.append(&mark_all_read);
         root.append(&toolbar);
+        let hint = gtk::Label::new(Some("Click an item to mark it read or unread."));
+        hint.set_xalign(0.0);
+        hint.set_wrap(true);
+        hint.set_margin_start(12);
+        hint.set_margin_end(12);
+        hint.set_margin_bottom(4);
+        hint.add_css_class("caption");
+        hint.add_css_class("dim-label");
+        root.append(&hint);
 
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -66,6 +76,7 @@ impl BriefPage {
         Self {
             root,
             mark_all_read,
+            links,
             rows,
             hidden,
         }
@@ -259,6 +270,18 @@ impl Workspace {
         let brief = self.brief.borrow();
         let unread = brief.unread_count();
         page.mark_all_read.set_sensitive(unread > 0);
+        while let Some(child) = page.links.first_child() {
+            page.links.remove(&child);
+        }
+        for link in &brief.links {
+            let button = gtk::LinkButton::with_label(&link.url, &link.label);
+            // A link button shows its whole URL by default; the domain is enough.
+            button.set_tooltip_text(Some(&match link.domain() {
+                Some(domain) => format!("Open {domain}"),
+                None => "Open the link".to_owned(),
+            }));
+            page.links.append(&button);
+        }
         let title = if unread > 0 {
             format!("Brief ({unread})")
         } else {

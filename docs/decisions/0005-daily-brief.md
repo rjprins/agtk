@@ -32,4 +32,7 @@ Decisions:
    session id, then for a session on the same conversation, and then offers a
    restore, like Resume Session. The restore needs the provider, because agtk
    reads Claude and Codex logs in different places.
-9. No keyboard shortcut for now.
+9. The links at the top of the page, such as the calendar and Todoist, come
+   from the assistant with `links`, not from agtk. A post without `links`
+   keeps them, so the assistant sets them once.
+10. No keyboard shortcut for now.

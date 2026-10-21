@@ -279,9 +279,10 @@ The session button selects that session. If it is closed, agtk looks for a sessi
 - `replaceSections` replaces all items of those sections with the posted ones, in posted order. Post no items for a section to empty it. A section with no items leaves the brief.
 - `retireIds` takes items out of the brief.
 - `unhideIds` shows hidden items again, for example when they need attention again. It does not change read or done.
+- `links` sets the fixed links at the top of the page, such as Google Calendar and Todoist: up to 8, each with a `label` of up to 30 characters and an http or https `url`. They stay until a post with `links` replaces them. Post `"links": []` to remove them.
 - agtk keeps the marks of items that left the brief for 30 days. If the same `id` comes back, so do its marks.
 
-`get_brief` returns the items with `read`, `hidden` and `done`, the sections that hold items, in order, and `retired`: the marks agtk still keeps for items that left the brief. `doneAt` is when the item was marked done, in Unix milliseconds. Skip items that are read, hidden or done. For a done Todoist task, complete the task in Todoist, then take the item out with `retireIds`.
+`get_brief` returns the items with `read`, `hidden` and `done`, the sections that hold items, in order, the `links` at the top, and `retired`: the marks agtk still keeps for items that left the brief. `doneAt` is when the item was marked done, in Unix milliseconds. Skip items that are read, hidden or done. For a done Todoist task, complete the task in Todoist, then take the item out with `retireIds`.
 
 From a shell, run `agtkctl brief` to read the brief, or `agtkctl brief post --json JSON` to post.
 

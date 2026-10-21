@@ -3527,7 +3527,13 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
             {"id":"gmail:abc","section":"Waiting on you","text":format!("Reply to the landlord{suffix}")}
         ])
     };
-    let posted = app.request("brief.post", json!({"items":items("")}));
+    let posted = app.request(
+        "brief.post",
+        json!({"items":items(""),"links":[
+            {"label":"Google Calendar","url":"https://calendar.google.com/calendar/u/0/r"},
+            {"label":"Todoist","url":"https://app.todoist.com/app/today"}
+        ]}),
+    );
     assert_eq!(posted["unreadCount"], 3);
     assert_eq!(
         posted["changes"]["added"],
@@ -3567,6 +3573,7 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
         .as_array()
         .unwrap()
         .iter()
+        .filter(|node| !node["id"].as_str().unwrap().starts_with("brief-link:"))
         .map(|node| {
             (
                 node["id"].as_str().unwrap(),
@@ -3596,6 +3603,20 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     assert_eq!(hidden["isSelected"], true);
     assert_eq!(hidden["children"][0]["id"], "brief-item:todoist:7");
     assert_eq!(hidden["children"][0]["isVisible"], true);
+    // The links stay through a restart and a post that leaves them out.
+    let link_labels = |inspection: &Value| {
+        (0..3)
+            .filter_map(|index| find(&inspection["root"], &format!("brief-link:{index}")))
+            .map(|node| node["label"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        link_labels(&inspection),
+        [
+            "Google Calendar (calendar.google.com)",
+            "Todoist (app.todoist.com)"
+        ]
+    );
     // Hidden sits at the bottom of the page, like Inactive Projects.
     let page = find(&inspection["root"], "brief-page").unwrap();
     let bottom = |node: &Value| {
@@ -3609,6 +3630,7 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
         json!({"items":items(" (updated)"),"replaceSections":["Waiting on you","Tasks"]}),
     );
     assert_eq!(marks(&reposted), expected);
+    assert_eq!(reposted["links"][1]["label"], "Todoist");
     assert_eq!(reposted["changes"]["added"], json!([]));
     assert_eq!(reposted["items"][0]["text"], "Review PR 1 (updated)");
 

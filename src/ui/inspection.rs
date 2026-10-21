@@ -920,12 +920,36 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
             .map_or_else(Bounds::default, |row| widget_bounds(row, &workspace.window)),
         children: Vec::new(),
     };
-    let mut children = brief
-        .visible_sections()
-        .into_iter()
-        .flat_map(|(_, items)| items)
-        .map(|item| item_node(item, page_visible))
+    let links = std::iter::successors(page.links.first_child(), |link| link.next_sibling())
         .collect::<Vec<_>>();
+    let mut children = brief
+        .links
+        .iter()
+        .enumerate()
+        .map(|(index, link)| UiNode {
+            id: format!("brief-link:{index}"),
+            role: "link".to_owned(),
+            label: Some(format!(
+                "{} ({})",
+                link.label,
+                link.domain().unwrap_or_default()
+            )),
+            is_visible: page_visible,
+            is_enabled: true,
+            is_selected: false,
+            bounds: links.get(index).map_or_else(Bounds::default, |link| {
+                widget_bounds(link, &workspace.window)
+            }),
+            children: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    children.extend(
+        brief
+            .visible_sections()
+            .into_iter()
+            .flat_map(|(_, items)| items)
+            .map(|item| item_node(item, page_visible)),
+    );
     let hidden = brief.hidden_items();
     if !hidden.is_empty() {
         let expanded = workspace.brief_hidden_expanded.get();

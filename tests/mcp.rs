@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
-use agtk::brief::{BriefItemInput, BriefPostParams, BriefSession};
+use agtk::brief::{BriefItemInput, BriefLink, BriefPostParams, BriefSession};
 use agtk::control::{
     ClaudePresetApplyParams, ControlCommand, CreateSessionParams, PrListParams, SendInputParams,
     SessionIdParams, SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
@@ -433,7 +433,8 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
                     }],
                     "replaceSections":["Waiting on you"],
                     "retireIds":["ado-pr:105600"],
-                    "unhideIds":["gmail:abc"]
+                    "unhideIds":["gmail:abc"],
+                    "links":[{"label":"Todoist","url":"https://app.todoist.com/app/today"}]
                 }
             }),
         ))
@@ -467,6 +468,10 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
                 replace_sections: vec!["Waiting on you".to_owned()],
                 retire_ids: vec!["ado-pr:105600".to_owned()],
                 unhide_ids: vec!["gmail:abc".to_owned()],
+                links: Some(vec![BriefLink {
+                    label: "Todoist".to_owned(),
+                    url: "https://app.todoist.com/app/today".to_owned(),
+                }]),
             }),
             ControlCommand::BriefGet,
         ]

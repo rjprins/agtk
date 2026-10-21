@@ -963,7 +963,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "post_brief",
             "Post to the daily brief",
-            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text, an optional http(s) link, and an optional session for items about an agent session: its agtk session id, and its provider and conversationId from list_sessions. In the panel the session button selects that session; when it is closed, agtk finds a session on the same conversation or offers to restore it, which needs provider and conversationId. Posting an existing id updates it in place and keeps its read, hidden and done marks; a new id shows as unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it, and an empty section leaves the brief. retireIds takes items out. unhideIds shows hidden items again, for example when they need attention again; it does not change read or done. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Hiding an item in the panel only moves it to the Hidden section. Returns the brief and the added, updated, retired and unhidden ids.",
+            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text, an optional http(s) link, and an optional session for items about an agent session: its agtk session id, and its provider and conversationId from list_sessions. In the panel the session button selects that session; when it is closed, agtk finds a session on the same conversation or offers to restore it, which needs provider and conversationId. Posting an existing id updates it in place and keeps its read, hidden and done marks; a new id shows as unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it, and an empty section leaves the brief. retireIds takes items out. unhideIds shows hidden items again, for example when they need attention again; it does not change read or done. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Hiding an item in the panel only moves it to the Hidden section. links sets the fixed links at the top of the panel, such as Google Calendar and Todoist, each with a label of up to 30 characters and an http(s) url; they stay until a post with links replaces them, and an empty list removes them. Returns the brief and the added, updated, retired and unhidden ids.",
             schema(
                 &[
                     (
@@ -1005,6 +1005,19 @@ fn tool_definitions() -> Vec<Value> {
                         "unhideIds",
                         json!({"type":"array","items":{"type":"string"}}),
                     ),
+                    (
+                        "links",
+                        json!({
+                            "type":"array",
+                            "maxItems":8,
+                            "items":{
+                                "type":"object",
+                                "properties":{"label":string(),"url":string()},
+                                "required":["label","url"],
+                                "additionalProperties":false
+                            }
+                        }),
+                    ),
                 ],
                 &[],
             ),
@@ -1012,7 +1025,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "get_brief",
             "Read the daily brief",
-            "Return the daily brief: items in panel order with their read, hidden and done marks, the order of the sections that hold items, and retired, the marks agtk still remembers for items no longer in the brief. done means the user marked the item done in the panel, at doneAt in Unix milliseconds, which also hides it; agtk changes nothing else, so complete the underlying task yourself. Skip or leave out items that are read, hidden or done.",
+            "Return the daily brief: items in panel order with their read, hidden and done marks, the order of the sections that hold items, the fixed links at the top of the panel, and retired, the marks agtk still remembers for items no longer in the brief. done means the user marked the item done in the panel, at doneAt in Unix milliseconds, which also hides it; agtk changes nothing else, so complete the underlying task yourself. Skip or leave out items that are read, hidden or done.",
             empty_schema(),
         ),
         tool(
