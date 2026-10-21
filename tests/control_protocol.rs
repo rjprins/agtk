@@ -170,6 +170,12 @@ fn every_core_method_decodes_to_a_typed_command() {
             r#"{"sessionId":"claude-1","presetId":"opus-high"}"#,
             "ClaudePresetApply",
         ),
+        (
+            "brief.post",
+            r#"{"items":[{"id":"ado-pr:1","section":"Waiting on you","text":"Review PR 1"}],"replaceSections":["Waiting on you"]}"#,
+            "BriefPost",
+        ),
+        ("brief.get", "{}", "BriefGet"),
         ("agent.list", "{}", "AgentList"),
         (
             "agent.preview",
@@ -640,4 +646,43 @@ fn provider_session_ids_cannot_pass_as_agent_flags() {
         "params": {"provider": "codex", "providerSessionId": uuid},
     });
     assert!(decode_request(request.to_string().as_bytes()).is_ok());
+}
+
+#[test]
+fn brief_posts_are_validated_and_round_trip() {
+    let request = encode_request(&agtk::control::ControlRequest {
+        version: PROTOCOL_VERSION,
+        id: "req".to_owned(),
+        command: ControlCommand::BriefPost(agtk::brief::BriefPostParams {
+            items: vec![agtk::brief::BriefItemInput {
+                id: "gmail:abc".to_owned(),
+                section: "Mail".to_owned(),
+                text: "Invoice".to_owned(),
+                link: Some("https://mail.google.com/mail/u/0/#inbox/abc".to_owned()),
+            }],
+            replace_sections: vec!["Mail".to_owned()],
+            retire_ids: vec!["gmail:old".to_owned()],
+        }),
+    })
+    .unwrap();
+    let decoded = decode_request(request.as_bytes()).unwrap();
+    let ControlCommand::BriefPost(params) = decoded.command else {
+        panic!("not a brief post: {decoded:?}");
+    };
+    assert_eq!(params.retire_ids, ["gmail:old"]);
+
+    for params in [
+        r#"{"items":[{"id":"a","section":"Today","text":"A"},{"id":"a","section":"Today","text":"B"}]}"#,
+        r#"{"items":[{"id":"a","section":"Today","text":"A","link":"javascript:alert(1)"}]}"#,
+        r#"{"items":[{"id":"a","section":"Today","text":"A","extra":true}]}"#,
+        r#"{"replaceSections":[""]}"#,
+    ] {
+        let wire = format!(r#"{{"version":1,"id":"req","method":"brief.post","params":{params}}}"#);
+        let error = decode_request(wire.as_bytes()).expect_err(params);
+        assert_eq!(error.code, ErrorCode::InvalidParams, "{params}");
+    }
+    let error =
+        decode_request(br#"{"version":1,"id":"req","method":"brief.get","params":{"all":true}}"#)
+            .expect_err("brief.get takes no parameters");
+    assert_eq!(error.code, ErrorCode::InvalidParams);
 }

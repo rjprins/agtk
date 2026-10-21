@@ -628,6 +628,10 @@ impl Workspace {
                     .map(|name| name.to_string())
                     .unwrap_or_default();
                 workspace.save_preference(SIDEBAR_PAGE_PREFERENCE, serde_json::json!(page));
+                // The brief is not about the worktree, so hide the branch line and refresh button.
+                let worktree_page = page != brief_ui::BRIEF_PAGE;
+                workspace.changes.branch.set_visible(worktree_page);
+                workspace.changes.refresh.set_visible(worktree_page);
                 if page == FILES_PAGE {
                     workspace.refresh_explorer_from_snapshot();
                     workspace.changes.explorer.filter.grab_focus();

@@ -140,6 +140,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 - A session that works on a PR, or reviews one, shows a PR button in its sidebar row and a PR bar above its terminal. Both open the PR in the browser.
 - Linked Claude, Codex and Gemini agents automatically receive new PR comments and source branch pushes. Polling runs every two minutes while agtk is open, including when its window is unfocused. The first poll establishes a baseline; later updates are deduplicated per session and queued across restarts until the agent is resting. Delivery waits while you focus the terminal, have an unsubmitted draft, or the agent is busy or asking for input. Comments by your signed-in Azure account are skipped to avoid reply loops. The agent receives the PR link, changed commit and comment thread IDs, then fetches the details and updates its checkout as part of its existing task.
 - Emacs: open Magit or a branch review for the selected session.
+- Daily brief: an assistant posts your brief over MCP, and the Brief page in the right sidebar shows it by section. New items are bold with a dot. Mark an item read, open its link, or remove it. Removing only hides it here: the task or mail itself does not change. See [Daily brief](#daily-brief).
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.
 
 ## Keyboard shortcuts
@@ -256,9 +257,23 @@ An agent can open a shell with `spawn_shell` and give it an `initialCommand`, su
 
 Sessions that agtk starts run outside any sandbox the agent has. An agent with the `agtk` tools can therefore run commands beyond its own sandbox, through `spawn_shell`, `send_input`, or `launch_agent`. Give the tools only to agents you would let run commands. PR reviews start Claude and Codex without the `agtk` tools, because they read code from someone else.
 
-The tools cover sessions, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, and screenshots of the agtk window. The server never captures the rest of the desktop.
+The tools cover sessions, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, the daily brief, and screenshots of the agtk window. The server never captures the rest of the desktop.
 
 `list_sessions` gives each session's `conversationId`, and for Claude and Codex agents `lastAgentMessage`: the agent's last message from its Claude or Codex log, cut to 500 characters, with `lastAgentMessageAt` in Unix milliseconds. Both are null until agtk knows the conversation and the agent has answered. So a caller can tell what an agent finished or asks without reading its terminal with `snapshot`. Together with the [state hook](#state-hook), a supervising agent hears about a finished turn right away and reads what it said.
+
+### Daily brief
+
+`post_brief` adds items to the brief. Each item has a stable `id`, such as `ado-pr:105687` or `gmail:THREAD_ID`, a `section`, `text`, and an optional http or https `link`.
+
+- Post an existing `id` to update it. It keeps its read and removed marks.
+- A new `id` shows as unread.
+- `replaceSections` replaces all items of those sections with the posted ones, in posted order. Post no items for a section to empty it.
+- `retireIds` takes items out of the brief.
+- agtk keeps the marks of items that left the brief for 30 days. If the same `id` comes back, so do its marks.
+
+`get_brief` returns the items with `read` and `removed`, the section order, and `retired`: the marks agtk still keeps for items that left the brief. Skip items that are read or removed.
+
+From a shell, run `agtkctl brief` to read the brief, or `agtkctl brief post --json JSON` to post.
 
 ## Where things are stored
 

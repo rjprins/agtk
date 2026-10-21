@@ -199,6 +199,10 @@ impl Workspace {
                     .preference("claudeModelPresets")?
                     .map(crate::claude_presets::ClaudePresetPreferences::from_value_lossy)
                     .unwrap_or_default();
+                let brief = store
+                    .preference(crate::brief::PREFERENCE_KEY)?
+                    .map(crate::brief::Brief::from_value_lossy)
+                    .unwrap_or_default();
                 let changes_sidebar_open = store
                     .preference("changesSidebarOpen")?
                     .and_then(|value| value.as_bool());
@@ -290,6 +294,7 @@ impl Workspace {
                     pr_activity,
                     session_input_pending,
                     claude_presets,
+                    brief,
                     changes_sidebar_open,
                     changes_sidebar_page,
                     changes_base_refs,
@@ -316,6 +321,7 @@ impl Workspace {
                     pr_activity,
                     session_input_pending,
                     claude_presets,
+                    brief,
                     changes_sidebar_open,
                     changes_sidebar_page,
                     changes_base_refs,
@@ -345,6 +351,7 @@ impl Workspace {
                     *workspace.session_input_pending.borrow_mut() = session_input_pending;
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
+                    workspace.load_brief(brief);
                     workspace.changes.state.borrow_mut().base_ref_by_context = changes_base_refs;
                     workspace.changes.updating_base.set(true);
                     workspace
@@ -353,11 +360,10 @@ impl Workspace {
                         .set_value(changes_commits_ago as f64);
                     workspace.changes.updating_base.set(false);
                     workspace.markdown_preview.set(markdown_preview);
-                    if changes_sidebar_page.as_deref() == Some(explorer_ui::FILES_PAGE) {
-                        workspace
-                            .changes
-                            .pages
-                            .set_visible_child_name(explorer_ui::FILES_PAGE);
+                    if let Some(page @ (explorer_ui::FILES_PAGE | brief_ui::BRIEF_PAGE)) =
+                        changes_sidebar_page.as_deref()
+                    {
+                        workspace.changes.pages.set_visible_child_name(page);
                     }
                     if let Some(open) = changes_sidebar_open {
                         workspace.changes.split.set_show_sidebar(open);

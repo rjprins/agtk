@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
+use agtk::brief::{BriefItemInput, BriefPostParams};
 use agtk::control::{
     ClaudePresetApplyParams, ControlCommand, CreateSessionParams, PrListParams, SendInputParams,
     SessionIdParams, SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
@@ -85,6 +86,8 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "list_claude_presets",
             "set_claude_presets",
             "apply_claude_preset",
+            "post_brief",
+            "get_brief",
             "inspect_ui",
             "capture_ui",
             "set_session_state",
@@ -400,6 +403,85 @@ fn claude_preset_tools_map_to_the_typed_local_control_protocol() {
             }),
         ]
     );
+}
+
+#[test]
+fn brief_tools_map_to_the_typed_local_control_protocol() {
+    let backend = MockBackend::default();
+    backend
+        .results
+        .borrow_mut()
+        .push_back(Ok(json!({"items":[],"unreadCount":0})));
+    backend
+        .results
+        .borrow_mut()
+        .push_back(Ok(json!({"items":[],"unreadCount":0})));
+    let mut server = McpServer::new(backend);
+    let posted = server
+        .handle(request(
+            15,
+            "tools/call",
+            json!({
+                "name":"post_brief",
+                "arguments":{
+                    "items":[{
+                        "id":"ado-pr:105687",
+                        "section":"Waiting on you",
+                        "text":"Review PR 105687",
+                        "link":"https://dev.azure.com/org/project/_git/repo/pullrequest/105687"
+                    }],
+                    "replaceSections":["Waiting on you"],
+                    "retireIds":["ado-pr:105600"]
+                }
+            }),
+        ))
+        .unwrap();
+    assert_eq!(posted["result"]["isError"], false);
+    let read = server
+        .handle(request(
+            16,
+            "tools/call",
+            json!({"name":"get_brief","arguments":{}}),
+        ))
+        .unwrap();
+    assert_eq!(read["result"]["structuredContent"]["unreadCount"], 0);
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        &[
+            ControlCommand::BriefPost(BriefPostParams {
+                items: vec![BriefItemInput {
+                    id: "ado-pr:105687".to_owned(),
+                    section: "Waiting on you".to_owned(),
+                    text: "Review PR 105687".to_owned(),
+                    link: Some(
+                        "https://dev.azure.com/org/project/_git/repo/pullrequest/105687".to_owned()
+                    ),
+                }],
+                replace_sections: vec!["Waiting on you".to_owned()],
+                retire_ids: vec!["ado-pr:105600".to_owned()],
+            }),
+            ControlCommand::BriefGet,
+        ]
+    );
+
+    for (name, arguments) in [
+        ("get_brief", json!({"all":true})),
+        (
+            "post_brief",
+            json!({"items":[{"id":"a","text":"no section"}]}),
+        ),
+        ("post_brief", json!({"entries":[]})),
+    ] {
+        let response = server
+            .handle(request(
+                17,
+                "tools/call",
+                json!({"name":name,"arguments":arguments}),
+            ))
+            .unwrap();
+        assert_eq!(response["result"]["isError"], true, "{name} {arguments}");
+    }
+    assert_eq!(server.backend().calls.borrow().len(), 2);
 }
 
 #[test]

@@ -407,6 +407,7 @@ impl Workspace {
         ];
         changes_children.extend(changes_content_nodes(self));
         changes_children.push(files_page_node(self));
+        changes_children.push(brief_page_node(self));
         let changes_sidebar_node = UiNode {
             id: "changes-sidebar".to_owned(),
             role: "complementary".to_owned(),
@@ -877,6 +878,44 @@ fn current_diff_scope_label(workspace: &Workspace) -> &'static str {
 }
 
 /// The Files page: its filter, the rows on show and any message instead of a tree.
+/// One child per item the panel shows; selected while it is unread.
+fn brief_page_node(workspace: &Workspace) -> UiNode {
+    let page = &workspace.changes.brief;
+    let page_visible = workspace.changes.split.shows_sidebar()
+        && workspace.changes.pages.visible_child_name().as_deref() == Some(brief_ui::BRIEF_PAGE);
+    let brief = workspace.brief.borrow();
+    let rows = std::iter::successors(page.rows.first_child(), |row| row.next_sibling())
+        .collect::<Vec<_>>();
+    let children = brief
+        .visible_sections()
+        .into_iter()
+        .flat_map(|(_, items)| items)
+        .map(|item| UiNode {
+            id: format!("brief-item:{}", item.id),
+            role: "listitem".to_owned(),
+            label: Some(format!("{}: {}", item.section, item.text)),
+            is_visible: page_visible,
+            is_enabled: true,
+            is_selected: !item.read,
+            bounds: rows
+                .iter()
+                .find(|row| row.widget_name() == item.id.as_str())
+                .map_or_else(Bounds::default, |row| widget_bounds(row, &workspace.window)),
+            children: Vec::new(),
+        })
+        .collect();
+    UiNode {
+        id: "brief-page".to_owned(),
+        role: "tabpanel".to_owned(),
+        label: Some(format!("{} unread", brief.unread_count())),
+        is_visible: page_visible,
+        is_enabled: page.root.is_sensitive(),
+        is_selected: page_visible,
+        bounds: widget_bounds(&page.root, &workspace.window),
+        children,
+    }
+}
+
 fn files_page_node(workspace: &Workspace) -> UiNode {
     let explorer = &workspace.changes.explorer;
     let sidebar_visible = workspace.changes.split.shows_sidebar();

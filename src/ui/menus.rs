@@ -232,7 +232,7 @@ impl Workspace {
         });
     }
 
-    fn add_target_action(&self, name: &str, activate: impl Fn(&Self, &str) + 'static) {
+    pub(super) fn add_target_action(&self, name: &str, activate: impl Fn(&Self, &str) + 'static) {
         let action = gio::SimpleAction::new(name, Some(glib::VariantTy::STRING));
         let workspace = self.clone();
         action.connect_activate(move |_, target| {

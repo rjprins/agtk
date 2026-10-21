@@ -281,6 +281,11 @@ impl<B: ControlBackend> McpServer<B> {
                 ControlCommand::ClaudePresetsGet
             }
             "apply_claude_preset" => ControlCommand::ClaudePresetApply(parse_args(arguments)?),
+            "post_brief" => ControlCommand::BriefPost(parse_args(arguments)?),
+            "get_brief" => {
+                require_empty(arguments)?;
+                ControlCommand::BriefGet
+            }
             "inspect_ui" => ControlCommand::UiInspect,
             "capture_ui" => {
                 require_empty(arguments)?;
@@ -954,6 +959,48 @@ fn tool_definitions() -> Vec<Value> {
                 &[("sessionId", string()), ("presetId", string())],
                 &["sessionId", "presetId"],
             ),
+        ),
+        tool(
+            "post_brief",
+            "Post to the daily brief",
+            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text and an optional http(s) link. Posting an existing id updates it in place and keeps its read and removed marks; a new id shows as unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it. retireIds takes items out. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Removing an item in the panel only hides it. Returns the brief and the added, updated and retired ids.",
+            schema(
+                &[
+                    (
+                        "items",
+                        json!({
+                            "type":"array",
+                            "maxItems":200,
+                            "items":{
+                                "type":"object",
+                                "properties":{
+                                    "id":string(),
+                                    "section":string(),
+                                    "text":string(),
+                                    "link":string()
+                                },
+                                "required":["id","section","text"],
+                                "additionalProperties":false
+                            }
+                        }),
+                    ),
+                    (
+                        "replaceSections",
+                        json!({"type":"array","items":{"type":"string"}}),
+                    ),
+                    (
+                        "retireIds",
+                        json!({"type":"array","items":{"type":"string"}}),
+                    ),
+                ],
+                &[],
+            ),
+        ),
+        tool(
+            "get_brief",
+            "Read the daily brief",
+            "Return the daily brief: items in panel order with their read and removed marks, the section order, and retired, the marks agtk still remembers for items no longer in the brief. Skip or leave out items that are read or removed.",
+            empty_schema(),
         ),
         tool(
             "inspect_ui",

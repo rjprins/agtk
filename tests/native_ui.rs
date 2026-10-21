@@ -214,6 +214,15 @@ impl App {
     }
 
     fn activate_action(&self, action: &str) {
+        self.activate_action_with(action, "[]");
+    }
+
+    /// Activates a window action that takes a string, such as a brief item id.
+    fn activate_target_action(&self, action: &str, target: &str) {
+        self.activate_action_with(action, &format!("[<{}>]", json!(target)));
+    }
+
+    fn activate_action_with(&self, action: &str, parameters: &str) {
         let id = self.paths.name().application_id();
         let path = format!("/{}/window/1", id.replace('.', "/"));
         let output = Command::new("gdbus")
@@ -227,7 +236,7 @@ impl App {
                 "--method",
                 "org.gtk.Actions.Activate",
                 action,
-                "[]",
+                parameters,
                 "{}",
             ])
             .output()
@@ -3491,4 +3500,95 @@ fn files_page_lists_the_worktree_and_opens_files_read_only() {
     );
     assert!(matches!(missing, ResponseBody::Failure(_)), "{missing:?}");
     app.request("session.close", json!({"sessionId":id}));
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn brief_read_and_removed_marks_survive_reposts_and_restarts() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
+    let mut app = App::new();
+    let items = |suffix: &str| {
+        json!([
+            {"id":"ado-pr:1","section":"Waiting on you","text":format!("Review PR 1{suffix}"),
+             "link":"https://dev.azure.com/org/project/_git/repo/pullrequest/1"},
+            {"id":"todoist:7","section":"Tasks","text":format!("Renew passport{suffix}")},
+            {"id":"gmail:abc","section":"Waiting on you","text":format!("Reply to the landlord{suffix}")}
+        ])
+    };
+    let posted = app.request("brief.post", json!({"items":items("")}));
+    assert_eq!(posted["unreadCount"], 3);
+    assert_eq!(
+        posted["changes"]["added"],
+        json!(["ado-pr:1", "todoist:7", "gmail:abc"])
+    );
+
+    app.activate_target_action("brief-read", "ado-pr:1");
+    app.activate_target_action("brief-remove", "todoist:7");
+    let brief = app.request("brief.get", json!({}));
+    assert_eq!(brief["unreadCount"], 1, "{brief}");
+    let marks = |brief: &Value| {
+        brief["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                (
+                    item["id"].as_str().unwrap().to_owned(),
+                    item["read"].as_bool().unwrap(),
+                    item["removed"].as_bool().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![
+        ("ado-pr:1".to_owned(), true, false),
+        ("todoist:7".to_owned(), false, true),
+        ("gmail:abc".to_owned(), false, false),
+    ];
+    assert_eq!(marks(&brief), expected);
+
+    app.request("ui.show", json!({"surface":"brief"}));
+    let inspection = app.request("ui.inspect", json!({}));
+    let page = find(&inspection["root"], "brief-page").unwrap();
+    assert_eq!(page["label"], "1 unread");
+    let shown = page["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|node| {
+            (
+                node["id"].as_str().unwrap(),
+                node["isSelected"].as_bool().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        shown,
+        [
+            ("brief-item:ado-pr:1", false),
+            ("brief-item:gmail:abc", true)
+        ]
+    );
+
+    app.stop();
+    app.start();
+    let reposted = app.request(
+        "brief.post",
+        json!({"items":items(" (updated)"),"replaceSections":["Waiting on you","Tasks"]}),
+    );
+    assert_eq!(marks(&reposted), expected);
+    assert_eq!(reposted["changes"]["added"], json!([]));
+    assert_eq!(reposted["items"][0]["text"], "Review PR 1 (updated)");
+
+    app.activate_action("brief-read-all");
+    assert_eq!(app.request("brief.get", json!({}))["unreadCount"], 0);
 }

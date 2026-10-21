@@ -8,6 +8,7 @@ pub mod agent_models;
 pub mod agent_status;
 pub mod appearance;
 pub mod azure;
+pub mod brief;
 pub mod capture;
 pub mod changes;
 pub mod claude_presets;

@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
+use super::brief_ui::{BRIEF_PAGE, BriefPage};
 use super::explorer_ui::{CHANGES_PAGE, FILES_PAGE, FileExplorer};
 use super::sidebar::{DEFAULT_CHANGES_WIDTH, MAX_CHANGES_WIDTH, MIN_CHANGES_WIDTH};
 use crate::changes::{
@@ -14,7 +15,8 @@ use crate::changes::{
 const INITIAL_FILE_LIMIT: usize = 200;
 const COMMITS_AGO_OPTION: &str = "Commits ago…";
 
-/// The right sidebar: a Changes page and a Files page for the selected worktree.
+/// The right sidebar: a Changes page and a Files page for the selected worktree,
+/// and a Brief page for the daily brief.
 #[derive(Clone)]
 pub(super) struct ChangesSidebar {
     pub split: adw::OverlaySplitView,
@@ -30,6 +32,7 @@ pub(super) struct ChangesSidebar {
     pub refresh: gtk::Button,
     pub rows: gtk::Box,
     pub explorer: FileExplorer,
+    pub brief: BriefPage,
     pub(crate) state: Rc<RefCell<ChangesSidebarState>>,
     pub updating_base: Rc<std::cell::Cell<bool>>,
 }
@@ -160,6 +163,8 @@ impl ChangesSidebar {
 
         let explorer = FileExplorer::new();
         pages.add_titled(&explorer.root, Some(FILES_PAGE), "Files");
+        let brief = BriefPage::new();
+        pages.add_titled(&brief.root, Some(BRIEF_PAGE), "Brief");
         root.append(&pages);
 
         let sidebar = gtk::Overlay::new();
@@ -172,7 +177,7 @@ impl ChangesSidebar {
             .build();
         toggle.add_css_class("flat");
         toggle.set_tooltip_text(Some(
-            "Show the changes and files of the selected agent's worktree",
+            "Show the changes and files of the selected agent's worktree, and the daily brief",
         ));
         let sync_toggle = toggle.clone();
         split.connect_show_sidebar_notify(move |split| {
@@ -197,6 +202,7 @@ impl ChangesSidebar {
             refresh,
             rows,
             explorer,
+            brief,
             state: Rc::new(RefCell::new(ChangesSidebarState::default())),
             updating_base: Rc::new(std::cell::Cell::new(false)),
         }
@@ -204,10 +210,10 @@ impl ChangesSidebar {
 
     /// The title of the page the sidebar shows, for the inspection tree.
     pub fn visible_page_title(&self) -> String {
-        if self.pages.visible_child_name().as_deref() == Some(FILES_PAGE) {
-            "Files".to_owned()
-        } else {
-            "Changes".to_owned()
+        match self.pages.visible_child_name().as_deref() {
+            Some(FILES_PAGE) => "Files".to_owned(),
+            Some(BRIEF_PAGE) => "Brief".to_owned(),
+            _ => "Changes".to_owned(),
         }
     }
 

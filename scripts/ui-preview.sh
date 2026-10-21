@@ -3,7 +3,7 @@
 # Nothing touches the live instance or the desktop.
 #
 # Usage: scripts/ui-preview.sh [--dark] [--keep] [--font-size N] [SURFACE...]
-#   SURFACE: main status changes files launch appearance shortcuts history search worktrees agents
+#   SURFACE: main status changes files brief launch appearance shortcuts history search worktrees agents
 #            pull-requests review-settings claude-models close-session (default: all)
 #   --keep   leave the instance running and print how to drive it
 set -euo pipefail
@@ -21,7 +21,7 @@ while (($#)); do
   esac
   shift
 done
-((${#surfaces[@]})) || surfaces=(main changes files launch appearance shortcuts history search worktrees agents pull-requests review-settings claude-models close-session)
+((${#surfaces[@]})) || surfaces=(main changes files brief launch appearance shortcuts history search worktrees agents pull-requests review-settings claude-models close-session)
 
 command -v mutter >/dev/null || { echo "ui-preview needs mutter" >&2; exit 1; }
 "$repo/scripts/build-viewer.sh"
@@ -228,6 +228,16 @@ for surface in "${surfaces[@]}"; do
     # The prompt only opens for the last session in a worktree.
     ctl session close "$(id_of 'test shell')" >/dev/null
     ctl session select "$(id_of 'cursor pagination')" >/dev/null
+  fi
+  if [[ $surface == brief ]]; then
+    ctl brief post --json '{"items":[
+      {"id":"next","section":"Next action","text":"Reply to Sanne about the cursor pagination rollout"},
+      {"id":"cal:standup","section":"Today","text":"09:30 Stand-up"},
+      {"id":"cal:review","section":"Today","text":"14:00 Sprint review"},
+      {"id":"ado-pr:2417","section":"Waiting on you","text":"Review PR 2417: Implement cursor pagination","link":"https://dev.azure.com/example/demo/_git/demo-service/pullrequest/2417"},
+      {"id":"gmail:1","section":"Waiting on you","text":"Invoice from the landlord needs an answer","link":"https://mail.google.com/mail/u/0/#inbox/1"},
+      {"id":"todoist:7","section":"Tasks","text":"Renew passport"}]}' >/dev/null
+    ctl brief >/dev/null
   fi
   # Prompt history only lives as long as one UI process.
   ctl session input "$main_id" --text "Make the orders endpoint use cursor pagination" >/dev/null

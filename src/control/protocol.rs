@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use crate::appearance::ThemeKey;
 use crate::azure::PrAttention;
+use crate::brief::BriefPostParams;
 use crate::claude_presets::{ClaudeModelPreset, ClaudePresetPreferences};
 use crate::history::submitted_prompt;
 use crate::providers::AgentProvider;
@@ -53,6 +54,8 @@ pub enum ControlCommand {
     ClaudePresetsSet(ClaudePresetsSetParams),
     ClaudePresetsGet,
     ClaudePresetApply(ClaudePresetApplyParams),
+    BriefPost(BriefPostParams),
+    BriefGet,
     AgentList(AgentListParams),
     AgentPreview(AgentPreviewParams),
     AgentRestore(AgentRestoreParams),
@@ -309,6 +312,7 @@ pub enum UiSurface {
     Search,
     Changes,
     Files,
+    Brief,
     Worktrees,
     Agents,
     PullRequests,
@@ -568,6 +572,17 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             validate_preset_id(&params.preset_id)?;
             ControlCommand::ClaudePresetApply(params)
         }
+        "brief.post" => {
+            let params: BriefPostParams = decode_params(wire.params)?;
+            params
+                .validate()
+                .map_err(|error| invalid_params(&error.to_string()))?;
+            ControlCommand::BriefPost(params)
+        }
+        "brief.get" => {
+            decode_empty_params(wire.params)?;
+            ControlCommand::BriefGet
+        }
         "agent.list" => {
             let params: AgentListParams = decode_params(wire.params)?;
             validate_agent_list(&params)?;
@@ -750,6 +765,8 @@ impl ControlCommand {
             Self::ClaudePresetsSet(_) => "claude.presets_set",
             Self::ClaudePresetsGet => "claude.presets_get",
             Self::ClaudePresetApply(_) => "claude.preset_apply",
+            Self::BriefPost(_) => "brief.post",
+            Self::BriefGet => "brief.get",
             Self::AgentList(_) => "agent.list",
             Self::AgentPreview(_) => "agent.preview",
             Self::AgentRestore(_) => "agent.restore",
@@ -799,6 +816,8 @@ impl ControlCommand {
             Self::ClaudePresetApply(params) => {
                 Ok(("claude.preset_apply", serde_json::to_value(params)?))
             }
+            Self::BriefPost(params) => Ok(("brief.post", serde_json::to_value(params)?)),
+            Self::BriefGet => Ok(("brief.get", empty_params())),
             Self::AgentList(params) => Ok(("agent.list", serde_json::to_value(params)?)),
             Self::AgentPreview(params) => Ok(("agent.preview", serde_json::to_value(params)?)),
             Self::AgentRestore(params) => Ok(("agent.restore", serde_json::to_value(params)?)),

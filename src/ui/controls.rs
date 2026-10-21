@@ -82,6 +82,10 @@ impl Workspace {
             self.handle_claude_control(pending);
             return;
         }
+        if matches!(&pending.request.command, ControlCommand::BriefPost(_)) {
+            self.handle_brief_control(pending);
+            return;
+        }
         if matches!(
             &pending.request.command,
             ControlCommand::PrList(_)
@@ -205,15 +209,15 @@ impl Workspace {
                         true
                     }
                     UiSurface::Search => false,
-                    UiSurface::Changes | UiSurface::Files => {
+                    UiSurface::Changes | UiSurface::Files | UiSurface::Brief => {
                         let already_open = self.changes.split.shows_sidebar();
-                        self.changes.pages.set_visible_child_name(
-                            if params.surface == UiSurface::Files {
-                                explorer_ui::FILES_PAGE
-                            } else {
-                                explorer_ui::CHANGES_PAGE
-                            },
-                        );
+                        self.changes
+                            .pages
+                            .set_visible_child_name(match params.surface {
+                                UiSurface::Files => explorer_ui::FILES_PAGE,
+                                UiSurface::Brief => brief_ui::BRIEF_PAGE,
+                                _ => explorer_ui::CHANGES_PAGE,
+                            });
                         self.changes.split.set_show_sidebar(true);
                         self.changes.toggle.set_active(true);
                         if already_open {
@@ -391,6 +395,7 @@ impl Workspace {
                 id,
                 serde_json::json!({ "presets": self.claude_presets.borrow().presets }),
             ),
+            ControlCommand::BriefGet => ControlResponse::success(id, self.brief.borrow().summary()),
             ControlCommand::SessionCreate(_)
             | ControlCommand::UiOpenDiff(_)
             | ControlCommand::UiOpenFile(_)
@@ -408,6 +413,7 @@ impl Workspace {
             | ControlCommand::PrLaunchReview(_)
             | ControlCommand::ClaudePresetsSet(_)
             | ControlCommand::ClaudePresetApply(_)
+            | ControlCommand::BriefPost(_)
             | ControlCommand::AgentList(_)
             | ControlCommand::AgentPreview(_)
             | ControlCommand::AgentRestore(_)

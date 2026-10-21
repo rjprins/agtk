@@ -87,6 +87,12 @@ vte-terminal { padding: 6px 10px; }
 .session-state.state-waiting { color: var(--warning-color); }
 .session-state.state-exited { color: var(--error-color); }
 .session-state.state-running { color: var(--accent-color); }
+.brief-unread-dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 50%;
+  background: var(--accent-bg-color);
+}
 .attention-dot {
   min-width: 6px;
   min-height: 6px;

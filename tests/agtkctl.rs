@@ -146,6 +146,29 @@ fn pr_acknowledge_command_preserves_the_exact_attention_marker() {
 }
 
 #[test]
+fn brief_commands_have_a_typed_protocol_mapping() {
+    assert_fixture_command(&["brief"], ControlCommand::BriefGet);
+    assert_fixture_command(
+        &[
+            "brief",
+            "post",
+            "--json",
+            r#"{"items":[{"id":"todoist:7","section":"Tasks","text":"Renew passport"}],"replaceSections":["Tasks"]}"#,
+        ],
+        ControlCommand::BriefPost(agtk::brief::BriefPostParams {
+            items: vec![agtk::brief::BriefItemInput {
+                id: "todoist:7".to_owned(),
+                section: "Tasks".to_owned(),
+                text: "Renew passport".to_owned(),
+                link: None,
+            }],
+            replace_sections: vec!["Tasks".to_owned()],
+            retire_ids: Vec::new(),
+        }),
+    );
+}
+
+#[test]
 fn claude_presets_command_has_a_typed_protocol_mapping() {
     assert_fixture_command(&["claude", "presets"], ControlCommand::ClaudePresetsGet);
     assert_fixture_command(

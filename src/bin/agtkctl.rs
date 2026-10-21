@@ -100,6 +100,15 @@ fn run() -> Result<(), Failure> {
         [group, action, rest @ ..] if group == "worktree" => parse_worktree_command(action, rest)?,
         [group, action, rest @ ..] if group == "pr" => parse_pr_command(action, rest)?,
         [group, action, rest @ ..] if group == "claude" => parse_claude_command(action, rest)?,
+        [group] if group == "brief" => ControlCommand::BriefGet,
+        [group, action, flag, value]
+            if group == "brief" && action == "post" && flag == "--json" =>
+        {
+            ControlCommand::BriefPost(
+                serde_json::from_str(value)
+                    .map_err(|error| Failure::Usage(format!("invalid brief JSON: {error}")))?,
+            )
+        }
         [group, action, rest @ ..] if group == "agent" => parse_agent_command(action, rest)?,
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
         _ => {
@@ -369,6 +378,7 @@ fn parse_ui_surface(value: &str) -> Result<UiSurface, Failure> {
         "search" => Ok(UiSurface::Search),
         "changes" => Ok(UiSurface::Changes),
         "files" => Ok(UiSurface::Files),
+        "brief" => Ok(UiSurface::Brief),
         "worktrees" => Ok(UiSurface::Worktrees),
         "agents" => Ok(UiSurface::Agents),
         "pull-requests" | "prs" => Ok(UiSurface::PullRequests),
@@ -1131,7 +1141,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|hook show|hook set --command CMD [--states STATE,...]|hook clear|project set ROOT OPTIONS|project remove ROOT|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session fork ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes and files, SCOPE is all|staged|unstaged|untracked|committed|commit)"
+    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|hook show|hook set --command CMD [--states STATE,...]|hook clear|project set ROOT OPTIONS|project remove ROOT|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|brief|brief post --json JSON|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session fork ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, files and brief, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

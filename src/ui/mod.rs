@@ -45,6 +45,7 @@ use crate::terminal_text::{bounded_terminal_text, copyable_selection};
 mod agents_ui;
 mod appearance_ui;
 mod azure_ui;
+mod brief_ui;
 mod capture;
 mod changes_ui;
 mod claude_ui;
@@ -209,6 +210,7 @@ struct Workspace {
     pr_activity_snapshots: Rc<RefCell<HashMap<String, std::time::Instant>>>,
     session_input_pending: Rc<RefCell<HashSet<String>>>,
     claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
+    brief: Rc<RefCell<crate::brief::Brief>>,
     selected_pr: Rc<RefCell<Option<SelectedPrContext>>>,
     /// The session in front of the user and since when; see `acknowledge_session`.
     viewing: Rc<RefCell<Option<Viewing>>>,
@@ -735,6 +737,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         pr_activity_snapshots: Rc::default(),
         session_input_pending: Rc::default(),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
+        brief: Rc::new(RefCell::new(crate::brief::Brief::default())),
         selected_pr: Rc::new(RefCell::new(None)),
         viewing: Rc::new(RefCell::new(None)),
     };
@@ -965,6 +968,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     });
     workspace.bind_sidebar_model();
     workspace.install_menu_actions();
+    workspace.install_brief_actions();
     workspace.install_shortcut_actions();
     workspace.install_font_scroll();
     workspace.discover_sessions();
