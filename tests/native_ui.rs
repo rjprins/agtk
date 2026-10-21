@@ -3596,6 +3596,14 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     assert_eq!(hidden["isSelected"], true);
     assert_eq!(hidden["children"][0]["id"], "brief-item:todoist:7");
     assert_eq!(hidden["children"][0]["isVisible"], true);
+    // Hidden sits at the bottom of the page, like Inactive Projects.
+    let page = find(&inspection["root"], "brief-page").unwrap();
+    let bottom = |node: &Value| {
+        node["bounds"]["y"].as_f64().unwrap() + node["bounds"]["height"].as_f64().unwrap()
+    };
+    let last_item = find(page, "brief-item:gmail:abc").unwrap();
+    assert!(hidden["bounds"]["y"].as_f64().unwrap() > bottom(last_item) + 100.0);
+    assert!(bottom(page) - bottom(hidden) < 20.0, "{page}");
     let reposted = app.request(
         "brief.post",
         json!({"items":items(" (updated)"),"replaceSections":["Waiting on you","Tasks"]}),

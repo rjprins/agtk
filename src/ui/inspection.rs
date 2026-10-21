@@ -898,7 +898,9 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
     let page_visible = workspace.changes.split.shows_sidebar()
         && workspace.changes.pages.visible_child_name().as_deref() == Some(brief_ui::BRIEF_PAGE);
     let brief = workspace.brief.borrow();
-    let rows = std::iter::successors(page.rows.first_child(), |row| row.next_sibling())
+    let rows = [&page.rows, &page.hidden]
+        .into_iter()
+        .flat_map(|rows| std::iter::successors(rows.first_child(), |row| row.next_sibling()))
         .collect::<Vec<_>>();
     let item_node = |item: &crate::brief::BriefItem, visible: bool| UiNode {
         id: format!("brief-item:{}", item.id),
@@ -934,7 +936,7 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
             is_visible: page_visible,
             is_enabled: true,
             is_selected: expanded,
-            bounds: Bounds::default(),
+            bounds: widget_bounds(&page.hidden, &workspace.window),
             children: hidden
                 .into_iter()
                 .map(|item| item_node(item, page_visible && expanded))

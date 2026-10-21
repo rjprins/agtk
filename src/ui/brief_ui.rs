@@ -16,6 +16,8 @@ pub(super) struct BriefPage {
     pub root: gtk::Box,
     pub mark_all_read: gtk::Button,
     pub rows: gtk::Box,
+    /// Hidden items, kept at the bottom like Inactive Projects in the sidebar.
+    pub hidden: gtk::Box,
 }
 
 impl BriefPage {
@@ -49,12 +51,23 @@ impl BriefPage {
         rows.set_margin_start(6);
         rows.set_margin_end(6);
         rows.set_margin_bottom(8);
-        scroll.set_child(Some(&rows));
+        let hidden = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        hidden.set_margin_start(6);
+        hidden.set_margin_end(6);
+        hidden.set_margin_bottom(8);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.append(&rows);
+        let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        spacer.set_vexpand(true);
+        content.append(&spacer);
+        content.append(&hidden);
+        scroll.set_child(Some(&content));
         root.append(&scroll);
         Self {
             root,
             mark_all_read,
             rows,
+            hidden,
         }
     }
 }
@@ -238,8 +251,10 @@ impl Workspace {
 
     pub(super) fn render_brief(&self) {
         let page = &self.changes.brief;
-        while let Some(child) = page.rows.first_child() {
-            page.rows.remove(&child);
+        for rows in [&page.rows, &page.hidden] {
+            while let Some(child) = rows.first_child() {
+                rows.remove(&child);
+            }
         }
         let brief = self.brief.borrow();
         let unread = brief.unread_count();
@@ -279,10 +294,10 @@ impl Workspace {
             return;
         }
         let expanded = self.brief_hidden_expanded.get();
-        page.rows.append(&hidden_header(hidden.len(), expanded));
+        page.hidden.append(&hidden_header(hidden.len(), expanded));
         if expanded {
             for item in hidden {
-                page.rows.append(&hidden_row(item));
+                page.hidden.append(&hidden_row(item));
             }
         }
     }
