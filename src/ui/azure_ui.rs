@@ -789,6 +789,7 @@ impl Workspace {
                 workspace.update_pr_indicator();
                 workspace.cache_pr_context(&loaded.context);
                 workspace.match_sessions_to_prs(&loaded.context);
+                workspace.remove_merged_reviews(&loaded.context);
                 workspace.observe_pr_activity(&loaded.context, loaded.requested_at);
                 if pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                     == pr_cache_key(&loaded.context.project_root)
@@ -1649,11 +1650,11 @@ fn pr_cache_key(root: &Path) -> String {
 }
 
 /// The PR number in the name of a session that `launch_pr_review` started.
-fn review_pr_id(name: &str) -> Option<u64> {
+pub(super) fn review_pr_id(name: &str) -> Option<u64> {
     name.strip_prefix("review: PR #")?.trim().parse().ok()
 }
 
-fn in_project(record: &SessionRecord, context: &PrContext) -> bool {
+pub(super) fn in_project(record: &SessionRecord, context: &PrContext) -> bool {
     record
         .project_root
         .as_deref()

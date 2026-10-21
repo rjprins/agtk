@@ -60,6 +60,7 @@ pub use history_ui::scroll_to_prompt;
 mod inspection;
 mod launch_ui;
 mod menus;
+mod merged_reviews_ui;
 mod modal;
 mod preferences_ui;
 mod projects_ui;
@@ -200,6 +201,8 @@ struct Workspace {
     quick_launch: Rc<RefCell<QuickLaunchPreferences>>,
     pr_preferences: Rc<RefCell<PrPreferences>>,
     pr_context_cache: Rc<RefCell<HashMap<String, PrContext>>>,
+    /// Review PRs, by project root, already looked up after they left the active list.
+    settled_reviews: Rc<RefCell<HashSet<(String, u64)>>>,
     session_pr_cache: Rc<RefCell<HashMap<String, AzurePr>>>,
     pr_activity: Rc<RefCell<crate::azure::PrActivityTracker>>,
     pr_activity_snapshots: Rc<RefCell<HashMap<String, std::time::Instant>>>,
@@ -725,6 +728,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         quick_launch: Rc::new(RefCell::new(QuickLaunchPreferences::default())),
         pr_preferences: Rc::new(RefCell::new(PrPreferences::default())),
         pr_context_cache: Rc::new(RefCell::new(HashMap::new())),
+        settled_reviews: Rc::default(),
         session_pr_cache: Rc::new(RefCell::new(HashMap::new())),
         pr_activity: Rc::default(),
         pr_activity_snapshots: Rc::default(),

@@ -109,6 +109,32 @@ impl AzureClient {
         }))
     }
 
+    /// Whether a PR that left the active list was completed (merged), not abandoned.
+    pub fn is_merged(&self, project_root: &Path, id: u64) -> AzureResult<bool> {
+        let Some(reference) = self.repository(project_root)? else {
+            return Err("project origin is not an Azure DevOps repository".into());
+        };
+        let id = id.to_string();
+        let raw = self.az_json([
+            "repos",
+            "pr",
+            "show",
+            "--id",
+            &id,
+            "--org",
+            &reference.org_url,
+            "--detect",
+            "false",
+            "--only-show-errors",
+            "-o",
+            "json",
+        ])?;
+        match raw.get("status").and_then(Value::as_str) {
+            Some(status) => Ok(status == "completed"),
+            None => Err("Azure PR response has no status".into()),
+        }
+    }
+
     fn add_pr_details(&self, reference: &AzureRepoRef, pull_requests: &mut [AzurePr]) {
         for chunk in pull_requests.chunks_mut(DETAIL_CONCURRENCY) {
             let results = thread::scope(|scope| {

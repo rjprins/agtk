@@ -169,6 +169,8 @@ fn azure_client_uses_bounded_cli_calls_and_collects_unresolved_threads() {
 case "$*" in
   "account show"*) printf 'rutger@example.com\n' ;;
   "repos pr list"*) printf '%s\n' '[{"pullRequestId":7,"title":"Review me","sourceRefName":"refs/heads/review-me","targetRefName":"refs/heads/main","creationDate":"2026-09-15T08:00:00Z","isDraft":false,"createdBy":{"displayName":"Other","uniqueName":"other@example.com"},"reviewers":[]}]' ;;
+  "repos pr show --id 8 "*) printf '%s\n' '{"pullRequestId":8,"status":"completed"}' ;;
+  "repos pr show --id 9 "*) printf '%s\n' '{"pullRequestId":9,"status":"abandoned"}' ;;
   "repos pr work-item list"*) [ -e "$0.fail-pbis" ] && exit 7; printf '%s\n' '[{"id":123,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Linked backlog item","System.TeamProject":"Project One"}},{"id":124,"fields":{"System.WorkItemType":"Bug","System.Title":"Linked bug"}},{"id":125,"fields":{"System.WorkItemType":"Product Backlog Item","System.Title":"Another backlog item"}}]' ;;
   "devops invoke"*) [ -e "$0.fail-threads" ] && exit 7; [ -e "$0.malformed-threads" ] && { printf '{}'; exit; }; printf '%s\n' '{"value":[{"id":3,"status":"active","comments":[{"id":1,"commentType":"text","content":"Please fix this","isDeleted":false,"publishedDate":"2026-09-15T09:00:00Z","author":{"uniqueName":"other@example.com"}}]},{"id":4,"status":"fixed","comments":[{"commentType":"text","content":"Fixed"},{"commentType":"text","content":"Thanks"}]}]}' ;;
   *) printf 'unexpected arguments: %s\n' "$*" >&2; exit 7 ;;
@@ -210,6 +212,11 @@ esac
         pbis[1].url,
         "https://dev.azure.com/demo/Project/_workitems/edit/125"
     );
+
+    let client = AzureClient::new(&az);
+    assert!(client.is_merged(&repository, 8).unwrap());
+    assert!(!client.is_merged(&repository, 9).unwrap());
+    assert!(client.is_merged(&repository, 10).is_err());
 
     let failed_pbis = directory.path().join("fake-az.fail-pbis");
     fs::write(&failed_pbis, "").unwrap();

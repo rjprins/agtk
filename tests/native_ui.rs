@@ -47,7 +47,7 @@ impl App {
         let fake_az = directory.path().join("fake-az");
         std::fs::write(
             &fake_az,
-            "#!/bin/sh\n[ -e \"$AGTK_AZURE_PRS_FILE.slow\" ] && sleep 10\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGTK_AZURE_PRS_FILE\" ;;\n  'repos pr work-item') cat \"$AGTK_AZURE_PBIS_FILE\" ;;\n  'devops invoke --org') cat \"$AGTK_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\n[ -e \"$AGTK_AZURE_PRS_FILE.slow\" ] && sleep 10\ncase \"$1 $2 $3\" in\n  'account show --query') printf '%s\\n' 'reviewer@example.com' ;;\n  'repos pr list') cat \"$AGTK_AZURE_PRS_FILE\" ;;\n  'repos pr show') cat \"$AGTK_AZURE_PRS_FILE.show\" ;;\n  'repos pr work-item') cat \"$AGTK_AZURE_PBIS_FILE\" ;;\n  'devops invoke --org') cat \"$AGTK_AZURE_THREADS_FILE\" ;;\n  *) printf '%s\\n' 'unexpected az command' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         std::fs::set_permissions(&fake_az, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1561,9 +1561,36 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
         capture["path"].as_str().is_some(),
         "unexpected capture: {capture}"
     );
-    app.request("session.close", json!({"sessionId":review_id}));
+
+    // Once PR #42 merges, its review session and checkout go; #44's review stays.
+    std::fs::write(
+        &pr_file,
+        serde_json::to_vec(&json!([pr(43, "review-me"), pr(44, "later-attention")])).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        app.directory.path().join("azure-prs.json.show"),
+        r#"{"status":"completed"}"#,
+    )
+    .unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while review_checkout(42).exists() {
+        assert!(
+            Instant::now() < deadline,
+            "merged PR review checkout was not removed"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+    let state = app.request("app.get_state", json!({}));
+    let sessions = state["sessions"].as_array().unwrap();
+    assert!(!sessions.iter().any(|session| session["id"] == review_id));
+    assert!(
+        sessions
+            .iter()
+            .any(|session| session["id"] == auto_review_id.as_str())
+    );
     app.request("session.close", json!({"sessionId":auto_review_id}));
-    assert!(review_checkout(42).is_dir());
     assert!(review_checkout(44).is_dir());
 }
 
