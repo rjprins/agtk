@@ -99,7 +99,7 @@ Optional tools:
 - When the last session in a project closes, the project moves to Inactive Projects at the bottom of the sidebar. Click it to launch a session there. Use the star to pin it, or the trash button to remove it from the list. This does not delete any files.
 - A pinned project stays at the top of the sidebar, even without sessions. Pin or unpin a project from its menu.
 - Launch Claude, Codex, Gemini, a shell, or a custom command in an exact directory and worktree.
-- Pick the model and reasoning effort an agent starts with in the launch dialog's options; empty uses the agent's default. MCP `launch_agent` takes the same `model` and `effort`.
+- Pick the model and reasoning effort an agent starts with in the launch dialog's options. Claude and Gemini offer their CLI's model aliases, Codex the models in its own model cache; the effort list follows the chosen model. MCP `launch_agent` takes the same `model` and `effort`.
 - Sessions keep running when the window closes, crashes, or is rebuilt. Start agtk again and it attaches to them.
 - Each agent row shows a state: busy, waiting, ready, or idle. See [Agent states](#agent-states).
 - Resume a closed Claude or Codex conversation with `Ctrl+Shift+R`. The list shows where each one stopped and which files it changed.

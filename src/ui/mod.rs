@@ -62,6 +62,7 @@ mod launch_ui;
 mod menus;
 mod merged_reviews_ui;
 mod modal;
+mod model_picker;
 mod preferences_ui;
 mod projects_ui;
 mod prompt_log_ui;

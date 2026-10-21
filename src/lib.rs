@@ -4,6 +4,7 @@
 pub type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub mod agent_hooks;
+pub mod agent_models;
 pub mod agent_status;
 pub mod appearance;
 pub mod azure;

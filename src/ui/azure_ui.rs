@@ -1,4 +1,6 @@
+use super::model_picker::ModelPicker;
 use super::*;
+use crate::agent_models::AgentModels;
 use crate::azure::{
     AzureClient, AzurePrList, PrAttention, PrContext, PrItem, PrProjectState,
     acknowledge_attention, reconcile_attention,
@@ -253,26 +255,36 @@ impl Workspace {
         let agent_row = adw::ActionRow::builder().title("Agent").build();
         agent_row.add_suffix(&agent_box);
         group.add(&agent_row);
-        let model = adw::EntryRow::builder()
-            .title("Model (empty uses the agent's default)")
-            .text(&current.model)
-            .build();
-        group.add(&model);
+        let models = ModelPicker::new();
+        group.add(&models.model_row);
+        group.add(&models.effort_row);
+        // Keeps the saved choice until the agent's models load.
+        models.set_model(&current.model);
+        models.set_effort(&current.effort);
+        let agent = Rc::new(Cell::new(current.agent));
+        let loaded: Rc<RefCell<AgentModels>> = Rc::default();
+        {
+            let (models, agent, loaded) = (models.clone(), agent.clone(), loaded.clone());
+            self.load_model_options(
+                crate::azure::PrReviewSettings::AGENTS.to_vec(),
+                move |_, options| {
+                    let shown = options
+                        .iter()
+                        .find(|(kind, _)| *kind == agent.get())
+                        .map(|(_, options)| options.clone());
+                    *loaded.borrow_mut() = options;
+                    if let Some(options) = shown {
+                        models.set_options(options);
+                    }
+                },
+            );
+        }
         fn choice(
             group: &adw::PreferencesGroup,
             title: &str,
             values: &[&str],
             selected: &str,
         ) -> adw::ComboRow {
-            let row = adw::ComboRow::builder()
-                .title(title)
-                .model(&choice_labels(values))
-                .selected(choice_index(values, selected))
-                .build();
-            group.add(&row);
-            row
-        }
-        fn choice_labels(values: &[&str]) -> gtk::StringList {
             let labels: Vec<&str> = values
                 .iter()
                 .map(|value| {
@@ -283,21 +295,18 @@ impl Workspace {
                     }
                 })
                 .collect();
-            gtk::StringList::new(&labels)
-        }
-        fn choice_index(values: &[&str], selected: &str) -> u32 {
-            values
-                .iter()
-                .position(|value| *value == selected)
-                .unwrap_or(0) as u32
-        }
-        fn efforts(kind: SessionKind) -> &'static [&'static str] {
-            match kind {
-                SessionKind::Claude => &["", "low", "medium", "high", "xhigh", "max"],
-                _ => &[
-                    "", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
-                ],
-            }
+            let row = adw::ComboRow::builder()
+                .title(title)
+                .model(&gtk::StringList::new(&labels))
+                .selected(
+                    values
+                        .iter()
+                        .position(|value| *value == selected)
+                        .unwrap_or(0) as u32,
+                )
+                .build();
+            group.add(&row);
+            row
         }
         const APPROVALS: &[&str] = &["", "on-request", "never"];
         const SANDBOXES: &[&str] = &["", "read-only", "workspace-write", "danger-full-access"];
@@ -309,12 +318,6 @@ impl Workspace {
             "dontAsk",
             "bypassPermissions",
         ];
-        let effort = choice(
-            &group,
-            "Reasoning effort",
-            efforts(current.agent),
-            &current.effort,
-        );
         let approval = choice(&group, "Approval policy", APPROVALS, &current.approval);
         approval.set_subtitle(
             "never prevents approval prompts; commands outside the sandbox will fail.",
@@ -328,7 +331,6 @@ impl Workspace {
             &current.permission_mode,
         );
         permission_mode.set_subtitle("A background review waits for any prompt it raises.");
-        let agent = Rc::new(Cell::new(current.agent));
         let show_agent_options = {
             let (approval, sandbox, permission_mode) =
                 (approval.clone(), sandbox.clone(), permission_mode.clone());
@@ -340,21 +342,29 @@ impl Workspace {
         };
         show_agent_options(current.agent);
         for (kind, button) in &agent_buttons {
-            let (kind, agent, effort, show_agent_options) = (
+            let (kind, agent, models, loaded, show_agent_options) = (
                 *kind,
                 agent.clone(),
-                effort.clone(),
+                models.clone(),
+                loaded.clone(),
                 show_agent_options.clone(),
             );
             button.connect_toggled(move |button| {
                 if !button.is_active() || agent.get() == kind {
                     return;
                 }
-                // Keep an effort level both agents know, such as high.
-                let previous = efforts(agent.get())[effort.selected() as usize];
+                // The model belongs to one agent, but an effort such as high suits both.
+                let effort = models.effort();
                 agent.set(kind);
-                effort.set_model(Some(&choice_labels(efforts(kind))));
-                effort.set_selected(choice_index(efforts(kind), previous));
+                models.set_model("");
+                let options = loaded
+                    .borrow()
+                    .iter()
+                    .find(|(loaded, _)| *loaded == kind)
+                    .map(|(_, options)| options.clone())
+                    .unwrap_or_default();
+                models.set_options(options);
+                models.set_effort(&effort);
                 show_agent_options(kind);
             });
         }
@@ -412,8 +422,8 @@ impl Workspace {
             let agent = agent.get();
             let settings = crate::azure::PrReviewSettings {
                 agent,
-                model: model.text().trim().to_owned(),
-                effort: efforts(agent)[effort.selected() as usize].to_owned(),
+                model: models.model(),
+                effort: models.effort(),
                 approval: APPROVALS[approval.selected() as usize].to_owned(),
                 sandbox: SANDBOXES[sandbox.selected() as usize].to_owned(),
                 permission_mode: PERMISSION_MODES[permission_mode.selected() as usize].to_owned(),

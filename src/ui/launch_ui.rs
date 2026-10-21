@@ -1,5 +1,6 @@
 #![allow(deprecated)]
 
+use super::model_picker::ModelPicker;
 use super::*;
 use crate::azure::PrItem;
 use crate::launch_model::{self, DEFAULT_BASE_BRANCH};
@@ -75,11 +76,9 @@ pub(super) struct LaunchDialog {
     pub(super) codex_bypass: adw::SwitchRow,
     pub(super) gemini_approval: adw::ComboRow,
     pub(super) gemini_yolo: adw::SwitchRow,
-    pub(super) claude_model: adw::EntryRow,
-    pub(super) claude_effort: adw::ComboRow,
-    pub(super) codex_model: adw::EntryRow,
-    pub(super) codex_effort: adw::ComboRow,
-    pub(super) gemini_model: adw::EntryRow,
+    pub(super) claude_models: ModelPicker,
+    pub(super) codex_models: ModelPicker,
+    pub(super) gemini_models: ModelPicker,
     pub(super) cwd: gtk::Entry,
     pub(super) project: gtk::Entry,
     pub(super) project_dropdown: gtk::DropDown,
@@ -164,21 +163,10 @@ impl LaunchDialog {
         let (claude_permission, claude_danger) = claude_launch_options();
         let (codex_approval, codex_sandbox, codex_full_auto, codex_bypass) = codex_launch_options();
         let (gemini_approval, gemini_yolo) = gemini_launch_options();
-        let claude_model = model_row();
-        let claude_effort = combo_row(
-            "Reasoning effort",
-            "--effort",
-            &["default", "low", "medium", "high", "xhigh", "max"],
-        );
-        let codex_model = model_row();
-        let codex_effort = combo_row(
-            "Reasoning effort",
-            "model_reasoning_effort",
-            &[
-                "default", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
-            ],
-        );
-        let gemini_model = model_row();
+        // Codex's models come from its cache once the dialog opens.
+        let claude_models = ModelPicker::new();
+        let codex_models = ModelPicker::new();
+        let gemini_models = ModelPicker::new();
         // Keep the original agmux choices and default to its on-request policy.
         codex_approval.set_selected(2);
         claude_danger.set_active(true);
@@ -201,8 +189,8 @@ impl LaunchDialog {
             .build();
         agent_options.add_named(
             &option_list(&[
-                claude_model.upcast_ref(),
-                claude_effort.upcast_ref(),
+                claude_models.model_row.upcast_ref(),
+                claude_models.effort_row.upcast_ref(),
                 claude_permission.upcast_ref(),
                 claude_danger.upcast_ref(),
             ]),
@@ -210,8 +198,8 @@ impl LaunchDialog {
         );
         agent_options.add_named(
             &option_list(&[
-                codex_model.upcast_ref(),
-                codex_effort.upcast_ref(),
+                codex_models.model_row.upcast_ref(),
+                codex_models.effort_row.upcast_ref(),
                 codex_approval.upcast_ref(),
                 codex_sandbox.upcast_ref(),
                 codex_full_auto.upcast_ref(),
@@ -221,7 +209,8 @@ impl LaunchDialog {
         );
         agent_options.add_named(
             &option_list(&[
-                gemini_model.upcast_ref(),
+                gemini_models.model_row.upcast_ref(),
+                gemini_models.effort_row.upcast_ref(),
                 gemini_approval.upcast_ref(),
                 gemini_yolo.upcast_ref(),
             ]),
@@ -382,11 +371,9 @@ impl LaunchDialog {
             codex_bypass,
             gemini_approval,
             gemini_yolo,
-            claude_model,
-            claude_effort,
-            codex_model,
-            codex_effort,
-            gemini_model,
+            claude_models,
+            codex_models,
+            gemini_models,
             // Not shown; they carry values between launches and from quick launch.
             cwd: gtk::Entry::new(),
             project,
@@ -448,15 +435,6 @@ fn string_item_expression() -> gtk::PropertyExpression {
         None::<&gtk::Expression>,
         "string",
     )
-}
-
-/// Empty leaves the model to the agent's own config.
-fn model_row() -> adw::EntryRow {
-    let row = adw::EntryRow::builder()
-        .title("Model (empty uses the agent's default)")
-        .build();
-    row.set_activates_default(true);
-    row
 }
 
 fn switch_row(title: &str, flag: &str) -> adw::SwitchRow {
@@ -568,6 +546,7 @@ impl Workspace {
         self.refresh_launch_base_branches();
         self.set_launch_worktree_mode(self.launch.worktree_mode.get());
         self.set_launch_agent(self.quick_launch.borrow().kind);
+        self.refresh_launch_models();
     }
 
     pub(super) fn load_quick_launch(&self, preferences: QuickLaunchPreferences) {
@@ -1282,26 +1261,9 @@ impl Workspace {
 
     fn current_launch_flags(&self, kind: SessionKind) -> BTreeMap<String, Value> {
         let mut flags = BTreeMap::new();
-        let (model, effort) = match kind {
-            SessionKind::Claude => (
-                Some(&self.launch.claude_model),
-                Some(&self.launch.claude_effort),
-            ),
-            SessionKind::Codex => (
-                Some(&self.launch.codex_model),
-                Some(&self.launch.codex_effort),
-            ),
-            SessionKind::Gemini => (Some(&self.launch.gemini_model), None),
-            SessionKind::Shell | SessionKind::Custom => (None, None),
-        };
-        if let Some(model) = model {
-            flags.insert(
-                "--model".to_owned(),
-                Value::String(model.text().trim().to_owned()),
-            );
-        }
-        if let Some(effort) = effort {
-            flags.insert("--effort".to_owned(), Value::String(dropdown_value(effort)));
+        if let Some(models) = self.launch_models(kind) {
+            flags.insert("--model".to_owned(), Value::String(models.model()));
+            flags.insert("--effort".to_owned(), Value::String(models.effort()));
         }
         match kind {
             SessionKind::Claude => {
@@ -1347,6 +1309,29 @@ impl Workspace {
         flags
     }
 
+    fn launch_models(&self, kind: SessionKind) -> Option<&ModelPicker> {
+        match kind {
+            SessionKind::Claude => Some(&self.launch.claude_models),
+            SessionKind::Codex => Some(&self.launch.codex_models),
+            SessionKind::Gemini => Some(&self.launch.gemini_models),
+            SessionKind::Shell | SessionKind::Custom => None,
+        }
+    }
+
+    /// Refreshes each agent's models, so a model Codex just added shows up.
+    fn refresh_launch_models(&self) {
+        self.load_model_options(
+            vec![SessionKind::Claude, SessionKind::Codex, SessionKind::Gemini],
+            |workspace, options| {
+                for (kind, options) in options {
+                    if let Some(models) = workspace.launch_models(kind) {
+                        models.set_options(options);
+                    }
+                }
+            },
+        );
+    }
+
     fn all_launch_flags(&self) -> BTreeMap<String, BTreeMap<String, Value>> {
         [SessionKind::Claude, SessionKind::Codex, SessionKind::Gemini]
             .into_iter()
@@ -1355,26 +1340,18 @@ impl Workspace {
     }
 
     fn apply_launch_flags(&self, flags: &BTreeMap<String, BTreeMap<String, Value>>) {
-        for (agent, model, effort) in [
-            (
-                "claude",
-                &self.launch.claude_model,
-                Some(&self.launch.claude_effort),
-            ),
-            (
-                "codex",
-                &self.launch.codex_model,
-                Some(&self.launch.codex_effort),
-            ),
-            ("gemini", &self.launch.gemini_model, None),
-        ] {
+        for kind in [SessionKind::Claude, SessionKind::Codex, SessionKind::Gemini] {
             // Launches saved before these fields existed leave the agent's defaults.
-            let values = flags.get(agent);
-            let value = |key: &str| values.and_then(|values| values.get(key));
-            model.set_text(value("--model").and_then(Value::as_str).unwrap_or_default());
-            if let Some(effort) = effort {
-                effort.set_selected(0);
-                set_dropdown_value(effort, value("--effort"));
+            let values = flags.get(kind.as_str());
+            let value = |key: &str| {
+                values
+                    .and_then(|values| values.get(key))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            };
+            if let Some(models) = self.launch_models(kind) {
+                models.set_model(value("--model"));
+                models.set_effort(value("--effort"));
             }
         }
         if let Some(values) = flags.get("claude") {

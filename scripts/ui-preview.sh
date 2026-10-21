@@ -157,6 +157,8 @@ CURL
 chmod 700 "$work/bin/curl"
 export PATH="$work/bin:$PATH"
 printf '%s\n' '{"tokens":{"access_token":"preview-fixture"}}' > "$work/codex/auth.json"
+# The launch and review settings model pickers read Codex's model cache.
+printf '%s\n' '{"models":[{"slug":"gpt-preview","display_name":"GPT-Preview","visibility":"list","priority":1,"supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}]},{"slug":"gpt-preview-mini","display_name":"GPT-Preview-Mini","visibility":"list","priority":2,"supported_reasoning_levels":[{"effort":"low"}]}]}' > "$work/codex/models_cache.json"
 printf '%s\n' '{"claudeAiOauth":{"accessToken":"preview-fixture"}}' > "$work/claude/.credentials.json"
 
 ctl() { "$bin/agtkctl" --instance preview "$@"; }
