@@ -6,6 +6,8 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::providers::AgentProvider;
+
 pub use crate::AppResult as BriefResult;
 
 pub const PREFERENCE_KEY: &str = "brief";
@@ -23,6 +25,82 @@ pub struct BriefItemInput {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<BriefSession>,
+}
+
+/// The agent session an item is about, as list_sessions reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BriefSession {
+    /// The agtk session id, while the session lives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Needed with conversationId, to find or restore the conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<AgentProvider>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+}
+
+/// Where opening an item's session leads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionTarget {
+    /// A row agtk shows, live or exited.
+    Select(String),
+    /// No row has the conversation any more; it can be restored.
+    Restore {
+        provider: AgentProvider,
+        conversation_id: String,
+    },
+    Gone,
+}
+
+impl BriefSession {
+    /// Picks the row by id, else a row on the same conversation, else a restore.
+    /// `sessions` holds each row's id, provider and conversation.
+    pub fn target<'a>(
+        &self,
+        sessions: impl IntoIterator<Item = (&'a str, Option<AgentProvider>, Option<&'a str>)>,
+    ) -> SessionTarget {
+        let sessions = sessions.into_iter().collect::<Vec<_>>();
+        if let Some(id) = &self.id
+            && sessions.iter().any(|(row, _, _)| row == id)
+        {
+            return SessionTarget::Select(id.clone());
+        }
+        let (Some(provider), Some(conversation_id)) = (self.provider, &self.conversation_id) else {
+            return SessionTarget::Gone;
+        };
+        match sessions.iter().find(|(_, row_provider, conversation)| {
+            *row_provider == Some(provider) && *conversation == Some(conversation_id.as_str())
+        }) {
+            Some((row, _, _)) => SessionTarget::Select((*row).to_owned()),
+            None => SessionTarget::Restore {
+                provider,
+                conversation_id: conversation_id.clone(),
+            },
+        }
+    }
+
+    fn validate(&self) -> BriefResult<()> {
+        if self.id.is_none() && self.conversation_id.is_none() {
+            return Err("session needs an id or a conversationId".into());
+        }
+        if self.conversation_id.is_some() && self.provider.is_none() {
+            return Err("session needs a provider with its conversationId".into());
+        }
+        for value in [&self.id, &self.conversation_id].into_iter().flatten() {
+            if !(1..=200).contains(&value.chars().count())
+                || value
+                    .chars()
+                    .any(|character| character.is_whitespace() || character.is_control())
+            {
+                return Err("session ids must be 1 to 200 characters without spaces".into());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +132,9 @@ impl BriefPostParams {
             if let Some(link) = &item.link {
                 validate_link(link)?;
             }
+            if let Some(session) = &item.session {
+                session.validate()?;
+            }
             if !ids.insert(item.id.as_str()) {
                 return Err(format!("item {} is posted twice", item.id).into());
             }
@@ -81,6 +162,8 @@ pub struct BriefItem {
     pub section: String,
     pub text: String,
     pub link: Option<String>,
+    #[serde(default)]
+    pub session: Option<BriefSession>,
     pub posted_at: u64,
     pub updated_at: u64,
     pub read: bool,
@@ -202,6 +285,7 @@ impl Brief {
                     section: input.section.clone(),
                     text: input.text.clone(),
                     link: input.link.clone(),
+                    session: input.session.clone(),
                     posted_at: now,
                     updated_at: now,
                     read: marks.as_ref().is_some_and(|marks| marks.read),
@@ -366,12 +450,15 @@ impl Brief {
 impl BriefItem {
     /// Takes the posted fields; true when any of them changed.
     fn apply(&mut self, input: &BriefItemInput, now: u64) -> bool {
-        let changed =
-            self.section != input.section || self.text != input.text || self.link != input.link;
+        let changed = self.section != input.section
+            || self.text != input.text
+            || self.link != input.link
+            || self.session != input.session;
         if changed {
             self.section = input.section.clone();
             self.text = input.text.clone();
             self.link = input.link.clone();
+            self.session = input.session.clone();
             self.updated_at = now;
         }
         changed

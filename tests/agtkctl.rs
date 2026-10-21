@@ -161,6 +161,7 @@ fn brief_commands_have_a_typed_protocol_mapping() {
                 section: "Tasks".to_owned(),
                 text: "Renew passport".to_owned(),
                 link: None,
+                session: None,
             }],
             replace_sections: vec!["Tasks".to_owned()],
             retire_ids: Vec::new(),

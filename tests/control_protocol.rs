@@ -659,6 +659,7 @@ fn brief_posts_are_validated_and_round_trip() {
                 section: "Mail".to_owned(),
                 text: "Invoice".to_owned(),
                 link: Some("https://mail.google.com/mail/u/0/#inbox/abc".to_owned()),
+                session: None,
             }],
             replace_sections: vec!["Mail".to_owned()],
             retire_ids: vec!["gmail:old".to_owned()],

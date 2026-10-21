@@ -1,4 +1,7 @@
-use agtk::brief::{Brief, BriefItemInput, BriefPostParams, REMEMBER_MILLIS};
+use agtk::brief::{
+    Brief, BriefItemInput, BriefPostParams, BriefSession, REMEMBER_MILLIS, SessionTarget,
+};
+use agtk::providers::AgentProvider;
 use serde_json::json;
 
 fn item(id: &str, section: &str, text: &str) -> BriefItemInput {
@@ -7,6 +10,7 @@ fn item(id: &str, section: &str, text: &str) -> BriefItemInput {
         section: section.to_owned(),
         text: text.to_owned(),
         link: None,
+        session: None,
     }
 }
 
@@ -554,4 +558,82 @@ fn empty_sections_leave_the_brief() {
     // A brief saved with empty sections drops them when it loads.
     let saved = json!({"items":[], "sections":["Next action","Today"], "retired":[]});
     assert!(Brief::from_value_lossy(saved).sections.is_empty());
+}
+
+fn session(id: Option<&str>, conversation: Option<&str>) -> BriefSession {
+    BriefSession {
+        id: id.map(str::to_owned),
+        provider: conversation.map(|_| AgentProvider::Claude),
+        conversation_id: conversation.map(str::to_owned),
+    }
+}
+
+#[test]
+fn a_session_link_finds_the_row_or_offers_a_restore() {
+    let rows = [
+        ("claude-1", Some(AgentProvider::Claude), Some("conv-a")),
+        ("codex-1", Some(AgentProvider::Codex), Some("conv-b")),
+        ("shell-1", None, None),
+    ];
+    // By agtk session id first.
+    assert_eq!(
+        session(Some("claude-1"), Some("conv-x")).target(rows),
+        SessionTarget::Select("claude-1".to_owned())
+    );
+    // The id is gone, but the conversation was restored under a new row.
+    assert_eq!(
+        session(Some("claude-9"), Some("conv-a")).target(rows),
+        SessionTarget::Select("claude-1".to_owned())
+    );
+    // A conversation is only matched for the same provider.
+    let codex_conversation_as_claude = session(None, Some("conv-b"));
+    assert_eq!(
+        codex_conversation_as_claude.target(rows),
+        SessionTarget::Restore {
+            provider: AgentProvider::Claude,
+            conversation_id: "conv-b".to_owned()
+        }
+    );
+    assert_eq!(
+        session(Some("claude-9"), None).target(rows),
+        SessionTarget::Gone
+    );
+}
+
+#[test]
+fn session_links_are_validated_stored_and_returned() {
+    let mut brief = Brief::default();
+    let mut linked = item("agent:review", "Waiting on you", "Review agent is waiting");
+    linked.session = Some(session(Some("claude-1"), Some("conv-a")));
+    brief.post(&post(vec![linked.clone()]), 1_000).unwrap();
+    assert_eq!(
+        brief.summary()["items"][0]["session"],
+        json!({"id":"claude-1","provider":"claude","conversationId":"conv-a"})
+    );
+
+    // A new session id after a restore counts as an update.
+    linked.session = Some(session(Some("claude-2"), Some("conv-a")));
+    let changes = brief.post(&post(vec![linked]), 2_000).unwrap();
+    assert_eq!(changes.updated, ["agent:review"]);
+
+    for bad in [
+        BriefSession {
+            id: None,
+            provider: None,
+            conversation_id: None,
+        },
+        BriefSession {
+            id: None,
+            provider: None,
+            conversation_id: Some("conv-a".to_owned()),
+        },
+        session(Some("has space"), None),
+    ] {
+        let mut invalid = item("x", "Today", "X");
+        invalid.session = Some(bad.clone());
+        assert!(brief.post(&post(vec![invalid]), 3_000).is_err(), "{bad:?}");
+    }
+    let mut id_only = item("y", "Today", "Y");
+    id_only.session = Some(session(Some("shell-1"), None));
+    assert!(brief.post(&post(vec![id_only]), 3_000).is_ok());
 }

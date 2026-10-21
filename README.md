@@ -140,7 +140,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 - A session that works on a PR, or reviews one, shows a PR button in its sidebar row and a PR bar above its terminal. Both open the PR in the browser.
 - Linked Claude, Codex and Gemini agents automatically receive new PR comments and source branch pushes. Polling runs every two minutes while agtk is open, including when its window is unfocused. The first poll establishes a baseline; later updates are deduplicated per session and queued across restarts until the agent is resting. Delivery waits while you focus the terminal, have an unsubmitted draft, or the agent is busy or asking for input. Comments by your signed-in Azure account are skipped to avoid reply loops. The agent receives the PR link, changed commit and comment thread IDs, then fetches the details and updates its checkout as part of its existing task.
 - Emacs: open Magit or a branch review for the selected session.
-- Daily brief: an assistant posts your brief over MCP, and the Brief page in the right sidebar shows it by section. New items are bold with a dot. Click an item to mark it read, and click it again to mark it unread. Use its buttons to open the link, mark it done, or hide it. Click the check mark again to undo done. Hidden items go to Hidden at the bottom of the page. Open Hidden and use the eye button to show an item again. Done and hide only change the panel: agtk does not change the task or mail. Your assistant reads the done marks and completes the task. See [Daily brief](#daily-brief).
+- Daily brief: an assistant posts your brief over MCP, and the Brief page in the right sidebar shows it by section. New items are bold with a dot. Click an item to mark it read, and click it again to mark it unread. Use its buttons to go to its agent session, open the link, mark it done, or hide it. Click the check mark again to undo done. Hidden items go to Hidden at the bottom of the page. Open Hidden and use the eye button to show an item again. Done and hide only change the panel: agtk does not change the task or mail. Your assistant reads the done marks and completes the task. See [Daily brief](#daily-brief).
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.
 
 ## Keyboard shortcuts
@@ -264,6 +264,15 @@ The tools cover sessions, terminal input and text, diffs, worktrees, recent conv
 ### Daily brief
 
 `post_brief` adds items to the brief. Each item has a stable `id`, such as `ado-pr:105687` or `gmail:THREAD_ID`, a `section`, `text`, and an optional http or https `link`.
+
+An item about an agent session can also have a `session`. Copy `id`, `kind` as `provider`, and `conversationId` from `list_sessions`:
+
+```json
+{"id":"agent:review-105687","section":"Waiting on you","text":"The PR review is ready",
+ "session":{"id":"SESSION_ID","provider":"claude","conversationId":"CONVERSATION_ID"}}
+```
+
+The session button selects that session. If it is closed, agtk looks for a session on the same conversation. If there is none, it offers to restore the conversation where it last ran. That needs `provider` and `conversationId`; `id` alone only finds a session that is still open.
 
 - Post an existing `id` to update it. It keeps its read, hidden and done marks.
 - A new `id` shows as unread.

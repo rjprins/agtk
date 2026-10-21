@@ -25,4 +25,10 @@ Decisions:
    again clears it. Done also marks the item read.
 7. Clicking a row marks it read, and clicking it again marks it unread. The
    link has its own button, so reading an item does not open a browser.
-8. No keyboard shortcut for now.
+8. An item can link to an agent session with `session`: the agtk session id,
+   and the provider and conversation id. agtk session ids end with the session,
+   but the conversation does not. So the session button first looks for the
+   session id, then for a session on the same conversation, and then offers a
+   restore, like Resume Session. The restore needs the provider, because agtk
+   reads Claude and Codex logs in different places.
+9. No keyboard shortcut for now.

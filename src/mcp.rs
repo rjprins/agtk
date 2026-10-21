@@ -963,7 +963,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "post_brief",
             "Post to the daily brief",
-            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text and an optional http(s) link. Posting an existing id updates it in place and keeps its read, hidden and done marks; a new id shows as unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it, and an empty section leaves the brief. retireIds takes items out. unhideIds shows hidden items again, for example when they need attention again; it does not change read or done. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Hiding an item in the panel only moves it to the Hidden section. Returns the brief and the added, updated, retired and unhidden ids.",
+            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text, an optional http(s) link, and an optional session for items about an agent session: its agtk session id, and its provider and conversationId from list_sessions. In the panel the session button selects that session; when it is closed, agtk finds a session on the same conversation or offers to restore it, which needs provider and conversationId. Posting an existing id updates it in place and keeps its read, hidden and done marks; a new id shows as unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it, and an empty section leaves the brief. retireIds takes items out. unhideIds shows hidden items again, for example when they need attention again; it does not change read or done. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Hiding an item in the panel only moves it to the Hidden section. Returns the brief and the added, updated, retired and unhidden ids.",
             schema(
                 &[
                     (
@@ -977,7 +977,16 @@ fn tool_definitions() -> Vec<Value> {
                                     "id":string(),
                                     "section":string(),
                                     "text":string(),
-                                    "link":string()
+                                    "link":string(),
+                                    "session":{
+                                        "type":"object",
+                                        "properties":{
+                                            "id":string(),
+                                            "provider":enum_values(&["codex", "claude"]),
+                                            "conversationId":string()
+                                        },
+                                        "additionalProperties":false
+                                    }
                                 },
                                 "required":["id","section","text"],
                                 "additionalProperties":false

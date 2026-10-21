@@ -1,8 +1,11 @@
 //! The Brief page of the right sidebar: the daily brief an assistant posts over MCP.
 
 use super::*;
-use crate::brief::{Brief, BriefItem, BriefPostParams, PREFERENCE_KEY};
+use crate::brief::{
+    Brief, BriefItem, BriefPostParams, BriefSession, PREFERENCE_KEY, SessionTarget,
+};
 use crate::persist::now_millis;
+use crate::providers::AgentProvider;
 
 pub(super) const BRIEF_PAGE: &str = "brief";
 pub(super) const HIDDEN_EXPANDED_PREFERENCE: &str = "briefHiddenExpanded";
@@ -81,6 +84,19 @@ impl Workspace {
             if let Some(link) = link {
                 workspace.open_brief_link(&link);
                 workspace.change_brief(|brief| brief.mark_read(id));
+            }
+        });
+        self.add_target_action("brief-session", |workspace, id| {
+            let session = workspace
+                .brief
+                .borrow()
+                .items
+                .iter()
+                .find(|item| item.id == id)
+                .and_then(|item| item.session.clone());
+            if let Some(session) = session {
+                workspace.change_brief(|brief| brief.mark_read(id));
+                workspace.open_brief_session(&session);
             }
         });
         let action = gio::SimpleAction::new("brief-read-all", None);
@@ -162,6 +178,49 @@ impl Workspace {
         self.render_brief();
         let value = serde_json::to_value(&*self.brief.borrow()).unwrap_or_default();
         self.save_preference(PREFERENCE_KEY, value);
+    }
+
+    /// Selects the item's session, or offers to restore its closed conversation.
+    fn open_brief_session(&self, session: &BriefSession) {
+        let target = {
+            let sessions = self.sessions.borrow();
+            session.target(sessions.iter().map(|(id, live)| {
+                (
+                    id.as_str(),
+                    AgentProvider::from_kind(live.record.kind),
+                    live.record.conversation_id.as_deref(),
+                )
+            }))
+        };
+        match target {
+            SessionTarget::Select(id) => {
+                let row = self.sessions.borrow().get(&id).map(|live| live.row.clone());
+                if let Some(row) = row {
+                    self.list.select_row(Some(&row));
+                }
+            }
+            SessionTarget::Restore {
+                provider,
+                conversation_id,
+            } => {
+                let dialog = adw::AlertDialog::new(
+                    Some("Restore the Agent Session?"),
+                    Some("This session is closed. Restore its conversation where it last ran?"),
+                );
+                dialog.add_responses(&[("cancel", "_Cancel"), ("restore", "_Restore")]);
+                dialog.set_response_appearance("restore", adw::ResponseAppearance::Suggested);
+                dialog.set_default_response(Some("restore"));
+                dialog.set_close_response("cancel");
+                let workspace = self.clone();
+                dialog.connect_response(Some("restore"), move |_, _| {
+                    workspace.restore_conversation(provider, conversation_id.clone());
+                });
+                dialog.present(Some(&self.window));
+            }
+            SessionTarget::Gone => self.show_error(
+                "This agent session is closed, and agtk does not know its conversation",
+            ),
+        }
     }
 
     fn open_brief_link(&self, url: &str) {
@@ -325,6 +384,15 @@ fn brief_row(item: &BriefItem) -> gtk::Box {
         }
     });
     row.add_controller(click);
+    if item.session.is_some() {
+        let open = brief_button(
+            "utilities-terminal-symbolic",
+            "Go to the agent session and mark it read",
+        );
+        open.set_action_name(Some("win.brief-session"));
+        open.set_action_target_value(Some(&target));
+        row.append(&open);
+    }
     if item.link.is_some() {
         let open = brief_button("web-browser-symbolic", "Open the link and mark it read");
         open.set_action_name(Some("win.brief-open"));

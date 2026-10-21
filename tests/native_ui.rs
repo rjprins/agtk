@@ -3620,7 +3620,7 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
 
 #[test]
 #[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
-fn clicking_a_brief_row_toggles_read_and_done_toggles_and_survives_restarts() {
+fn clicking_a_brief_row_toggles_read_done_survives_restarts_and_sessions_restore() {
     use glib::variant::ToVariant;
 
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
@@ -3751,6 +3751,53 @@ fn clicking_a_brief_row_toggles_read_and_done_toggles_and_survives_restarts() {
         "Tasks: Renew passport (done)"
     );
 
+    // A closed conversation: the session button offers a restore, and Enter
+    // picks the dialog's default, Restore.
+    let codex_logs = app.directory.path().join("codex/sessions/2026/10/21");
+    let project = app.directory.path().join("brief-project");
+    std::fs::create_dir_all(&codex_logs).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        codex_logs.join("session.jsonl"),
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"codex-brief-1\",\"cwd\":{:?}}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"role\":\"user\",\"content\":\"Fix the flaky test\"}}}}\n",
+            project.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    app.request(
+        "brief.post",
+        json!({"items":[{
+            "id":"agent:codex-brief-1","section":"Waiting on you","text":"Codex finished the fix",
+            "session":{"id":"codex-gone","provider":"codex","conversationId":"codex-brief-1"}
+        }]}),
+    );
+    app.activate_target_action("brief-session", "agent:codex-brief-1");
+    thread::sleep(Duration::from_millis(500));
+    key(28, true);
+    key(28, false);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let restored_id = loop {
+        let state = app.request("app.get_state", json!({}));
+        if let Some(session) = state["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["conversationId"] == "codex-brief-1")
+        {
+            break session["id"].as_str().unwrap().to_owned();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the conversation was not restored: {state}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    };
+    app.wait_text(&restored_id, "__RESTORE_ARGS_resume_codex-brief-1__");
+    let brief = app.request("brief.get", json!({}));
+    assert_eq!(item(&brief, "agent:codex-brief-1")["read"], true);
+    app.request("session.close", json!({"sessionId":restored_id}));
+
     app.stop();
     app.start();
     let reposted = app.request(
@@ -3764,4 +3811,50 @@ fn clicking_a_brief_row_toggles_read_and_done_toggles_and_survives_restarts() {
         (&undone["done"], &undone["doneAt"]),
         (&json!(false), &Value::Null)
     );
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn a_brief_session_link_selects_its_session() {
+    let app = App::new();
+    let create = |name: &str| {
+        app.request(
+            "session.create",
+            json!({
+                "kind":"custom","command":"/bin/sh","args":["-c","exec sleep 30"],
+                "cwd":app.directory.path(),"name":name
+            }),
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let first = create("first");
+    let second = create("second");
+    assert_eq!(
+        app.request("app.get_state", json!({}))["selectedSessionId"],
+        first
+    );
+    app.request(
+        "brief.post",
+        json!({"items":[
+            {"id":"agent:second","section":"Waiting on you","text":"Second is ready",
+             "session":{"id":second}},
+            {"id":"agent:gone","section":"Waiting on you","text":"Closed and unknown",
+             "session":{"id":"shell-gone"}}
+        ]}),
+    );
+    app.activate_target_action("brief-session", "agent:second");
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["selectedSessionId"], second);
+    let brief = app.request("brief.get", json!({}));
+    assert_eq!(brief["items"][0]["read"], true);
+    assert_eq!(brief["items"][0]["session"], json!({"id":second}));
+
+    // Without a conversation there is nothing to restore; the selection stays.
+    app.activate_target_action("brief-session", "agent:gone");
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["selectedSessionId"], second);
+    app.request("session.close", json!({"sessionId":first}));
+    app.request("session.close", json!({"sessionId":second}));
 }

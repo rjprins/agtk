@@ -736,6 +736,43 @@ impl Workspace {
         );
     }
 
+    /// Restores one closed conversation where it last ran, as Resume Session does.
+    pub(super) fn restore_conversation(&self, provider: AgentProvider, conversation_id: String) {
+        let discovery = self.provider_discovery();
+        let names = self.agents.names.borrow().clone();
+        let known_project_roots = self
+            .project_summaries()
+            .into_iter()
+            .map(|project| PathBuf::from(project.root))
+            .collect::<Vec<_>>();
+        let manager = crate::worktrees::WorktreeManager::new(self.paths.attic_dir());
+        self.run_slow(
+            move || {
+                let mut session = discovery.preview(provider, &conversation_id, 1)?.session;
+                if let Some(name) = names.get(&agent_session_key(&session)) {
+                    session.name = name.clone();
+                }
+                let target = restore_target_for_location(
+                    session.cwd.clone(),
+                    None,
+                    &known_project_roots,
+                    &manager,
+                );
+                Ok(session.restore_plan(target))
+            },
+            |workspace, result| match result {
+                Ok(plan) => workspace.launch_controlled_with_conversation(
+                    plan.params,
+                    Some(plan.conversation_id),
+                    None,
+                ),
+                Err(error) => {
+                    workspace.show_error(&format!("Could not restore agent session: {error}"))
+                }
+            },
+        );
+    }
+
     pub(super) fn provider_discovery(&self) -> ProviderDiscovery {
         ProviderDiscovery::from_environment().with_cache(self.paths.provider_log_cache())
     }

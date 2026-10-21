@@ -2,13 +2,13 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
-use agtk::brief::{BriefItemInput, BriefPostParams};
+use agtk::brief::{BriefItemInput, BriefPostParams, BriefSession};
 use agtk::control::{
     ClaudePresetApplyParams, ControlCommand, CreateSessionParams, PrListParams, SendInputParams,
     SessionIdParams, SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
 };
 use agtk::mcp::{ControlBackend, McpServer};
-use agtk::providers::{DiscoveryRoots, ProviderDiscovery};
+use agtk::providers::{AgentProvider, DiscoveryRoots, ProviderDiscovery};
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -428,7 +428,8 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
                         "id":"ado-pr:105687",
                         "section":"Waiting on you",
                         "text":"Review PR 105687",
-                        "link":"https://dev.azure.com/org/project/_git/repo/pullrequest/105687"
+                        "link":"https://dev.azure.com/org/project/_git/repo/pullrequest/105687",
+                        "session":{"id":"claude-1","provider":"claude","conversationId":"conv-a"}
                     }],
                     "replaceSections":["Waiting on you"],
                     "retireIds":["ado-pr:105600"],
@@ -457,6 +458,11 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
                     link: Some(
                         "https://dev.azure.com/org/project/_git/repo/pullrequest/105687".to_owned()
                     ),
+                    session: Some(BriefSession {
+                        id: Some("claude-1".to_owned()),
+                        provider: Some(AgentProvider::Claude),
+                        conversation_id: Some("conv-a".to_owned()),
+                    }),
                 }],
                 replace_sections: vec!["Waiting on you".to_owned()],
                 retire_ids: vec!["ado-pr:105600".to_owned()],
