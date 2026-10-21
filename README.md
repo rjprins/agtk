@@ -99,6 +99,7 @@ Optional tools:
 - When the last session in a project closes, the project moves to Inactive Projects at the bottom of the sidebar. Click it to launch a session there. Use the star to pin it, or the trash button to remove it from the list. This does not delete any files.
 - A pinned project stays at the top of the sidebar, even without sessions. Pin or unpin a project from its menu.
 - Launch Claude, Codex, Gemini, a shell, or a custom command in an exact directory and worktree.
+- Pick the model and reasoning effort an agent starts with in the launch dialog's options; empty uses the agent's default. MCP `launch_agent` takes the same `model` and `effort`.
 - Sessions keep running when the window closes, crashes, or is rebuilt. Start agtk again and it attaches to them.
 - Each agent row shows a state: busy, waiting, ready, or idle. See [Agent states](#agent-states).
 - Resume a closed Claude or Codex conversation with `Ctrl+Shift+R`. The list shows where each one stopped and which files it changed.
@@ -135,7 +136,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 ### Integrations
 
 - Azure DevOps pull requests: see PRs that need your attention. Each PR's Launch button opens the launcher with its worktree selected, or its source branch ready to check out when you launch. Choose an agent, then Launch for a regular session or Launch review for a review in its own detached `pr-<id>` checkout. Both use the selected agent and launch options. Reviews use the configured PR review prompt unless you enter an Initial Prompt. Review sessions open in the background and do not take the selection, and so do sessions started by `agtkctl` or an agent over MCP. Once a reviewed PR is merged, agtk closes its review sessions and removes its `pr-<id>` checkout, saving any edits to the attic first.
-- PR review settings: open the gear in Pull Requests to choose the Codex model, reasoning effort, approval policy, sandbox permissions, and review prompt. The Codex settings apply to automatic reviews and reviews started through `agtkctl` or MCP; defaults inherit your Codex configuration. Use `{pr_id}` in the prompt for the PR number. Choose approval policy `never` to prevent permission prompts, and sandbox permissions appropriate for the commands the review needs.
+- PR review settings: open the gear in Pull Requests to choose the agent (Claude or Codex), model, reasoning effort, review prompt, and the agent's own permission options: approval policy and sandbox for Codex, permission mode for Claude. The settings apply to automatic reviews and reviews started through `agtkctl` or MCP; empty fields inherit the agent's own configuration. Use `{pr_id}` in the prompt for the PR number. A review runs in the background, so choose options that avoid permission prompts for the commands it needs.
 - A session that works on a PR, or reviews one, shows a PR button in its sidebar row and a PR bar above its terminal. Both open the PR in the browser.
 - Linked Claude, Codex and Gemini agents automatically receive new PR comments and source branch pushes. Polling runs every two minutes while agtk is open, including when its window is unfocused. The first poll establishes a baseline; later updates are deduplicated per session and queued across restarts until the agent is resting. Delivery waits while you focus the terminal, have an unsubmitted draft, or the agent is busy or asking for input. Comments by your signed-in Azure account are skipped to avoid reply loops. The agent receives the PR link, changed commit and comment thread IDs, then fetches the details and updates its checkout as part of its existing task.
 - Emacs: open Magit or a branch review for the selected session.
@@ -253,7 +254,7 @@ To add it to another MCP client, use it as a local stdio server:
 
 An agent can open a shell with `spawn_shell` and give it an `initialCommand`, such as a `sudo` command. Type the password in that shell, and the agent reads the result with `snapshot`. agtk itself never runs anything as root.
 
-Sessions that agtk starts run outside any sandbox the agent has. An agent with the `agtk` tools can therefore run commands beyond its own sandbox, through `spawn_shell`, `send_input`, or `launch_agent`. Give the tools only to agents you would let run commands. PR reviews start Codex without the `agtk` tools, because they read code from someone else.
+Sessions that agtk starts run outside any sandbox the agent has. An agent with the `agtk` tools can therefore run commands beyond its own sandbox, through `spawn_shell`, `send_input`, or `launch_agent`. Give the tools only to agents you would let run commands. PR reviews start Claude and Codex without the `agtk` tools, because they read code from someone else.
 
 The tools cover sessions, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, and screenshots of the agtk window. The server never captures the rest of the desktop.
 

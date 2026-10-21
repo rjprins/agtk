@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::AzurePr;
+use crate::session::SessionKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -56,38 +57,49 @@ pub struct PrPreferences {
     pub projects: BTreeMap<String, PrProjectState>,
 }
 
-/// Settings shared by automatic and manual PR reviews. Empty fields inherit Codex config.
+/// Settings shared by automatic and manual PR reviews. Empty fields inherit the agent's config.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PrReviewSettings {
+    pub agent: SessionKind,
     pub model: String,
     pub effort: String,
+    /// Codex only.
     pub approval: String,
+    /// Codex only.
     pub sandbox: String,
+    /// Claude only.
+    pub permission_mode: String,
     pub prompt: String,
 }
 
 impl Default for PrReviewSettings {
     fn default() -> Self {
         Self {
+            // Settings saved before the agent choice were Codex reviews.
+            agent: SessionKind::Codex,
             model: String::new(),
             effort: String::new(),
             approval: String::new(),
             sandbox: String::new(),
+            permission_mode: String::new(),
             prompt: "/review-pr {pr_id}".to_owned(),
         }
     }
 }
 
 impl PrReviewSettings {
+    /// The agents a review can run with; each keeps agtk's tools out of the review.
+    pub const AGENTS: [SessionKind; 2] = [SessionKind::Claude, SessionKind::Codex];
+
     pub fn args(&self) -> Vec<String> {
-        let mut args = crate::launch_model::codex_args_without_agtk_mcp();
-        if !self.model.trim().is_empty() {
-            args.extend(["--model".to_owned(), self.model.trim().to_owned()]);
-        }
+        let mut args = crate::launch_model::args_without_agtk_mcp(self.agent);
         let flags = [
+            ("--model", &self.model),
+            ("--effort", &self.effort),
             ("--ask-for-approval", &self.approval),
             ("--sandbox", &self.sandbox),
+            ("--permission-mode", &self.permission_mode),
         ]
         .into_iter()
         .filter_map(|(flag, value)| {
@@ -95,20 +107,7 @@ impl PrReviewSettings {
             (!value.is_empty()).then(|| (flag.to_owned(), serde_json::json!(value)))
         })
         .collect();
-        args.extend(crate::launch_model::provider_args(
-            crate::session::SessionKind::Codex,
-            &flags,
-        ));
-        let effort = self.effort.trim();
-        if !effort.is_empty() {
-            args.extend([
-                "-c".to_owned(),
-                format!(
-                    "model_reasoning_effort={}",
-                    serde_json::to_string(effort).unwrap()
-                ),
-            ]);
-        }
+        args.extend(crate::launch_model::provider_args(self.agent, &flags));
         args
     }
 

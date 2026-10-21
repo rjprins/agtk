@@ -292,17 +292,18 @@ fn review_settings_trim_effort_and_migrate_saved_approval_policies() {
             sandbox: " read-only ".into(),
             ..Default::default()
         };
-        let mut expected = agtk::launch_model::codex_args_without_agtk_mcp();
+        let mut expected =
+            agtk::launch_model::args_without_agtk_mcp(agtk::session::SessionKind::Codex);
         expected.extend(
             [
                 "--model",
                 "custom-model",
+                "-c",
+                "model_reasoning_effort=\"high\"",
                 "--ask-for-approval",
                 "on-request",
                 "--sandbox",
                 "read-only",
-                "-c",
-                "model_reasoning_effort=\"high\"",
             ]
             .map(str::to_owned),
         );
@@ -314,7 +315,33 @@ fn review_settings_trim_effort_and_migrate_saved_approval_policies() {
     };
     assert_eq!(
         settings.args(),
-        agtk::launch_model::codex_args_without_agtk_mcp()
+        agtk::launch_model::args_without_agtk_mcp(agtk::session::SessionKind::Codex)
+    );
+}
+
+#[test]
+fn claude_review_settings_drop_agtk_tools_and_skip_codex_options() {
+    let settings = agtk::azure::PrReviewSettings {
+        agent: agtk::session::SessionKind::Claude,
+        model: "opus".into(),
+        effort: "max".into(),
+        approval: "never".into(),
+        sandbox: "read-only".into(),
+        permission_mode: "auto".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        settings.args(),
+        [
+            "--disallowedTools=mcp__agtk",
+            "--model",
+            "opus",
+            "--effort",
+            "max",
+            "--permission-mode",
+            "auto",
+        ]
+        .map(str::to_owned)
     );
 }
 
@@ -325,7 +352,7 @@ fn review_settings_preserve_legacy_defaults_and_customize_launch() {
     assert_eq!(preferences.review.prompt(42), "/review-pr 42");
     assert_eq!(
         preferences.review.args(),
-        agtk::launch_model::codex_args_without_agtk_mcp()
+        agtk::launch_model::args_without_agtk_mcp(agtk::session::SessionKind::Codex)
     );
     let mut settings = preferences.review;
     settings.model = "custom-model".into();

@@ -106,7 +106,7 @@ impl PrDialog {
             .build();
         let auto_review = adw::SwitchRow::builder()
             .title("Auto-Review New Attention")
-            .subtitle("Launch a Codex review when a colleague's PR needs attention")
+            .subtitle("Launch a review when a colleague's PR needs attention")
             .build();
         let project = adw::PreferencesGroup::new();
         project.add(&root);
@@ -231,11 +231,30 @@ impl Workspace {
         }
         let current = self.pr_preferences.borrow().review.clone();
         let group = adw::PreferencesGroup::builder()
-            .title("Codex PR Reviews")
+            .title("PR Reviews")
             .description("Applies to automatic reviews and reviews launched through agtkctl or MCP. The Launch dialog uses its selected agent and options.")
             .build();
+        let agent_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        agent_box.add_css_class("linked");
+        agent_box.set_valign(gtk::Align::Center);
+        let mut agent_buttons: Vec<(SessionKind, gtk::ToggleButton)> = Vec::new();
+        for kind in crate::azure::PrReviewSettings::AGENTS {
+            let button = gtk::ToggleButton::with_label(match kind {
+                SessionKind::Claude => "Claude",
+                _ => "Codex",
+            });
+            if let Some((_, first)) = agent_buttons.first() {
+                button.set_group(Some(first));
+            }
+            button.set_active(kind == current.agent);
+            agent_box.append(&button);
+            agent_buttons.push((kind, button));
+        }
+        let agent_row = adw::ActionRow::builder().title("Agent").build();
+        agent_row.add_suffix(&agent_box);
+        group.add(&agent_row);
         let model = adw::EntryRow::builder()
-            .title("Model (empty uses Codex default)")
+            .title("Model (empty uses the agent's default)")
             .text(&current.model)
             .build();
         group.add(&model);
@@ -245,41 +264,100 @@ impl Workspace {
             values: &[&str],
             selected: &str,
         ) -> adw::ComboRow {
+            let row = adw::ComboRow::builder()
+                .title(title)
+                .model(&choice_labels(values))
+                .selected(choice_index(values, selected))
+                .build();
+            group.add(&row);
+            row
+        }
+        fn choice_labels(values: &[&str]) -> gtk::StringList {
             let labels: Vec<&str> = values
                 .iter()
                 .map(|value| {
                     if value.is_empty() {
-                        "Codex default"
+                        "Agent default"
                     } else {
                         value
                     }
                 })
                 .collect();
-            let row = adw::ComboRow::builder()
-                .title(title)
-                .model(&gtk::StringList::new(&labels))
-                .selected(
-                    values
-                        .iter()
-                        .position(|value| *value == selected)
-                        .unwrap_or(0) as u32,
-                )
-                .build();
-            group.add(&row);
-            row
+            gtk::StringList::new(&labels)
         }
-        const EFFORTS: &[&str] = &[
-            "", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
-        ];
+        fn choice_index(values: &[&str], selected: &str) -> u32 {
+            values
+                .iter()
+                .position(|value| *value == selected)
+                .unwrap_or(0) as u32
+        }
+        fn efforts(kind: SessionKind) -> &'static [&'static str] {
+            match kind {
+                SessionKind::Claude => &["", "low", "medium", "high", "xhigh", "max"],
+                _ => &[
+                    "", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+                ],
+            }
+        }
         const APPROVALS: &[&str] = &["", "on-request", "never"];
         const SANDBOXES: &[&str] = &["", "read-only", "workspace-write", "danger-full-access"];
-        let effort = choice(&group, "Reasoning effort", EFFORTS, &current.effort);
+        const PERMISSION_MODES: &[&str] = &[
+            "",
+            "manual",
+            "acceptEdits",
+            "auto",
+            "dontAsk",
+            "bypassPermissions",
+        ];
+        let effort = choice(
+            &group,
+            "Reasoning effort",
+            efforts(current.agent),
+            &current.effort,
+        );
         let approval = choice(&group, "Approval policy", APPROVALS, &current.approval);
         approval.set_subtitle(
             "never prevents approval prompts; commands outside the sandbox will fail.",
         );
         let sandbox = choice(&group, "Sandbox permissions", SANDBOXES, &current.sandbox);
         sandbox.set_subtitle("danger-full-access allows commands without sandbox restrictions.");
+        let permission_mode = choice(
+            &group,
+            "Permission mode",
+            PERMISSION_MODES,
+            &current.permission_mode,
+        );
+        permission_mode.set_subtitle("A background review waits for any prompt it raises.");
+        let agent = Rc::new(Cell::new(current.agent));
+        let show_agent_options = {
+            let (approval, sandbox, permission_mode) =
+                (approval.clone(), sandbox.clone(), permission_mode.clone());
+            move |kind: SessionKind| {
+                approval.set_visible(kind == SessionKind::Codex);
+                sandbox.set_visible(kind == SessionKind::Codex);
+                permission_mode.set_visible(kind == SessionKind::Claude);
+            }
+        };
+        show_agent_options(current.agent);
+        for (kind, button) in &agent_buttons {
+            let (kind, agent, effort, show_agent_options) = (
+                *kind,
+                agent.clone(),
+                effort.clone(),
+                show_agent_options.clone(),
+            );
+            button.connect_toggled(move |button| {
+                if !button.is_active() || agent.get() == kind {
+                    return;
+                }
+                // Keep an effort level both agents know, such as high.
+                let previous = efforts(agent.get())[effort.selected() as usize];
+                agent.set(kind);
+                effort.set_model(Some(&choice_labels(efforts(kind))));
+                effort.set_selected(choice_index(efforts(kind), previous));
+                show_agent_options(kind);
+            });
+        }
         let prompt_group = adw::PreferencesGroup::builder()
             .title("Review Prompt")
             .description("Use {pr_id} for the PR number. Default: /review-pr {pr_id}")
@@ -331,11 +409,14 @@ impl Workspace {
                 workspace.show_error("Workspace is loading");
                 return;
             };
+            let agent = agent.get();
             let settings = crate::azure::PrReviewSettings {
+                agent,
                 model: model.text().trim().to_owned(),
-                effort: EFFORTS[effort.selected() as usize].to_owned(),
+                effort: efforts(agent)[effort.selected() as usize].to_owned(),
                 approval: APPROVALS[approval.selected() as usize].to_owned(),
                 sandbox: SANDBOXES[sandbox.selected() as usize].to_owned(),
+                permission_mode: PERMISSION_MODES[permission_mode.selected() as usize].to_owned(),
                 prompt: text,
             };
             let mut preferences = workspace.pr_preferences.borrow().clone();
@@ -1275,7 +1356,7 @@ impl Workspace {
             project_root,
             item,
             CreateSessionParams {
-                kind: SessionKind::Codex,
+                kind: settings.agent,
                 command: None,
                 args: settings.args(),
                 cwd: None,

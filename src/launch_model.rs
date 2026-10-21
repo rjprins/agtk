@@ -142,8 +142,25 @@ pub fn provider_args(
     let mut args = Vec::new();
     let value = |key: &str| flags.get(key).and_then(Value::as_str);
     let enabled = |key: &str| flags.get(key).and_then(Value::as_bool).unwrap_or(false);
+    // Empty or "default" leaves the choice to the agent's own config.
+    let chosen = |key: &str| {
+        value(key)
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != "default")
+    };
+    if let Some(model) = chosen("--model")
+        && matches!(
+            kind,
+            SessionKind::Claude | SessionKind::Codex | SessionKind::Gemini
+        )
+    {
+        args.extend(["--model".to_owned(), model.to_owned()]);
+    }
     match kind {
         SessionKind::Claude => {
+            if let Some(effort) = chosen("--effort") {
+                args.extend(["--effort".to_owned(), effort.to_owned()]);
+            }
             if let Some(value) = value("--permission-mode") {
                 args.extend(["--permission-mode".to_owned(), value.to_owned()]);
             }
@@ -152,6 +169,15 @@ pub fn provider_args(
             }
         }
         SessionKind::Codex => {
+            if let Some(effort) = chosen("--effort") {
+                args.extend([
+                    "-c".to_owned(),
+                    format!(
+                        "model_reasoning_effort={}",
+                        serde_json::to_string(effort).unwrap()
+                    ),
+                ]);
+            }
             // Codex's automatic modes replace both manual approval and
             // sandbox policy flags. Passing them together makes current
             // Codex reject the launch before the TUI starts.
@@ -190,19 +216,24 @@ pub fn provider_args(
     args
 }
 
-/// Codex arguments that turn off the agtk MCP server for one launch. A PR
-/// review reads a tree its author controls, so it gets no tools to start or
-/// drive other sessions. Codex's sandbox already keeps its shell commands off
-/// agtk's socket. The command keeps the override valid without an agtk entry.
-pub fn codex_args_without_agtk_mcp() -> Vec<String> {
-    [
-        "-c",
-        "mcp_servers.agtk.command=\"true\"",
-        "-c",
-        "mcp_servers.agtk.enabled=false",
-    ]
-    .map(str::to_owned)
-    .to_vec()
+/// Arguments that turn off the agtk MCP server for one launch. A PR review
+/// reads a tree its author controls, so it gets no tools to start or drive
+/// other sessions. Codex's sandbox already keeps its shell commands off agtk's
+/// socket; its command override keeps the config valid without an agtk entry.
+/// Claude drops every tool of the server, even when it skips permission prompts.
+pub fn args_without_agtk_mcp(kind: SessionKind) -> Vec<String> {
+    let args: &[&str] = match kind {
+        SessionKind::Codex => &[
+            "-c",
+            "mcp_servers.agtk.command=\"true\"",
+            "-c",
+            "mcp_servers.agtk.enabled=false",
+        ],
+        // The inline value keeps the variadic flag from taking later arguments.
+        SessionKind::Claude => &["--disallowedTools=mcp__agtk"],
+        _ => &[],
+    };
+    args.iter().copied().map(str::to_owned).collect()
 }
 
 /// The launch flags an agent keeps when it starts again. Anything else in its
@@ -214,7 +245,11 @@ pub fn carried_agent_args(kind: SessionKind, args: &[String]) -> Vec<String> {
             ("--permission-mode", true),
             ("--dangerously-skip-permissions", false),
             ("--model", true),
+            ("--effort", true),
             ("--add-dir", true),
+            // Keeps a PR review away from agtk's tools.
+            ("--disallowedTools", true),
+            ("--disallowed-tools", true),
         ],
         SessionKind::Codex => &[
             ("--dangerously-bypass-approvals-and-sandbox", false),

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use agtk::control::SessionKind;
 use agtk::launch_model::{
-    DEFAULT_BASE_BRANCH, carried_agent_args, choice_matches, codex_args_without_agtk_mcp,
+    DEFAULT_BASE_BRANCH, args_without_agtk_mcp, carried_agent_args, choice_matches,
     directory_choices, path_completions, provider_args, worktree_choices,
 };
 use serde_json::json;
@@ -275,10 +275,40 @@ fn a_restarted_fork_resumes_its_own_conversation_instead_of_forking_again() {
 
 #[test]
 fn a_restarted_pr_review_stays_without_the_agtk_tools() {
-    let mut args = vec!["resume".to_owned(), "old-id".to_owned()];
-    args.extend(codex_args_without_agtk_mcp());
+    for kind in [SessionKind::Codex, SessionKind::Claude] {
+        let mut args = vec!["--resume".to_owned(), "old-id".to_owned()];
+        args.extend(args_without_agtk_mcp(kind));
+        assert_eq!(carried_agent_args(kind, &args), args_without_agtk_mcp(kind));
+    }
+}
+
+#[test]
+fn model_and_effort_map_to_each_agents_flags() {
+    let args = |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+    let flags = [
+        ("--model".to_owned(), json!(" opus ")),
+        ("--effort".to_owned(), json!("high")),
+    ]
+    .into_iter()
+    .collect();
     assert_eq!(
-        carried_agent_args(SessionKind::Codex, &args),
-        codex_args_without_agtk_mcp()
+        provider_args(SessionKind::Claude, &flags),
+        args(&["--model", "opus", "--effort", "high"])
     );
+    assert_eq!(
+        provider_args(SessionKind::Codex, &flags),
+        args(&["--model", "opus", "-c", "model_reasoning_effort=\"high\""])
+    );
+    assert_eq!(
+        provider_args(SessionKind::Gemini, &flags),
+        args(&["--model", "opus"])
+    );
+    let defaults = [
+        ("--model".to_owned(), json!("")),
+        ("--effort".to_owned(), json!("default")),
+    ]
+    .into_iter()
+    .collect();
+    assert!(provider_args(SessionKind::Claude, &defaults).is_empty());
+    assert!(provider_args(SessionKind::Codex, &defaults).is_empty());
 }

@@ -241,7 +241,7 @@ impl<B: ControlBackend> McpServer<B> {
                 ControlCommand::SessionCreate(CreateSessionParams {
                     kind: params.provider.kind(),
                     command: None,
-                    args: params.args,
+                    args: params.agent_args(),
                     cwd: params.cwd,
                     name: params.name,
                     project_root: params.project_root,
@@ -351,6 +351,7 @@ impl<B: ControlBackend> McpServer<B> {
     /// Creates the worktree first, so the agent starts inside it and the
     /// session is grouped under it from the first prompt.
     fn launch_agent_in_new_worktree(&self, params: LaunchAgentArgs) -> Result<ToolOutput, String> {
+        let args = params.agent_args();
         let branch = params.branch.ok_or("branch is required")?;
         let project_root = params
             .project_root
@@ -386,7 +387,7 @@ impl<B: ControlBackend> McpServer<B> {
             .call(ControlCommand::SessionCreate(CreateSessionParams {
                 kind: params.provider.kind(),
                 command: None,
-                args: params.args,
+                args,
                 cwd: Some(path.clone()),
                 name: params.name,
                 project_root: Some(repo_root),
@@ -658,6 +659,24 @@ struct LaunchAgentArgs {
     branch: Option<String>,
     base_branch: Option<String>,
     purpose: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+}
+
+impl LaunchAgentArgs {
+    /// The given arguments plus the provider's own flags for model and effort.
+    fn agent_args(&self) -> Vec<String> {
+        let flags = [("--model", &self.model), ("--effort", &self.effort)]
+            .into_iter()
+            .filter_map(|(flag, value)| Some((flag.to_owned(), json!(value.as_ref()?))))
+            .collect();
+        let mut args = self.args.clone();
+        args.extend(crate::launch_model::provider_args(
+            self.provider.kind(),
+            &flags,
+        ));
+        args
+    }
 }
 
 #[derive(Deserialize)]
@@ -705,7 +724,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "launch_agent",
             "Launch agent",
-            "Launch Codex or Claude directly with optional arguments and initial input. Missing projectRoot and worktreePath are inferred from the Git checkout containing cwd; explicit associations take precedence. The session opens in the background and does not take the selection. Give branch, purpose and projectRoot to create a new worktree first and start the agent inside it; the result then holds both the session and the worktree.",
+            "Launch Codex or Claude directly with optional arguments and initial input. Missing projectRoot and worktreePath are inferred from the Git checkout containing cwd; explicit associations take precedence. The session opens in the background and does not take the selection. Give branch, purpose and projectRoot to create a new worktree first and start the agent inside it; the result then holds both the session and the worktree. model picks the model the agent starts with, such as opus or gpt-6-astra. effort sets the reasoning effort: low, medium, high, xhigh or max for Claude; minimal, low, medium, high, xhigh, max or ultra for Codex. Leave either out for the agent's default.",
             launch_schema(true),
         ),
         tool(
@@ -886,7 +905,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "launch_pr_review",
             "Launch PR review",
-            "Launch Codex with /review-pr for one active PR in its own detached pr-<id> checkout next to the project.",
+            "Launch a review of one active PR in its own detached pr-<id> checkout next to the project, with the agent, model and prompt from the PR review settings.",
             schema(
                 &[
                     ("projectRoot", string()),
@@ -991,6 +1010,8 @@ fn launch_schema(agent: bool) -> Value {
         properties.insert(0, ("provider", enum_values(&["codex", "claude"])));
         properties.push(("args", json!({"type":"array","items":{"type":"string"}})));
         properties.push(("initialInput", string()));
+        properties.push(("model", string()));
+        properties.push(("effort", string()));
         properties.push(("branch", string()));
         properties.push(("baseBranch", string()));
         properties.push(("purpose", string()));
