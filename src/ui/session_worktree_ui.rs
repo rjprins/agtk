@@ -136,7 +136,6 @@ impl Workspace {
             session.record.worktree_path = record.worktree_path;
             session.record.project_root = record.project_root;
             session.record.name = record.name.clone();
-            sessions::show_worktree_caption(&session.worktree_label, &session.record);
             if name_changed {
                 session.label.set_text(&record.name);
                 if matches!(
@@ -151,6 +150,7 @@ impl Workspace {
         if name_changed {
             self.send_pending_agent_name(&id);
         }
+        self.refresh_session_pr_button(&id);
         // Tabs follow the worktree, so the session leaves its old context.
         self.attach_workspace_session(&id);
         self.remember_project(project_root.as_deref());

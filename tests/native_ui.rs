@@ -1475,7 +1475,10 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     };
     let review_pr = row_pr(&app, review_id);
     assert_eq!(review_pr["isVisible"], true, "{review_pr}");
-    assert_eq!(review_pr["label"], "#42");
+    assert_eq!(review_pr["label"], "PR #42");
+    let inspection = app.request("ui.inspect", json!({}));
+    let caption = find(&inspection["root"], &format!("session-caption-{review_id}")).unwrap();
+    assert_eq!(caption["label"], "Colleague · Review feature");
 
     assert_eq!(
         app.request(
@@ -1523,7 +1526,7 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
     loop {
         let node = row_pr(&app, &auto_review_id);
         if node["isVisible"] == true {
-            assert_eq!(node["label"], "#44");
+            assert_eq!(node["label"], "PR #44");
             break;
         }
         assert!(Instant::now() < deadline, "row PR button did not appear");

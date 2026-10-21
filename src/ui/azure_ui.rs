@@ -670,11 +670,11 @@ impl Workspace {
     /// Shows the row's PR button when the session has a PR, matching it from
     /// the project's PR list if it was not linked yet.
     pub(super) fn refresh_session_pr_button(&self, id: &str) {
-        let Some((record, button, label, dot)) = self.sessions.borrow().get(id).map(|session| {
+        let Some((record, caption, button, dot)) = self.sessions.borrow().get(id).map(|session| {
             (
                 session.record.clone(),
+                session.worktree_label.clone(),
                 session.pr_button.clone(),
-                session.pr_label.clone(),
                 session.pr_attention_dot.clone(),
             )
         }) else {
@@ -699,7 +699,16 @@ impl Workspace {
                     .as_deref()
                     .and_then(|root| self.pr_attention(root, pull_request.id))
                     == Some(PrAttention::Review);
-                label.set_text(&format!("#{}", pull_request.id));
+                // People recall a PR by who wrote it and what it is about, not its number.
+                caption.set_text(&pr_caption(&pull_request));
+                caption.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                let worktree = record.worktree_path.as_ref().or(record.cwd.as_ref());
+                let tooltip = match worktree {
+                    Some(path) => format!("{}\n{}", pull_request.title, path.display()),
+                    None => pull_request.title.clone(),
+                };
+                caption.set_tooltip_text(Some(&tooltip));
+                caption.set_visible(true);
                 let mut description =
                     format!("Open PR #{}: {}", pull_request.id, pull_request.title);
                 if has_new_comments {
@@ -711,6 +720,7 @@ impl Workspace {
                 button.set_visible(true);
             }
             None => {
+                sessions::show_worktree_caption(&caption, &record);
                 dot.set_visible(false);
                 button.set_visible(false);
             }
@@ -1779,6 +1789,15 @@ fn session_pr_from_context(record: &SessionRecord, context: &PrContext) -> Optio
         .map(|item| item.pull_request.clone())
 }
 
+/// The sidebar caption for a session's PR: the subject, led by the author unless it is yours.
+fn pr_caption(pull_request: &AzurePr) -> String {
+    if pull_request.is_own_author || pull_request.author.is_empty() {
+        pull_request.title.clone()
+    } else {
+        format!("{} · {}", pull_request.author, pull_request.title)
+    }
+}
+
 const fn attention_name(attention: PrAttention) -> &'static str {
     match attention {
         PrAttention::New => "new",
@@ -1797,7 +1816,7 @@ fn badge(text: &str, class: &str) -> gtk::Label {
 
 #[cfg(test)]
 mod tests {
-    use super::{review_pr_id, session_pr_from_context};
+    use super::{pr_caption, review_pr_id, session_pr_from_context};
     use crate::azure::{AzurePr, AzureRepoRef, PrContext, PrItem};
     use crate::persist::SessionRecord;
     use std::path::PathBuf;
@@ -1853,6 +1872,14 @@ mod tests {
         assert_eq!(review_pr_id("review: PR #42"), Some(42));
         assert_eq!(review_pr_id("review: PR #x"), None);
         assert_eq!(review_pr_id("PR #42"), None);
+    }
+
+    #[test]
+    fn a_pr_caption_names_the_author_unless_it_is_you() {
+        let mut pull_request = pull_request(42, "feature");
+        assert_eq!(pr_caption(&pull_request), "Colleague · Review feature");
+        pull_request.is_own_author = true;
+        assert_eq!(pr_caption(&pull_request), "Review feature");
     }
 
     #[test]

@@ -1196,14 +1196,13 @@ impl Workspace {
         mainline.append(&primary);
         let worktree_label = gtk::Label::new(None);
         worktree_label.set_xalign(0.0);
-        worktree_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
         worktree_label.add_css_class("caption");
         worktree_label.add_css_class("dim-label");
         show_worktree_caption(&worktree_label, &record);
         mainline.append(&worktree_label);
         content.append(&mainline);
-        // Just the number: the sidebar is narrow and the tooltip carries the title.
-        let pr_label = gtk::Label::new(Some("#"));
+        // The caption carries the PR's author and subject; the number is in the tooltip.
+        let pr_label = gtk::Label::new(Some("PR"));
         let pr_contents = gtk::Overlay::new();
         pr_contents.set_child(Some(&pr_label));
         let pr_attention_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -1305,7 +1304,6 @@ impl Workspace {
                 state_label,
                 elapsed_label,
                 pr_button,
-                pr_label,
                 pr_attention_dot,
                 history: Vec::new(),
                 typed_history_pending: 0,
@@ -1343,6 +1341,7 @@ pub(super) fn show_worktree_caption(label: &gtk::Label, record: &SessionRecord) 
         .map(str::to_owned)
         .unwrap_or_else(|| worktree.to_string_lossy().into_owned());
     label.set_text(&name);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     label.set_tooltip_text(Some(&worktree.to_string_lossy()));
     label.set_visible(true);
 }

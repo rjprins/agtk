@@ -101,6 +101,16 @@ impl Workspace {
                     bounds: widget_bounds(&session.row, &self.window),
                     children: vec![
                         UiNode {
+                            id: format!("session-caption-{id}"),
+                            role: "label".to_owned(),
+                            label: Some(session.worktree_label.text().to_string()),
+                            is_visible: session.worktree_label.is_visible(),
+                            is_enabled: true,
+                            is_selected: false,
+                            bounds: widget_bounds(&session.worktree_label, &self.window),
+                            children: Vec::new(),
+                        },
+                        UiNode {
                             id: format!("session-state-{id}"),
                             role: "status".to_owned(),
                             label: Some(format!("{:?}", session.record.state).to_lowercase()),
@@ -113,7 +123,11 @@ impl Workspace {
                         UiNode {
                             id: format!("session-pr-{id}"),
                             role: "button".to_owned(),
-                            label: Some(session.pr_label.text().to_string()),
+                            label: self
+                                .session_pr_cache
+                                .borrow()
+                                .get(&id)
+                                .map(|pull_request| format!("PR #{}", pull_request.id)),
                             is_visible: session.pr_button.is_visible(),
                             is_enabled: session.pr_button.is_sensitive(),
                             is_selected: false,
