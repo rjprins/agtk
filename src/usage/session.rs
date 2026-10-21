@@ -20,6 +20,8 @@ pub struct SessionUsage {
     pub cached: u64,
     pub context_used: Option<u64>,
     pub context_capacity: Option<u64>,
+    /// Where the user's settings make Claude Code auto-compact, below capacity.
+    pub compact_window: Option<u64>,
     pub available: bool,
     pub catching_up: bool,
     pub incomplete: bool,
@@ -33,6 +35,21 @@ impl SessionUsage {
     pub fn context_remaining(&self) -> Option<f64> {
         let capacity = self.context_capacity.filter(|value| *value > 0)?;
         Some(100.0 * capacity.saturating_sub(self.context_used?) as f64 / capacity as f64)
+    }
+
+    /// The context that fits before the session compacts.
+    pub fn context_limit(&self) -> Option<u64> {
+        let capacity = self.context_capacity.filter(|value| *value > 0)?;
+        Some(
+            self.compact_window
+                .map_or(capacity, |window| window.min(capacity)),
+        )
+    }
+
+    /// How far the context is toward its limit, in percent.
+    pub fn context_fill(&self) -> Option<f64> {
+        let limit = self.context_limit()?;
+        Some((100.0 * self.context_used? as f64 / limit as f64).min(100.0))
     }
 }
 
@@ -191,13 +208,29 @@ impl UsageReader {
     }
 }
 
-/// The context window in a Claude Code status line report. Claude's transcripts
-/// never record it, so agtk's status line saves that input for each session.
-pub fn reported_context_window(report: &[u8]) -> Option<u64> {
-    let report: Value = serde_json::from_slice(report).ok()?;
-    report["context_window"]["context_window_size"]
-        .as_u64()
-        .filter(|size| *size > 0)
+/// A Claude Code status line report. Claude's transcripts never record the
+/// context window, so agtk's status line saves that input for each session.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ContextReport {
+    pub window: Option<u64>,
+    pub model: Option<String>,
+    pub project_dir: Option<PathBuf>,
+}
+
+impl ContextReport {
+    pub fn parse(report: &[u8]) -> Option<Self> {
+        let report: Value = serde_json::from_slice(report).ok()?;
+        let text = |value: &Value| value.as_str().map(str::to_owned);
+        Some(Self {
+            window: report["context_window"]["context_window_size"]
+                .as_u64()
+                .filter(|size| *size > 0),
+            model: text(&report["model"]["id"]),
+            project_dir: text(&report["workspace"]["project_dir"])
+                .or_else(|| text(&report["cwd"]))
+                .map(PathBuf::from),
+        })
+    }
 }
 
 fn count(value: &Value, key: &str) -> u64 {
@@ -328,13 +361,29 @@ mod tests {
     fn status_line_reports_supply_the_context_window() {
         let report = json!({"session_id":"a","context_window":{
             "total_input_tokens":0,"context_window_size":1_000_000,"used_percentage":null}});
-        assert_eq!(
-            reported_context_window(report.to_string().as_bytes()),
-            Some(1_000_000)
-        );
+        let window = |report: &Value| {
+            ContextReport::parse(report.to_string().as_bytes()).and_then(|report| report.window)
+        };
+        assert_eq!(window(&report), Some(1_000_000));
         let empty = json!({"context_window":{"context_window_size":0}});
-        assert_eq!(reported_context_window(empty.to_string().as_bytes()), None);
-        assert_eq!(reported_context_window(b"{\"context_window\":"), None);
+        assert_eq!(window(&empty), None);
+        assert_eq!(ContextReport::parse(b"{\"context_window\":"), None);
+    }
+
+    #[test]
+    fn the_auto_compact_window_limits_the_context_fill() {
+        let mut usage = SessionUsage {
+            context_used: Some(200_000),
+            context_capacity: Some(1_000_000),
+            ..Default::default()
+        };
+        assert_eq!(usage.context_fill(), Some(20.0));
+        usage.compact_window = Some(400_000);
+        assert_eq!(usage.context_fill(), Some(50.0));
+        usage.context_used = Some(500_000);
+        assert_eq!(usage.context_fill(), Some(100.0));
+        usage.compact_window = Some(2_000_000);
+        assert_eq!(usage.context_limit(), Some(1_000_000));
     }
 
     #[test]

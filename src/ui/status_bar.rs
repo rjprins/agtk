@@ -1,10 +1,10 @@
 //! Bottom-row presentation and background collection for usage measurements.
 
 use super::*;
-use crate::agent_hooks::context_report_path;
+use crate::agent_hooks::{auto_compact_window, context_report_path};
 use crate::providers::{AgentProvider, DiscoveryRoots};
 use crate::usage::quota::{self, AccountQuota};
-use crate::usage::session::{SessionUsage, UsageReader, reported_context_window};
+use crate::usage::session::{ContextReport, SessionUsage, UsageReader};
 use crate::usage::system::{CpuSample, Memory};
 
 type UsageSelection = Option<(String, Option<String>)>;
@@ -334,10 +334,18 @@ impl Workspace {
             if let Some(usage) = usage.as_mut()
                 && usage.context_capacity.is_none()
                 && let Some(record) = &record
-            {
-                usage.context_capacity = fs::read(context_report_path(&record.socket_path))
+                && let Some(report) = fs::read(context_report_path(&record.socket_path))
                     .ok()
-                    .and_then(|report| reported_context_window(&report));
+                    .and_then(|report| ContextReport::parse(&report))
+            {
+                usage.context_capacity = report.window;
+                usage.compact_window = report.model.and_then(|model| {
+                    auto_compact_window(
+                        &DiscoveryRoots::from_environment().claude_config_dir,
+                        report.project_dir.as_deref(),
+                        &model,
+                    )
+                });
             }
             (collector, key, record, usage, cpu, memory)
         });
@@ -402,7 +410,7 @@ impl Workspace {
                 compact(usage.total())
             ),
             &session_details(&record.name, usage),
-            usage.context_remaining().map(|left| 100.0 - left),
+            usage.context_fill(),
         );
     }
 
@@ -525,6 +533,17 @@ fn session_details(name: &str, usage: &SessionUsage) -> String {
             100.0 - left,
         ),
         _ => "Context capacity is not reported for this session.".to_owned(),
+    };
+    let context = match (
+        usage.compact_window,
+        usage.context_limit(),
+        usage.context_fill(),
+    ) {
+        (Some(_), Some(limit), Some(fill)) => format!(
+            "{context}\nAuto-compacts at {} tokens · {fill:.1}% of the way",
+            compact(limit)
+        ),
+        _ => context,
     };
     let mut details = format!(
         "{name}\n\nSession tokens: {}\nInput: {} ({:.1}% of total)\nCached input: {} ({:.1}% of input)\nOutput: {} ({:.1}% of total)\n\n{context}\nToken totals are separate from account quota.",

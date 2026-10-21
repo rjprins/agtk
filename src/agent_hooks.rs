@@ -50,20 +50,43 @@ pub fn context_report_path(socket: &Path) -> PathBuf {
     socket.with_extension(CONTEXT_EXTENSION)
 }
 
-/// True when Claude Code would show the user's own status line in `cwd`, which
-/// agtk's would replace.
-pub fn has_own_status_line(claude_config_dir: &Path, cwd: Option<&Path>) -> bool {
+/// The user's Claude Code settings that apply in `cwd`, least specific first.
+fn claude_settings(claude_config_dir: &Path, cwd: Option<&Path>) -> Vec<Value> {
     let mut candidates = vec![claude_config_dir.join("settings.json")];
     if let Some(cwd) = cwd {
         candidates.push(cwd.join(".claude/settings.json"));
         candidates.push(cwd.join(".claude/settings.local.json"));
     }
-    candidates.into_iter().any(|path| {
-        fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .is_some_and(|settings| !settings["statusLine"].is_null())
-    })
+    candidates
+        .into_iter()
+        .filter_map(|path| {
+            fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        })
+        .collect()
+}
+
+/// True when Claude Code would show the user's own status line in `cwd`, which
+/// agtk's would replace.
+pub fn has_own_status_line(claude_config_dir: &Path, cwd: Option<&Path>) -> bool {
+    claude_settings(claude_config_dir, cwd)
+        .iter()
+        .any(|settings| !settings["statusLine"].is_null())
+}
+
+/// The token count at which Claude Code auto-compacts `model` in `cwd`, when
+/// the user's settings set one.
+pub fn auto_compact_window(
+    claude_config_dir: &Path,
+    cwd: Option<&Path>,
+    model: &str,
+) -> Option<u64> {
+    claude_settings(claude_config_dir, cwd)
+        .iter()
+        .rev()
+        .find_map(|settings| settings["modelSettings"][model]["autoCompactWindow"].as_u64())
+        .filter(|window| *window > 0)
 }
 
 /// With `sessions_dir`, also adds the status line that reports the context window.
@@ -120,4 +143,30 @@ pub fn ensure_claude_hook_settings(
         fs::rename(&temporary, &path)?;
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_most_specific_settings_set_the_auto_compact_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let (user, project) = (dir.path().join("user"), dir.path().join("project"));
+        fs::create_dir_all(project.join(".claude")).unwrap();
+        fs::create_dir_all(&user).unwrap();
+        let write = |path: PathBuf, window: u64| {
+            let settings = json!({"modelSettings":{"opus":{"autoCompactWindow":window}}});
+            fs::write(path, settings.to_string()).unwrap();
+        };
+        let window = |model| auto_compact_window(&user, Some(&project), model);
+        assert_eq!(window("opus"), None);
+        write(user.join("settings.json"), 800_000);
+        assert_eq!(window("opus"), Some(800_000));
+        write(project.join(".claude/settings.json"), 300_000);
+        assert_eq!(window("opus"), Some(300_000));
+        write(project.join(".claude/settings.local.json"), 200_000);
+        assert_eq!(window("opus"), Some(200_000));
+        assert_eq!(window("sonnet"), None);
+    }
 }
