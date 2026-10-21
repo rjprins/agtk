@@ -1,5 +1,5 @@
 //! The daily brief an assistant posts over MCP: items grouped in sections,
-//! each with read and removed marks that survive re-posts of the same id.
+//! each with read, hidden and done marks that survive re-posts of the same id.
 
 use std::collections::HashSet;
 
@@ -12,7 +12,6 @@ pub const PREFERENCE_KEY: &str = "brief";
 const MAX_ITEMS: usize = 500;
 const MAX_POSTED_ITEMS: usize = 200;
 const MAX_REMEMBERED: usize = 2000;
-const MAX_SECTIONS: usize = 100;
 /// How long agtk remembers the marks of an item the assistant took out.
 pub const REMEMBER_MILLIS: u64 = 30 * 24 * 60 * 60 * 1000;
 
@@ -37,6 +36,9 @@ pub struct BriefPostParams {
     /// Items the assistant takes out of the brief.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retire_ids: Vec<String>,
+    /// Hidden items the assistant shows again because they need attention.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unhide_ids: Vec<String>,
 }
 
 impl BriefPostParams {
@@ -59,6 +61,9 @@ impl BriefPostParams {
         for section in &self.replace_sections {
             validate_section(section)?;
         }
+        for id in &self.unhide_ids {
+            validate_id(id)?;
+        }
         for id in &self.retire_ids {
             validate_id(id)?;
             if ids.contains(id.as_str()) {
@@ -80,7 +85,8 @@ pub struct BriefItem {
     pub updated_at: u64,
     pub read: bool,
     /// Hidden in the panel; the underlying task or mail is untouched.
-    pub removed: bool,
+    #[serde(alias = "removed")]
+    pub hidden: bool,
     /// Marked done in the panel. The assistant completes the task itself.
     #[serde(default)]
     pub done: bool,
@@ -95,7 +101,8 @@ pub struct BriefItem {
 pub struct RetiredItem {
     pub id: String,
     pub read: bool,
-    pub removed: bool,
+    #[serde(alias = "removed")]
+    pub hidden: bool,
     #[serde(default)]
     pub done: bool,
     #[serde(default)]
@@ -109,6 +116,7 @@ pub struct BriefChanges {
     pub added: Vec<String>,
     pub updated: Vec<String>,
     pub retired: Vec<String>,
+    pub unhidden: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,7 +125,7 @@ pub struct Brief {
     /// In the order the panel shows them within each section.
     #[serde(default)]
     pub items: Vec<BriefItem>,
-    /// Section names in the order they were first posted.
+    /// Names of the sections that hold items, in the order they were first posted.
     #[serde(default)]
     pub sections: Vec<String>,
     #[serde(default)]
@@ -126,10 +134,13 @@ pub struct Brief {
 
 impl Brief {
     pub fn from_value_lossy(value: Value) -> Self {
-        serde_json::from_value(value).unwrap_or_else(|error| {
+        let mut brief: Self = serde_json::from_value(value).unwrap_or_else(|error| {
             eprintln!("agtk: ignoring saved brief: {error}");
             Self::default()
-        })
+        });
+        // Briefs saved before empty sections were dropped can still list some.
+        brief.drop_empty_sections();
+        brief
     }
 
     /// Applies one post: retires replaced and named items, then adds or
@@ -194,7 +205,7 @@ impl Brief {
                     posted_at: now,
                     updated_at: now,
                     read: marks.as_ref().is_some_and(|marks| marks.read),
-                    removed: marks.as_ref().is_some_and(|marks| marks.removed),
+                    hidden: marks.as_ref().is_some_and(|marks| marks.hidden),
                     done: marks.as_ref().is_some_and(|marks| marks.done),
                     done_at: marks.and_then(|marks| marks.done_at),
                 });
@@ -209,16 +220,21 @@ impl Brief {
         }
         for item in taken {
             changes.retired.push(item.id.clone());
-            if item.read || item.removed || item.done {
+            if item.read || item.hidden || item.done {
                 next.retired.retain(|retired| retired.id != item.id);
                 next.retired.push(RetiredItem {
                     id: item.id,
                     read: item.read,
-                    removed: item.removed,
+                    hidden: item.hidden,
                     done: item.done,
                     done_at: item.done_at,
                     retired_at: now,
                 });
+            }
+        }
+        for id in &params.unhide_ids {
+            if next.unhide(id) {
+                changes.unhidden.push(id.clone());
             }
         }
         next.forget_old(now);
@@ -238,7 +254,7 @@ impl Brief {
 
     pub fn mark_all_read(&mut self) -> bool {
         let mut changed = false;
-        for item in self.items.iter_mut().filter(|item| !item.removed) {
+        for item in self.items.iter_mut().filter(|item| !item.hidden) {
             changed |= !item.read;
             item.read = true;
         }
@@ -256,15 +272,48 @@ impl Brief {
         true
     }
 
+    /// Marks one item read, or unread again.
+    pub fn toggle_read(&mut self, id: &str) -> bool {
+        let Some(item) = self.items.iter_mut().find(|item| item.id == id) else {
+            return false;
+        };
+        item.read = !item.read;
+        true
+    }
+
     /// Hides one item. It stays in the brief, so a re-post keeps it hidden.
-    pub fn remove(&mut self, id: &str) -> bool {
+    pub fn hide(&mut self, id: &str) -> bool {
         match self.items.iter_mut().find(|item| item.id == id) {
-            Some(item) if !item.removed => {
-                item.removed = true;
+            Some(item) if !item.hidden => {
+                item.hidden = true;
                 true
             }
             _ => false,
         }
+    }
+
+    /// Shows a hidden item again, also one that left the brief.
+    pub fn unhide(&mut self, id: &str) -> bool {
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
+            let changed = item.hidden;
+            item.hidden = false;
+            return changed;
+        }
+        let Some(position) = self.retired.iter().position(|retired| retired.id == id) else {
+            return false;
+        };
+        let retired = &mut self.retired[position];
+        let changed = retired.hidden;
+        retired.hidden = false;
+        if !retired.read && !retired.done {
+            self.retired.remove(position);
+        }
+        changed
+    }
+
+    /// Hidden items, in brief order, for the panel's Hidden section.
+    pub fn hidden_items(&self) -> Vec<&BriefItem> {
+        self.items.iter().filter(|item| item.hidden).collect()
     }
 
     /// The items the panel shows, grouped by section in section order.
@@ -274,7 +323,7 @@ impl Brief {
             .iter()
             .map(|section| (section.as_str(), Vec::new()))
             .collect::<Vec<_>>();
-        for item in self.items.iter().filter(|item| !item.removed) {
+        for item in self.items.iter().filter(|item| !item.hidden) {
             match sections.iter_mut().find(|(name, _)| *name == item.section) {
                 Some((_, items)) => items.push(item),
                 None => sections.push((item.section.as_str(), vec![item])),
@@ -294,7 +343,7 @@ impl Brief {
     pub fn unread_count(&self) -> usize {
         self.items
             .iter()
-            .filter(|item| !item.read && !item.removed)
+            .filter(|item| !item.read && !item.hidden)
             .count()
     }
 
@@ -303,16 +352,14 @@ impl Brief {
             .retain(|retired| now.saturating_sub(retired.retired_at) < REMEMBER_MILLIS);
         let excess = self.retired.len().saturating_sub(MAX_REMEMBERED);
         self.retired.drain(..excess);
-        if self.sections.len() > MAX_SECTIONS {
-            let items = &self.items;
-            let mut excess = self.sections.len() - MAX_SECTIONS;
-            self.sections.retain(|section| {
-                let unused = !items.iter().any(|item| &item.section == section);
-                let drop = excess > 0 && unused;
-                excess -= usize::from(drop);
-                !drop
-            });
-        }
+        self.drop_empty_sections();
+    }
+
+    /// A section with no items left, not even hidden ones, leaves the order.
+    fn drop_empty_sections(&mut self) {
+        let items = &self.items;
+        self.sections
+            .retain(|section| items.iter().any(|item| &item.section == section));
     }
 }
 

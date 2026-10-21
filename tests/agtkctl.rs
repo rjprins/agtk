@@ -164,6 +164,7 @@ fn brief_commands_have_a_typed_protocol_mapping() {
             }],
             replace_sections: vec!["Tasks".to_owned()],
             retire_ids: Vec::new(),
+            unhide_ids: Vec::new(),
         }),
     );
 }

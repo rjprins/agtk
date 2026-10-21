@@ -203,6 +203,10 @@ impl Workspace {
                     .preference(crate::brief::PREFERENCE_KEY)?
                     .map(crate::brief::Brief::from_value_lossy)
                     .unwrap_or_default();
+                let brief_hidden_expanded = store
+                    .preference(brief_ui::HIDDEN_EXPANDED_PREFERENCE)?
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
                 let changes_sidebar_open = store
                     .preference("changesSidebarOpen")?
                     .and_then(|value| value.as_bool());
@@ -295,6 +299,7 @@ impl Workspace {
                     session_input_pending,
                     claude_presets,
                     brief,
+                    brief_hidden_expanded,
                     changes_sidebar_open,
                     changes_sidebar_page,
                     changes_base_refs,
@@ -322,6 +327,7 @@ impl Workspace {
                     session_input_pending,
                     claude_presets,
                     brief,
+                    brief_hidden_expanded,
                     changes_sidebar_open,
                     changes_sidebar_page,
                     changes_base_refs,
@@ -351,6 +357,7 @@ impl Workspace {
                     *workspace.session_input_pending.borrow_mut() = session_input_pending;
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
+                    workspace.brief_hidden_expanded.set(brief_hidden_expanded);
                     workspace.load_brief(brief);
                     workspace.changes.state.borrow_mut().base_ref_by_context = changes_base_refs;
                     workspace.changes.updating_base.set(true);

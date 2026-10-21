@@ -431,7 +431,8 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
                         "link":"https://dev.azure.com/org/project/_git/repo/pullrequest/105687"
                     }],
                     "replaceSections":["Waiting on you"],
-                    "retireIds":["ado-pr:105600"]
+                    "retireIds":["ado-pr:105600"],
+                    "unhideIds":["gmail:abc"]
                 }
             }),
         ))
@@ -459,6 +460,7 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
                 }],
                 replace_sections: vec!["Waiting on you".to_owned()],
                 retire_ids: vec!["ado-pr:105600".to_owned()],
+                unhide_ids: vec!["gmail:abc".to_owned()],
             }),
             ControlCommand::BriefGet,
         ]

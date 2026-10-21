@@ -10,15 +10,19 @@ Decisions:
 2. agtk stores the brief as the `brief` preference in its own database, like PR
    attention. MCP and `agtkctl` are the only ways in.
 3. The assistant decides what leaves the brief: `replaceSections` and
-   `retireIds`. Nothing expires per day. When an item leaves, agtk keeps its
-   read, removed and done marks for 30 days, only if one of them is set. So a
+   `retireIds`. Nothing expires per day. A section with no items leaves the
+   brief. When an item leaves, agtk keeps its
+   read, hidden and done marks for 30 days, only if one of them is set. So a
    task that comes back the next morning stays hidden, read or done.
-4. Removing an item only hides it. agtk never changes the task, mail or PR.
-5. Read, removed and done are set in the panel only. There is no MCP tool for
-   them, so the assistant cannot mark things as seen or done for the user.
+4. Hiding an item moves it to a collapsed Hidden section at the bottom, like
+   Inactive Projects in the sidebar. agtk never changes the task, mail or PR.
+   Hidden was called removed before; saved briefs with `removed` still load.
+5. Read and done are set in the panel only, so the assistant cannot mark things
+   as seen or done for the user. The assistant can unhide items with
+   `unhideIds` when they need attention again. It cannot hide them.
 6. Done is a request to the assistant. agtk records when it was set, and the
    assistant completes the Todoist task on its next run. Clicking the check mark
    again clears it. Done also marks the item read.
-7. Clicking a row marks it read. The link has its own button, so reading an
-   item does not open a browser.
+7. Clicking a row marks it read, and clicking it again marks it unread. The
+   link has its own button, so reading an item does not open a browser.
 8. No keyboard shortcut for now.

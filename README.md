@@ -140,7 +140,7 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 - A session that works on a PR, or reviews one, shows a PR button in its sidebar row and a PR bar above its terminal. Both open the PR in the browser.
 - Linked Claude, Codex and Gemini agents automatically receive new PR comments and source branch pushes. Polling runs every two minutes while agtk is open, including when its window is unfocused. The first poll establishes a baseline; later updates are deduplicated per session and queued across restarts until the agent is resting. Delivery waits while you focus the terminal, have an unsubmitted draft, or the agent is busy or asking for input. Comments by your signed-in Azure account are skipped to avoid reply loops. The agent receives the PR link, changed commit and comment thread IDs, then fetches the details and updates its checkout as part of its existing task.
 - Emacs: open Magit or a branch review for the selected session.
-- Daily brief: an assistant posts your brief over MCP, and the Brief page in the right sidebar shows it by section. New items are bold with a dot. Click an item to mark it read. Use its buttons to open the link, mark it done, or remove it. Click the check mark again to undo done. Done and remove only change the panel: agtk does not change the task or mail. Your assistant reads the done marks and completes the task. See [Daily brief](#daily-brief).
+- Daily brief: an assistant posts your brief over MCP, and the Brief page in the right sidebar shows it by section. New items are bold with a dot. Click an item to mark it read, and click it again to mark it unread. Use its buttons to open the link, mark it done, or hide it. Click the check mark again to undo done. Hidden items go to Hidden at the bottom of the page. Open Hidden and use the eye button to show an item again. Done and hide only change the panel: agtk does not change the task or mail. Your assistant reads the done marks and completes the task. See [Daily brief](#daily-brief).
 - A command line tool (`agtkctl`) and an MCP server (`agtk-mcp`) control agtk from scripts and agents. Both use a local socket. Nothing listens on the network.
 
 ## Keyboard shortcuts
@@ -265,13 +265,14 @@ The tools cover sessions, terminal input and text, diffs, worktrees, recent conv
 
 `post_brief` adds items to the brief. Each item has a stable `id`, such as `ado-pr:105687` or `gmail:THREAD_ID`, a `section`, `text`, and an optional http or https `link`.
 
-- Post an existing `id` to update it. It keeps its read, removed and done marks.
+- Post an existing `id` to update it. It keeps its read, hidden and done marks.
 - A new `id` shows as unread.
-- `replaceSections` replaces all items of those sections with the posted ones, in posted order. Post no items for a section to empty it.
+- `replaceSections` replaces all items of those sections with the posted ones, in posted order. Post no items for a section to empty it. A section with no items leaves the brief.
 - `retireIds` takes items out of the brief.
+- `unhideIds` shows hidden items again, for example when they need attention again. It does not change read or done.
 - agtk keeps the marks of items that left the brief for 30 days. If the same `id` comes back, so do its marks.
 
-`get_brief` returns the items with `read`, `removed` and `done`, the section order, and `retired`: the marks agtk still keeps for items that left the brief. `doneAt` is when the item was marked done, in Unix milliseconds. Skip items that are read, removed or done. For a done Todoist task, complete the task in Todoist, then take the item out with `retireIds`.
+`get_brief` returns the items with `read`, `hidden` and `done`, the sections that hold items, in order, and `retired`: the marks agtk still keeps for items that left the brief. `doneAt` is when the item was marked done, in Unix milliseconds. Skip items that are read, hidden or done. For a done Todoist task, complete the task in Todoist, then take the item out with `retireIds`.
 
 From a shell, run `agtkctl brief` to read the brief, or `agtkctl brief post --json JSON` to post.
 

@@ -3504,7 +3504,7 @@ fn files_page_lists_the_worktree_and_opens_files_read_only() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
-fn brief_read_and_removed_marks_survive_reposts_and_restarts() {
+fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
         if node["id"] == id {
             return Some(node);
@@ -3531,8 +3531,8 @@ fn brief_read_and_removed_marks_survive_reposts_and_restarts() {
         json!(["ado-pr:1", "todoist:7", "gmail:abc"])
     );
 
-    app.activate_target_action("brief-read", "ado-pr:1");
-    app.activate_target_action("brief-remove", "todoist:7");
+    app.activate_target_action("brief-toggle-read", "ado-pr:1");
+    app.activate_target_action("brief-hide", "todoist:7");
     let brief = app.request("brief.get", json!({}));
     assert_eq!(brief["unreadCount"], 1, "{brief}");
     let marks = |brief: &Value| {
@@ -3544,7 +3544,7 @@ fn brief_read_and_removed_marks_survive_reposts_and_restarts() {
                 (
                     item["id"].as_str().unwrap().to_owned(),
                     item["read"].as_bool().unwrap(),
-                    item["removed"].as_bool().unwrap(),
+                    item["hidden"].as_bool().unwrap(),
                 )
             })
             .collect::<Vec<_>>()
@@ -3575,12 +3575,24 @@ fn brief_read_and_removed_marks_survive_reposts_and_restarts() {
         shown,
         [
             ("brief-item:ado-pr:1", false),
-            ("brief-item:gmail:abc", true)
+            ("brief-item:gmail:abc", true),
+            ("brief-hidden", false)
         ]
     );
+    // Hidden starts collapsed; opening it lists the hidden item and is remembered.
+    let hidden = find(page, "brief-hidden").unwrap();
+    assert_eq!(hidden["label"], "Hidden 1");
+    assert_eq!(hidden["children"][0]["isVisible"], false);
+    app.activate_action("brief-toggle-hidden");
 
     app.stop();
     app.start();
+    app.request("ui.show", json!({"surface":"brief"}));
+    let inspection = app.request("ui.inspect", json!({}));
+    let hidden = find(&inspection["root"], "brief-hidden").unwrap();
+    assert_eq!(hidden["isSelected"], true);
+    assert_eq!(hidden["children"][0]["id"], "brief-item:todoist:7");
+    assert_eq!(hidden["children"][0]["isVisible"], true);
     let reposted = app.request(
         "brief.post",
         json!({"items":items(" (updated)"),"replaceSections":["Waiting on you","Tasks"]}),
@@ -3591,11 +3603,24 @@ fn brief_read_and_removed_marks_survive_reposts_and_restarts() {
 
     app.activate_action("brief-read-all");
     assert_eq!(app.request("brief.get", json!({}))["unreadCount"], 0);
+
+    // The assistant unhides an item that needs attention again; read stays,
+    // and Mark all read skipped it while it was hidden.
+    let unhidden = app.request("brief.post", json!({"items":[],"unhideIds":["todoist:7"]}));
+    assert_eq!(unhidden["changes"]["unhidden"], json!(["todoist:7"]));
+    assert_eq!(marks(&unhidden)[1], ("todoist:7".to_owned(), false, false));
+    // The panel's unhide button does the same.
+    app.activate_target_action("brief-hide", "gmail:abc");
+    app.activate_target_action("brief-unhide", "gmail:abc");
+    let brief = app.request("brief.get", json!({}));
+    assert_eq!(marks(&brief)[2], ("gmail:abc".to_owned(), true, false));
+    let inspection = app.request("ui.inspect", json!({}));
+    assert!(find(&inspection["root"], "brief-hidden").is_none());
 }
 
 #[test]
 #[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
-fn clicking_a_brief_row_marks_it_read_and_done_toggles_and_survives_restarts() {
+fn clicking_a_brief_row_toggles_read_and_done_toggles_and_survives_restarts() {
     use glib::variant::ToVariant;
 
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
@@ -3676,17 +3701,9 @@ fn clicking_a_brief_row_marks_it_read_and_done_toggles_and_survives_restarts() {
     key(125, false);
     thread::sleep(Duration::from_millis(500));
 
-    let inspection = app.request("ui.inspect", json!({}));
-    let row = find(&inspection["root"], "brief-item:gmail:abc").unwrap();
-    let bounds = &row["bounds"];
     // The first click in a headless session only activates the window.
     click(160.0, 400.0);
     thread::sleep(Duration::from_millis(200));
-    // The row's text, left of its buttons.
-    click(
-        bounds["x"].as_f64().unwrap() + 40.0,
-        bounds["y"].as_f64().unwrap() + bounds["height"].as_f64().unwrap() / 2.0,
-    );
     let item = |brief: &Value, id: &str| {
         brief["items"]
             .as_array()
@@ -3696,19 +3713,32 @@ fn clicking_a_brief_row_marks_it_read_and_done_toggles_and_survives_restarts() {
             .unwrap()
             .clone()
     };
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        let brief = app.request("brief.get", json!({}));
-        if item(&brief, "gmail:abc")["read"] == true {
-            assert_eq!(item(&brief, "todoist:7")["read"], false);
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "a row click did not mark it read: {brief}"
+    let click_row = |id: &str, read: bool| {
+        let inspection = app.request("ui.inspect", json!({}));
+        let bounds =
+            find(&inspection["root"], &format!("brief-item:{id}")).unwrap()["bounds"].clone();
+        // The row's text, left of its buttons.
+        click(
+            bounds["x"].as_f64().unwrap() + 40.0,
+            bounds["y"].as_f64().unwrap() + bounds["height"].as_f64().unwrap() / 2.0,
         );
-        thread::sleep(Duration::from_millis(30));
-    }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let brief = app.request("brief.get", json!({}));
+            if item(&brief, id)["read"] == read {
+                assert_eq!(item(&brief, "todoist:7")["read"], false);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "a row click did not set read to {read}: {brief}"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
+    };
+    click_row("gmail:abc", true);
+    click_row("gmail:abc", false);
+    click_row("gmail:abc", true);
 
     app.activate_target_action("brief-done", "todoist:7");
     let brief = app.request("brief.get", json!({}));

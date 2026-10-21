@@ -886,29 +886,47 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
     let brief = workspace.brief.borrow();
     let rows = std::iter::successors(page.rows.first_child(), |row| row.next_sibling())
         .collect::<Vec<_>>();
-    let children = brief
+    let item_node = |item: &crate::brief::BriefItem, visible: bool| UiNode {
+        id: format!("brief-item:{}", item.id),
+        role: "listitem".to_owned(),
+        label: Some(format!(
+            "{}: {}{}",
+            item.section,
+            item.text,
+            if item.done { " (done)" } else { "" }
+        )),
+        is_visible: visible,
+        is_enabled: true,
+        is_selected: !item.read,
+        bounds: rows
+            .iter()
+            .find(|row| row.widget_name() == item.id.as_str())
+            .map_or_else(Bounds::default, |row| widget_bounds(row, &workspace.window)),
+        children: Vec::new(),
+    };
+    let mut children = brief
         .visible_sections()
         .into_iter()
         .flat_map(|(_, items)| items)
-        .map(|item| UiNode {
-            id: format!("brief-item:{}", item.id),
-            role: "listitem".to_owned(),
-            label: Some(format!(
-                "{}: {}{}",
-                item.section,
-                item.text,
-                if item.done { " (done)" } else { "" }
-            )),
+        .map(|item| item_node(item, page_visible))
+        .collect::<Vec<_>>();
+    let hidden = brief.hidden_items();
+    if !hidden.is_empty() {
+        let expanded = workspace.brief_hidden_expanded.get();
+        children.push(UiNode {
+            id: "brief-hidden".to_owned(),
+            role: "group".to_owned(),
+            label: Some(format!("Hidden {}", hidden.len())),
             is_visible: page_visible,
             is_enabled: true,
-            is_selected: !item.read,
-            bounds: rows
-                .iter()
-                .find(|row| row.widget_name() == item.id.as_str())
-                .map_or_else(Bounds::default, |row| widget_bounds(row, &workspace.window)),
-            children: Vec::new(),
-        })
-        .collect();
+            is_selected: expanded,
+            bounds: Bounds::default(),
+            children: hidden
+                .into_iter()
+                .map(|item| item_node(item, page_visible && expanded))
+                .collect(),
+        });
+    }
     UiNode {
         id: "brief-page".to_owned(),
         role: "tabpanel".to_owned(),

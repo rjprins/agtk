@@ -5,6 +5,7 @@ use crate::brief::{Brief, BriefItem, BriefPostParams, PREFERENCE_KEY};
 use crate::persist::now_millis;
 
 pub(super) const BRIEF_PAGE: &str = "brief";
+pub(super) const HIDDEN_EXPANDED_PREFERENCE: &str = "briefHiddenExpanded";
 const EMPTY_TEXT: &str = "No brief yet. Your assistant posts it with the post_brief MCP tool.";
 
 #[derive(Clone)]
@@ -21,7 +22,7 @@ impl BriefPage {
         toolbar.set_margin_start(12);
         toolbar.set_margin_end(12);
         toolbar.set_margin_bottom(4);
-        let hint = gtk::Label::new(Some("Removing only hides an item."));
+        let hint = gtk::Label::new(Some("Click an item to mark it read or unread."));
         hint.set_xalign(0.0);
         hint.set_hexpand(true);
         hint.set_wrap(true);
@@ -57,14 +58,17 @@ impl BriefPage {
 
 impl Workspace {
     pub(super) fn install_brief_actions(&self) {
-        self.add_target_action("brief-read", |workspace, id| {
-            workspace.change_brief(|brief| brief.mark_read(id));
+        self.add_target_action("brief-toggle-read", |workspace, id| {
+            workspace.change_brief(|brief| brief.toggle_read(id));
         });
         self.add_target_action("brief-done", |workspace, id| {
             workspace.change_brief(|brief| brief.toggle_done(id, now_millis()));
         });
-        self.add_target_action("brief-remove", |workspace, id| {
-            workspace.change_brief(|brief| brief.remove(id));
+        self.add_target_action("brief-hide", |workspace, id| {
+            workspace.change_brief(|brief| brief.hide(id));
+        });
+        self.add_target_action("brief-unhide", |workspace, id| {
+            workspace.change_brief(|brief| brief.unhide(id));
         });
         self.add_target_action("brief-open", |workspace, id| {
             let link = workspace
@@ -82,6 +86,15 @@ impl Workspace {
         let action = gio::SimpleAction::new("brief-read-all", None);
         let workspace = self.clone();
         action.connect_activate(move |_, _| workspace.change_brief(Brief::mark_all_read));
+        self.window.add_action(&action);
+        let action = gio::SimpleAction::new("brief-toggle-hidden", None);
+        let workspace = self.clone();
+        action.connect_activate(move |_, _| {
+            let expanded = !workspace.brief_hidden_expanded.get();
+            workspace.brief_hidden_expanded.set(expanded);
+            workspace.save_preference(HIDDEN_EXPANDED_PREFERENCE, serde_json::json!(expanded));
+            workspace.render_brief();
+        });
         self.window.add_action(&action);
     }
 
@@ -179,7 +192,8 @@ impl Workspace {
         };
         self.changes.pages.page(&page.root).set_title(Some(&title));
         let sections = brief.visible_sections();
-        if sections.is_empty() {
+        let hidden = brief.hidden_items();
+        if sections.is_empty() && hidden.is_empty() {
             let message = gtk::Label::new(Some(EMPTY_TEXT));
             message.set_wrap(true);
             message.set_margin_top(24);
@@ -202,7 +216,70 @@ impl Workspace {
                 page.rows.append(&brief_row(item));
             }
         }
+        if hidden.is_empty() {
+            return;
+        }
+        let expanded = self.brief_hidden_expanded.get();
+        page.rows.append(&hidden_header(hidden.len(), expanded));
+        if expanded {
+            for item in hidden {
+                page.rows.append(&hidden_row(item));
+            }
+        }
     }
+}
+
+/// Heads the hidden items at the bottom; the list under it starts collapsed.
+fn hidden_header(count: usize, expanded: bool) -> gtk::Button {
+    let contents = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    contents.add_css_class("dim-label");
+    let icon = gtk::Image::from_icon_name(if expanded {
+        "pan-down-symbolic"
+    } else {
+        "pan-end-symbolic"
+    });
+    icon.set_pixel_size(14);
+    let label = gtk::Label::new(Some("Hidden"));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.add_css_class("caption-heading");
+    let count_label = gtk::Label::new(Some(&count.to_string()));
+    count_label.add_css_class("numeric");
+    contents.append(&icon);
+    contents.append(&label);
+    contents.append(&count_label);
+    let toggle = gtk::Button::builder()
+        .child(&contents)
+        .action_name("win.brief-toggle-hidden")
+        .tooltip_text(if expanded {
+            "Collapse hidden items"
+        } else {
+            "Show hidden items"
+        })
+        .build();
+    toggle.set_margin_top(10);
+    toggle.add_css_class("flat");
+    toggle.update_state(&[gtk::accessible::State::Expanded(Some(expanded))]);
+    toggle
+}
+
+fn hidden_row(item: &BriefItem) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    row.set_widget_name(&item.id);
+    row.set_margin_start(18);
+    let text = gtk::Label::new(Some(&item.text));
+    text.set_xalign(0.0);
+    text.set_hexpand(true);
+    text.set_wrap(true);
+    text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    text.add_css_class("dim-label");
+    text.set_tooltip_text(Some(&item.section));
+    row.append(&text);
+    let unhide = brief_button("view-reveal-symbolic", "Unhide");
+    unhide.set_action_name(Some("win.brief-unhide"));
+    unhide.set_action_target_value(Some(&item.id.to_variant()));
+    row.append(&unhide);
+    row
 }
 
 fn brief_row(item: &BriefItem) -> gtk::Box {
@@ -233,19 +310,21 @@ fn brief_row(item: &BriefItem) -> gtk::Box {
     }
     row.append(&text);
     let target = item.id.to_variant();
-    if !item.read {
-        row.set_tooltip_text(Some("Click to mark read"));
-        row.set_cursor_from_name(Some("pointer"));
-        // Buttons claim their own clicks, so only the rest of the row marks it read.
-        let click = gtk::GestureClick::new();
-        let click_target = target.clone();
-        click.connect_released(move |gesture, _, _, _| {
-            if let Some(row) = gesture.widget() {
-                let _ = row.activate_action("win.brief-read", Some(&click_target));
-            }
-        });
-        row.add_controller(click);
-    }
+    row.set_tooltip_text(Some(if item.read {
+        "Click to mark unread"
+    } else {
+        "Click to mark read"
+    }));
+    row.set_cursor_from_name(Some("pointer"));
+    // Buttons claim their own clicks, so only the rest of the row toggles read.
+    let click = gtk::GestureClick::new();
+    let click_target = target.clone();
+    click.connect_released(move |gesture, _, _, _| {
+        if let Some(row) = gesture.widget() {
+            let _ = row.activate_action("win.brief-toggle-read", Some(&click_target));
+        }
+    });
+    row.add_controller(click);
     if item.link.is_some() {
         let open = brief_button("web-browser-symbolic", "Open the link and mark it read");
         open.set_action_name(Some("win.brief-open"));
@@ -265,13 +344,13 @@ fn brief_row(item: &BriefItem) -> gtk::Box {
     done.set_action_name(Some("win.brief-done"));
     done.set_action_target_value(Some(&target));
     row.append(&done);
-    let remove = brief_button(
-        "window-close-symbolic",
-        "Remove from the brief. The task or mail itself is not changed.",
+    let hide = brief_button(
+        "view-conceal-symbolic",
+        "Hide. The task or mail itself is not changed.",
     );
-    remove.set_action_name(Some("win.brief-remove"));
-    remove.set_action_target_value(Some(&target));
-    row.append(&remove);
+    hide.set_action_name(Some("win.brief-hide"));
+    hide.set_action_target_value(Some(&target));
+    row.append(&hide);
     row
 }
 

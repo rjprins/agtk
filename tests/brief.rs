@@ -21,7 +21,7 @@ fn replace(sections: &[&str], items: Vec<BriefItemInput>) -> BriefPostParams {
     BriefPostParams {
         items,
         replace_sections: sections.iter().map(|&section| section.to_owned()).collect(),
-        retire_ids: Vec::new(),
+        ..BriefPostParams::default()
     }
 }
 
@@ -72,7 +72,7 @@ fn new_items_are_unread_and_grouped_in_posted_section_order() {
         ]
     );
     assert_eq!(brief.unread_count(), 4);
-    assert!(brief.items.iter().all(|item| !item.read && !item.removed));
+    assert!(brief.items.iter().all(|item| !item.read && !item.hidden));
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn reposting_an_id_updates_it_in_place_and_keeps_its_marks() {
         )
         .unwrap();
     assert!(brief.mark_read("ado-pr:1"));
-    assert!(brief.remove("ado-pr:2"));
+    assert!(brief.hide("ado-pr:2"));
 
     let mut changed = item("ado-pr:1", "Waiting on you", "Review PR 1 (2 new comments)");
     changed.link = Some("https://dev.azure.com/org/project/_git/repo/pullrequest/1".to_owned());
@@ -107,7 +107,7 @@ fn reposting_an_id_updates_it_in_place_and_keeps_its_marks() {
     assert!(first.read, "an update must not re-highlight a read item");
     assert_eq!(first.text, "Review PR 1 (2 new comments)");
     assert_eq!((first.posted_at, first.updated_at), (1_000, 2_000));
-    assert!(get(&brief, "ado-pr:2").removed);
+    assert!(get(&brief, "ado-pr:2").hidden);
     assert_eq!(
         shown(&brief),
         [("Waiting on you".to_owned(), vec!["ado-pr:1".to_owned()])]
@@ -148,7 +148,7 @@ fn replacing_a_section_uses_the_posted_order_and_retires_the_rest() {
         ]
     );
     assert!(get(&brief, "a").read);
-    // b was neither read nor removed, so nothing about it is remembered.
+    // b was neither read nor hidden, so nothing about it is remembered.
     assert!(brief.retired.is_empty());
 
     // Posting no items empties a replaced section.
@@ -169,7 +169,7 @@ fn retired_marks_come_back_on_a_repost_and_are_forgotten_after_thirty_days() {
             1_000,
         )
         .unwrap();
-    brief.remove("todoist:1");
+    brief.hide("todoist:1");
     brief.mark_read("gmail:abc");
     let changes = brief
         .post(
@@ -177,6 +177,7 @@ fn retired_marks_come_back_on_a_repost_and_are_forgotten_after_thirty_days() {
                 items: Vec::new(),
                 replace_sections: vec!["Tasks".to_owned()],
                 retire_ids: vec!["gmail:abc".to_owned(), "gmail:def".to_owned()],
+                ..BriefPostParams::default()
             },
             2_000,
         )
@@ -186,8 +187,8 @@ fn retired_marks_come_back_on_a_repost_and_are_forgotten_after_thirty_days() {
     assert_eq!(
         serde_json::to_value(&brief.retired).unwrap(),
         json!([
-            {"id":"todoist:1","read":false,"removed":true,"done":false,"doneAt":null,"retiredAt":2_000},
-            {"id":"gmail:abc","read":true,"removed":false,"done":false,"doneAt":null,"retiredAt":2_000}
+            {"id":"todoist:1","read":false,"hidden":true,"done":false,"doneAt":null,"retiredAt":2_000},
+            {"id":"gmail:abc","read":true,"hidden":false,"done":false,"doneAt":null,"retiredAt":2_000}
         ])
     );
 
@@ -202,7 +203,7 @@ fn retired_marks_come_back_on_a_repost_and_are_forgotten_after_thirty_days() {
             3_000,
         )
         .unwrap();
-    assert!(get(&brief, "todoist:1").removed);
+    assert!(get(&brief, "todoist:1").hidden);
     assert!(get(&brief, "gmail:abc").read);
     assert!(!get(&brief, "gmail:def").read);
     assert!(brief.retired.is_empty());
@@ -219,7 +220,7 @@ fn retired_marks_come_back_on_a_repost_and_are_forgotten_after_thirty_days() {
             5_000 + REMEMBER_MILLIS,
         )
         .unwrap();
-    assert!(!get(&brief, "todoist:1").removed);
+    assert!(!get(&brief, "todoist:1").hidden);
 }
 
 #[test]
@@ -251,13 +252,13 @@ fn marking_from_the_panel_reports_only_real_changes() {
         )
         .unwrap();
     assert!(!brief.mark_read("missing"));
-    assert!(!brief.remove("missing"));
-    assert!(brief.remove("b"));
-    assert!(!brief.remove("b"));
+    assert!(!brief.hide("missing"));
+    assert!(brief.hide("b"));
+    assert!(!brief.hide("b"));
     assert!(brief.mark_all_read());
     assert!(!brief.mark_all_read());
     assert!(!brief.mark_read("a"));
-    // Removed items keep their own read mark.
+    // Hidden items keep their own read mark.
     assert!(!get(&brief, "b").read);
     assert_eq!(brief.summary()["unreadCount"], 0);
 }
@@ -282,6 +283,7 @@ fn invalid_posts_change_nothing() {
             items: vec![item("b", "Today", "B")],
             replace_sections: Vec::new(),
             retire_ids: vec!["b".to_owned()],
+            ..BriefPostParams::default()
         },
         post(
             (0..201)
@@ -376,7 +378,7 @@ fn done_survives_reposts_and_retirement() {
     assert_eq!(
         serde_json::to_value(&brief.retired).unwrap(),
         json!([{
-            "id":"todoist:7","read":true,"removed":false,
+            "id":"todoist:7","read":true,"hidden":false,
             "done":true,"doneAt":2_000,"retiredAt":4_000
         }])
     );
@@ -392,7 +394,7 @@ fn done_survives_reposts_and_retirement() {
 }
 
 #[test]
-fn a_brief_saved_before_done_existed_still_loads() {
+fn a_brief_saved_before_done_and_hidden_existed_still_loads() {
     let saved = json!({
         "items":[{"id":"a","section":"Today","text":"A","link":null,
                   "postedAt":1,"updatedAt":1,"read":true,"removed":false}],
@@ -403,5 +405,153 @@ fn a_brief_saved_before_done_existed_still_loads() {
     assert_eq!(brief.items.len(), 1);
     assert!(brief.items[0].read && !brief.items[0].done);
     assert_eq!(brief.items[0].done_at, None);
-    assert!(brief.retired[0].removed && !brief.retired[0].done);
+    assert!(brief.retired[0].hidden && !brief.retired[0].done);
+}
+
+#[test]
+fn clicking_toggles_read_both_ways() {
+    let mut brief = Brief::default();
+    brief
+        .post(&post(vec![item("a", "Today", "A")]), 1_000)
+        .unwrap();
+    assert!(!brief.toggle_read("missing"));
+    assert!(brief.toggle_read("a"));
+    assert!(get(&brief, "a").read);
+    assert!(brief.toggle_read("a"));
+    assert!(!get(&brief, "a").read);
+    assert_eq!(brief.unread_count(), 1);
+}
+
+#[test]
+fn hidden_items_are_listed_apart_and_can_be_unhidden_in_the_panel() {
+    let mut brief = Brief::default();
+    brief
+        .post(
+            &post(vec![
+                item("a", "Today", "A"),
+                item("b", "Today", "B"),
+                item("c", "Tasks", "C"),
+            ]),
+            1_000,
+        )
+        .unwrap();
+    brief.hide("c");
+    brief.hide("a");
+    assert_eq!(shown(&brief), [("Today".to_owned(), vec!["b".to_owned()])]);
+    let hidden = brief
+        .hidden_items()
+        .into_iter()
+        .map(|item| item.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(hidden, ["a", "c"]);
+    // A section that only holds hidden items is still a section of the brief.
+    assert_eq!(brief.sections, ["Today", "Tasks"]);
+    assert_eq!(brief.summary()["items"][2]["hidden"], true);
+
+    assert!(brief.unhide("a"));
+    assert!(!brief.unhide("a"));
+    assert!(!brief.unhide("missing"));
+    assert_eq!(
+        shown(&brief),
+        [("Today".to_owned(), vec!["a".to_owned(), "b".to_owned()])]
+    );
+}
+
+#[test]
+fn the_assistant_unhides_items_but_cannot_change_read_or_done() {
+    let mut brief = Brief::default();
+    brief
+        .post(
+            &post(vec![
+                item("ado-pr:1", "Waiting on you", "Review PR 1"),
+                item("gmail:abc", "Mail", "Landlord"),
+                item("gmail:def", "Mail", "Newsletter"),
+            ]),
+            1_000,
+        )
+        .unwrap();
+    brief.mark_read("ado-pr:1");
+    brief.hide("ado-pr:1");
+    brief.toggle_done("gmail:abc", 1_500);
+    brief.hide("gmail:abc");
+    brief.hide("gmail:def");
+    // gmail:abc and gmail:def leave the brief hidden; their marks are kept.
+    brief.post(&replace(&["Mail"], Vec::new()), 2_000).unwrap();
+    assert_eq!(brief.retired.len(), 2);
+
+    let changes = brief
+        .post(
+            &BriefPostParams {
+                items: vec![item("ado-pr:1", "Waiting on you", "Review PR 1: new push")],
+                unhide_ids: vec![
+                    "ado-pr:1".to_owned(),
+                    "gmail:abc".to_owned(),
+                    "gmail:def".to_owned(),
+                    "missing".to_owned(),
+                ],
+                ..BriefPostParams::default()
+            },
+            3_000,
+        )
+        .unwrap();
+    assert_eq!(changes.unhidden, ["ado-pr:1", "gmail:abc", "gmail:def"]);
+    let pr = get(&brief, "ado-pr:1");
+    assert!(!pr.hidden && pr.read, "unhiding leaves read alone");
+    // Kept for its done mark; gmail:def had nothing else worth keeping.
+    assert_eq!(
+        serde_json::to_value(&brief.retired).unwrap(),
+        json!([{
+            "id":"gmail:abc","read":true,"hidden":false,
+            "done":true,"doneAt":1_500,"retiredAt":2_000
+        }])
+    );
+    brief
+        .post(&post(vec![item("gmail:def", "Mail", "Newsletter")]), 4_000)
+        .unwrap();
+    assert!(!get(&brief, "gmail:def").hidden);
+
+    let invalid = BriefPostParams {
+        unhide_ids: vec![" bad".to_owned()],
+        ..BriefPostParams::default()
+    };
+    assert!(brief.post(&invalid, 5_000).is_err());
+}
+
+#[test]
+fn empty_sections_leave_the_brief() {
+    let mut brief = Brief::default();
+    brief
+        .post(
+            &post(vec![
+                item("next", "Next action", "Reply to Sanne"),
+                item("cal:1", "Today", "Stand-up"),
+                item("t", "Tasks", "Renew passport"),
+            ]),
+            1_000,
+        )
+        .unwrap();
+    brief
+        .post(&replace(&["Next action", "Today"], Vec::new()), 2_000)
+        .unwrap();
+    assert_eq!(brief.sections, ["Tasks"]);
+    assert_eq!(brief.summary()["sections"], json!(["Tasks"]));
+    // Coming back later puts a section at the end.
+    brief
+        .post(&post(vec![item("cal:2", "Today", "Review")]), 3_000)
+        .unwrap();
+    assert_eq!(brief.sections, ["Tasks", "Today"]);
+    brief
+        .post(
+            &BriefPostParams {
+                retire_ids: vec!["cal:2".to_owned()],
+                ..BriefPostParams::default()
+            },
+            4_000,
+        )
+        .unwrap();
+    assert_eq!(brief.sections, ["Tasks"]);
+
+    // A brief saved with empty sections drops them when it loads.
+    let saved = json!({"items":[], "sections":["Next action","Today"], "retired":[]});
+    assert!(Brief::from_value_lossy(saved).sections.is_empty());
 }

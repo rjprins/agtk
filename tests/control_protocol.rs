@@ -662,6 +662,7 @@ fn brief_posts_are_validated_and_round_trip() {
             }],
             replace_sections: vec!["Mail".to_owned()],
             retire_ids: vec!["gmail:old".to_owned()],
+            unhide_ids: vec!["gmail:hidden".to_owned()],
         }),
     })
     .unwrap();
@@ -670,6 +671,7 @@ fn brief_posts_are_validated_and_round_trip() {
         panic!("not a brief post: {decoded:?}");
     };
     assert_eq!(params.retire_ids, ["gmail:old"]);
+    assert_eq!(params.unhide_ids, ["gmail:hidden"]);
 
     for params in [
         r#"{"items":[{"id":"a","section":"Today","text":"A"},{"id":"a","section":"Today","text":"B"}]}"#,
