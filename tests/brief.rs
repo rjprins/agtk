@@ -637,3 +637,35 @@ fn session_links_are_validated_stored_and_returned() {
     id_only.session = Some(session(Some("shell-1"), None));
     assert!(brief.post(&post(vec![id_only]), 3_000).is_ok());
 }
+
+#[test]
+fn the_open_button_names_the_links_domain() {
+    let domain = |link: Option<&str>| {
+        let mut posted = item("a", "Today", "A");
+        posted.link = link.map(str::to_owned);
+        let mut brief = Brief::default();
+        brief.post(&post(vec![posted]), 1_000).unwrap();
+        brief.items[0].link_domain()
+    };
+    assert_eq!(
+        domain(Some(
+            "https://dev.azure.com/org/project/_git/repo/pullrequest/1"
+        ))
+        .as_deref(),
+        Some("dev.azure.com")
+    );
+    assert_eq!(
+        domain(Some("https://mail.google.com/mail/u/0/#inbox/abc")).as_deref(),
+        Some("mail.google.com")
+    );
+    // User info before an @ is not the host.
+    assert_eq!(
+        domain(Some("https://dev.azure.com@evil.example/path")).as_deref(),
+        Some("evil.example")
+    );
+    assert_eq!(
+        domain(Some("http://localhost:8080/x")).as_deref(),
+        Some("localhost")
+    );
+    assert_eq!(domain(None), None);
+}

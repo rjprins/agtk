@@ -448,6 +448,12 @@ impl Brief {
 }
 
 impl BriefItem {
+    /// The host the link goes to, for the open button's tooltip.
+    pub fn link_domain(&self) -> Option<String> {
+        let uri = glib::Uri::parse(self.link.as_deref()?, glib::UriFlags::NONE).ok()?;
+        uri.host().map(|host| host.to_string())
+    }
+
     /// Takes the posted fields; true when any of them changed.
     fn apply(&mut self, input: &BriefItemInput, now: u64) -> bool {
         let changed = self.section != input.section

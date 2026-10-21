@@ -394,7 +394,11 @@ fn brief_row(item: &BriefItem) -> gtk::Box {
         row.append(&open);
     }
     if item.link.is_some() {
-        let open = brief_button("web-browser-symbolic", "Open the link and mark it read");
+        let tooltip = match item.link_domain() {
+            Some(domain) => format!("Open {domain}"),
+            None => "Open the link".to_owned(),
+        };
+        let open = brief_button("web-browser-symbolic", &tooltip);
         open.set_action_name(Some("win.brief-open"));
         open.set_action_target_value(Some(&target));
         row.append(&open);
