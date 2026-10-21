@@ -3746,11 +3746,16 @@ fn clicking_a_brief_row_toggles_read_done_survives_restarts_and_sessions_restore
     app.activate_target_action("brief-done", "todoist:7");
     let brief = app.request("brief.get", json!({}));
     let done = item(&brief, "todoist:7");
-    assert_eq!((&done["done"], &done["read"]), (&json!(true), &json!(true)));
-    let done_at = done["doneAt"].as_u64().unwrap();
-    let inspection = app.request("ui.inspect", json!({}));
     assert_eq!(
-        find(&inspection["root"], "brief-item:todoist:7").unwrap()["label"],
+        (&done["done"], &done["read"], &done["hidden"]),
+        (&json!(true), &json!(true), &json!(true))
+    );
+    let done_at = done["doneAt"].as_u64().unwrap();
+    // Done moves the item into Hidden.
+    let inspection = app.request("ui.inspect", json!({}));
+    let hidden = find(&inspection["root"], "brief-hidden").unwrap();
+    assert_eq!(
+        find(hidden, "brief-item:todoist:7").unwrap()["label"],
         "Tasks: Renew passport (done)"
     );
 
@@ -3811,9 +3816,13 @@ fn clicking_a_brief_row_toggles_read_done_survives_restarts_and_sessions_restore
     app.activate_target_action("brief-done", "todoist:7");
     let undone = item(&app.request("brief.get", json!({})), "todoist:7");
     assert_eq!(
-        (&undone["done"], &undone["doneAt"]),
-        (&json!(false), &Value::Null)
+        (&undone["done"], &undone["doneAt"], &undone["hidden"]),
+        (&json!(false), &Value::Null, &json!(false))
     );
+    // Undoing done brings it back out of Hidden.
+    let inspection = app.request("ui.inspect", json!({}));
+    assert!(find(&inspection["root"], "brief-hidden").is_none());
+    assert!(find(&inspection["root"], "brief-item:todoist:7").is_some());
 }
 
 #[test]

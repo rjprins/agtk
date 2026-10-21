@@ -21,8 +21,9 @@ Decisions:
    as seen or done for the user. The assistant can unhide items with
    `unhideIds` when they need attention again. It cannot hide them.
 6. Done is a request to the assistant. agtk records when it was set, and the
-   assistant completes the Todoist task on its next run. Clicking the check mark
-   again clears it. Done also marks the item read.
+   assistant completes the Todoist task on its next run. Done also marks the
+   item read and hides it, so it moves to Hidden, struck through. Clicking its
+   check mark there clears done and brings the item back.
 7. Clicking a row marks it read, and clicking it again marks it unread. The
    link has its own button, so reading an item does not open a browser.
 8. An item can link to an agent session with `session`: the agtk session id,

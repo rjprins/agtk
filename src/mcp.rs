@@ -1012,7 +1012,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "get_brief",
             "Read the daily brief",
-            "Return the daily brief: items in panel order with their read, hidden and done marks, the order of the sections that hold items, and retired, the marks agtk still remembers for items no longer in the brief. done means the user marked the item done in the panel, at doneAt in Unix milliseconds; agtk changes nothing else, so complete the underlying task yourself. Skip or leave out items that are read, hidden or done.",
+            "Return the daily brief: items in panel order with their read, hidden and done marks, the order of the sections that hold items, and retired, the marks agtk still remembers for items no longer in the brief. done means the user marked the item done in the panel, at doneAt in Unix milliseconds, which also hides it; agtk changes nothing else, so complete the underlying task yourself. Skip or leave out items that are read, hidden or done.",
             empty_schema(),
         ),
         tool(

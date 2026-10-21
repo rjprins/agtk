@@ -345,7 +345,8 @@ impl Brief {
         changed
     }
 
-    /// Marks one item done, or not done again. Done also means read.
+    /// Marks one item done, which also reads and hides it, or not done again,
+    /// which brings it back.
     pub fn toggle_done(&mut self, id: &str, now: u64) -> bool {
         let Some(item) = self.items.iter_mut().find(|item| item.id == id) else {
             return false;
@@ -353,6 +354,7 @@ impl Brief {
         item.done = !item.done;
         item.done_at = item.done.then_some(now);
         item.read |= item.done;
+        item.hidden = item.done;
         true
     }
 

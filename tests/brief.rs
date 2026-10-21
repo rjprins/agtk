@@ -320,7 +320,7 @@ fn a_damaged_saved_brief_loads_empty() {
 }
 
 #[test]
-fn done_toggles_with_its_time_and_also_marks_read() {
+fn done_toggles_with_its_time_and_also_reads_and_hides() {
     let mut brief = Brief::default();
     brief
         .post(
@@ -332,15 +332,21 @@ fn done_toggles_with_its_time_and_also_marks_read() {
 
     assert!(brief.toggle_done("todoist:7", 2_000));
     let done = get(&brief, "todoist:7");
-    assert!(done.done && done.read);
+    assert!(done.done && done.read && done.hidden);
     assert_eq!(done.done_at, Some(2_000));
     assert_eq!(brief.unread_count(), 0);
+    assert!(shown(&brief).is_empty());
+    assert_eq!(brief.hidden_items()[0].id, "todoist:7");
     assert_eq!(brief.summary()["items"][0]["doneAt"], 2_000);
 
-    // Undoing clears the mark and its time, but the item stays read.
+    // Undoing clears the mark and its time and brings the item back, still read.
     assert!(brief.toggle_done("todoist:7", 3_000));
     let undone = get(&brief, "todoist:7");
-    assert!(!undone.done && undone.read);
+    assert!(!undone.done && undone.read && !undone.hidden);
+    assert_eq!(
+        shown(&brief),
+        [("Tasks".to_owned(), vec!["todoist:7".to_owned()])]
+    );
     assert_eq!(undone.done_at, None);
     assert_eq!(brief.summary()["items"][0]["done"], false);
 }
@@ -382,7 +388,7 @@ fn done_survives_reposts_and_retirement() {
     assert_eq!(
         serde_json::to_value(&brief.retired).unwrap(),
         json!([{
-            "id":"todoist:7","read":true,"hidden":false,
+            "id":"todoist:7","read":true,"hidden":true,
             "done":true,"doneAt":2_000,"retiredAt":4_000
         }])
     );

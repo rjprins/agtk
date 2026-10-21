@@ -333,12 +333,43 @@ fn hidden_row(item: &BriefItem) -> gtk::Box {
     text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
     text.add_css_class("dim-label");
     text.set_tooltip_text(Some(&item.section));
+    if item.done {
+        strike_through(&text);
+    }
     row.append(&text);
-    let unhide = brief_button("view-reveal-symbolic", "Unhide");
-    unhide.set_action_name(Some("win.brief-unhide"));
-    unhide.set_action_target_value(Some(&item.id.to_variant()));
-    row.append(&unhide);
+    // Undoing done brings a done item back, so it needs no unhide button.
+    if item.done {
+        row.append(&done_button(item));
+    } else {
+        let unhide = brief_button("view-reveal-symbolic", "Unhide");
+        unhide.set_action_name(Some("win.brief-unhide"));
+        unhide.set_action_target_value(Some(&item.id.to_variant()));
+        row.append(&unhide);
+    }
     row
+}
+
+fn strike_through(text: &gtk::Label) {
+    let strikethrough = gtk::pango::AttrList::new();
+    strikethrough.insert(gtk::pango::AttrInt::new_strikethrough(true));
+    text.set_attributes(Some(&strikethrough));
+    text.add_css_class("dim-label");
+}
+
+fn done_button(item: &BriefItem) -> gtk::Button {
+    let done = if item.done {
+        let button = brief_button("object-select-symbolic", "Done. Click to undo.");
+        button.add_css_class("success");
+        button
+    } else {
+        brief_button(
+            "object-select-symbolic",
+            "Mark done and hide it. Your assistant completes the task.",
+        )
+    };
+    done.set_action_name(Some("win.brief-done"));
+    done.set_action_target_value(Some(&item.id.to_variant()));
+    done
 }
 
 fn brief_row(item: &BriefItem) -> gtk::Box {
@@ -361,11 +392,9 @@ fn brief_row(item: &BriefItem) -> gtk::Box {
     if !item.read {
         text.add_css_class("heading");
     }
+    // Done items are hidden, unless the assistant shows one again.
     if item.done {
-        let strikethrough = gtk::pango::AttrList::new();
-        strikethrough.insert(gtk::pango::AttrInt::new_strikethrough(true));
-        text.set_attributes(Some(&strikethrough));
-        text.add_css_class("dim-label");
+        strike_through(&text);
     }
     row.append(&text);
     let target = item.id.to_variant();
@@ -403,19 +432,7 @@ fn brief_row(item: &BriefItem) -> gtk::Box {
         open.set_action_target_value(Some(&target));
         row.append(&open);
     }
-    let done = if item.done {
-        let button = brief_button("object-select-symbolic", "Done. Click to undo.");
-        button.add_css_class("success");
-        button
-    } else {
-        brief_button(
-            "object-select-symbolic",
-            "Mark done. Your assistant completes the task.",
-        )
-    };
-    done.set_action_name(Some("win.brief-done"));
-    done.set_action_target_value(Some(&target));
-    row.append(&done);
+    row.append(&done_button(item));
     let hide = brief_button(
         "view-conceal-symbolic",
         "Hide. The task or mail itself is not changed.",
