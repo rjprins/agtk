@@ -270,6 +270,7 @@ impl Workspace {
     fn reap_worktree(&self, params: WorktreeReapParams, pending: PendingRequest) {
         let manager = WorktreeManager::new(self.paths.attic_dir());
         let live_paths = self.live_worktree_paths();
+        self.stop_language_servers(&params.path);
         let request = ReapRequest {
             path: params.path,
             expected_head: params.expected_head,
@@ -413,6 +414,7 @@ impl Workspace {
     fn reap_worktree_from_panel(&self, worktree: WorktreeInfo) {
         let manager = WorktreeManager::new(self.paths.attic_dir());
         let live_paths = self.live_worktree_paths();
+        self.stop_language_servers(&worktree.path);
         let request = ReapRequest {
             path: worktree.path,
             expected_head: worktree.head.unwrap_or_default(),

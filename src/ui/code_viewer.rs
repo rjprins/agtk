@@ -60,6 +60,31 @@ pub(super) enum ViewerEvent {
         tab_id: String,
         href: String,
     },
+    /// Go to definition or find references at a one-based line and column.
+    LookUp {
+        request_id: u32,
+        document_id: String,
+        lookup: crate::language_server::Lookup,
+        line: u32,
+        column: u32,
+    },
+    /// Monaco followed a definition or reference: within the shown text when `path` is absent.
+    Jump {
+        document_id: String,
+        #[serde(default)]
+        path: Option<String>,
+        line: u32,
+        column: u32,
+        from_line: u32,
+        from_column: u32,
+    },
+    /// Back or forward through earlier jumps, from the cursor at `line` and `column`.
+    History {
+        document_id: String,
+        forward: bool,
+        line: u32,
+        column: u32,
+    },
     Error {
         #[serde(default)]
         request_id: Option<String>,
@@ -97,6 +122,10 @@ enum ViewerCommand {
         theme: String,
         font_family: String,
         font_size: u32,
+    },
+    AnswerLookup {
+        request_id: u32,
+        answer: String,
     },
 }
 
@@ -273,6 +302,14 @@ impl CodeViewer {
         self.enqueue(ViewerCommand::SaveViewState);
     }
 
+    /// Answers a `LookUp` event with locations, or with an `error` to show.
+    pub(super) fn answer_lookup(&self, request_id: u32, answer: &Value) {
+        self.enqueue(ViewerCommand::AnswerLookup {
+            request_id,
+            answer: answer.to_string(),
+        });
+    }
+
     pub(super) fn focus(&self) {
         self.web_view.grab_focus();
     }
@@ -320,6 +357,7 @@ impl CodeViewer {
             | ViewerCommand::NextChange
             | ViewerCommand::Reveal { .. }
             | ViewerCommand::SaveViewState
+            | ViewerCommand::AnswerLookup { .. }
             | ViewerCommand::Clear => state.queued.push_back(command),
         }
         while state.queued.len() > 16 {
@@ -380,6 +418,15 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             args.insert("fontSize", font_size);
             (
                 "window.agtkViewer.setAppearance(theme, fontFamily, fontSize)".to_owned(),
+                Some(args.end()),
+            )
+        }
+        ViewerCommand::AnswerLookup { request_id, answer } => {
+            let args = glib::VariantDict::new(None);
+            args.insert("requestId", request_id);
+            args.insert("answerJson", answer);
+            (
+                "window.agtkViewer.answerLookup(requestId, JSON.parse(answerJson))".to_owned(),
                 Some(args.end()),
             )
         }
@@ -465,6 +512,33 @@ fn valid_event(event: &ViewerEvent) -> bool {
         ViewerEvent::OpenLink { tab_id, href } => {
             !tab_id.is_empty() && tab_id.len() <= 128 && !href.is_empty() && href.len() <= 4096
         }
+        ViewerEvent::LookUp {
+            document_id,
+            line,
+            column,
+            ..
+        } => valid_document_id(document_id) && valid_position(*line, *column),
+        ViewerEvent::Jump {
+            document_id,
+            path,
+            line,
+            column,
+            from_line,
+            from_column,
+        } => {
+            valid_document_id(document_id)
+                && path
+                    .as_ref()
+                    .is_none_or(|path| path.starts_with('/') && path.len() <= 4096)
+                && valid_position(*line, *column)
+                && valid_position(*from_line, *from_column)
+        }
+        ViewerEvent::History {
+            document_id,
+            line,
+            column,
+            ..
+        } => valid_document_id(document_id) && valid_position(*line, *column),
         ViewerEvent::Error {
             request_id,
             message,
@@ -475,6 +549,15 @@ fn valid_event(event: &ViewerEvent) -> bool {
                 && message.len() <= 2048
         }
     }
+}
+
+/// Document IDs are the request IDs of shown diffs and files.
+fn valid_document_id(document_id: &str) -> bool {
+    !document_id.is_empty() && document_id.len() <= 128
+}
+
+fn valid_position(line: u32, column: u32) -> bool {
+    (1..=1_000_000).contains(&line) && (1..=1_000_000).contains(&column)
 }
 
 fn serve_asset(request: &webkit6::URISchemeRequest) {

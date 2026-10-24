@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use agtk::changes;
+use agtk::{changes, language_server};
 use code_viewer::{CodeViewer, ViewerEvent};
 use gtk::prelude::*;
 use serde_json::json;

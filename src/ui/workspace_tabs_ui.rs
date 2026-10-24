@@ -609,7 +609,7 @@ impl Workspace {
         });
     }
 
-    fn activate_diff_tab(&self, key: &DiffTabKey) {
+    pub(super) fn activate_diff_tab(&self, key: &DiffTabKey) {
         let tab = WorkspaceTabId::Diff(key.clone());
         if !self.workspace_tabs.borrow_mut().select_tab(&tab) {
             return;
@@ -862,6 +862,11 @@ impl Workspace {
         if let Some(viewer) = self.code_viewer.borrow().as_ref() {
             viewer.set_appearance(theme, &font_family, font_size);
             let state = self.diff_view_states.borrow().get(&tab_id).cloned();
+            let position = self.take_diff_position(key);
+            let source_path = key.new_path.as_deref().map(|new_path| {
+                use std::os::unix::ffi::OsStrExt;
+                Path::new(&key.worktree_root).join(std::ffi::OsStr::from_bytes(new_path))
+            });
             let payload = serde_json::json!({
                 "requestId": request_id,
                 "tabId": tab_id,
@@ -873,11 +878,23 @@ impl Workspace {
                 "language": document.language,
                 "metadata": document.metadata,
                 "viewState": state,
+                "line": position.map(|(line, _)| line),
+                "column": position.map(|(_, column)| column),
+                "sourcePath": source_path.as_ref().map(|path| path.to_string_lossy()),
                 "presentation": self.markdown_presentation_for(Path::new(&document.path), true),
             });
             if let Err(error) = viewer.show_diff(&payload) {
                 self.show_diff_placeholder(key, &document.path, &error, None, &[]);
                 return;
+            }
+            if let Some(source_path) = source_path {
+                self.remember_shown_text(
+                    &request_id,
+                    WorkspaceTabId::Diff(key.clone()),
+                    &key.worktree_root,
+                    source_path,
+                    Arc::from(document.modified.as_str()),
+                );
             }
             self.diff_placeholder.set_visible(false);
             self.diff_viewer_host.set_visible(true);
@@ -902,6 +919,47 @@ impl Workspace {
                 // Leave the WebKit signal before opening tabs, which call back into the viewer.
                 let workspace = link_workspace.clone();
                 glib::idle_add_local_once(move || workspace.open_markdown_link(&tab_id, &href));
+            }
+            code_viewer::ViewerEvent::LookUp {
+                request_id,
+                document_id,
+                lookup,
+                line,
+                column,
+            } => {
+                let workspace = link_workspace.clone();
+                glib::idle_add_local_once(move || {
+                    workspace.look_up_code(request_id, &document_id, lookup, line, column)
+                });
+            }
+            code_viewer::ViewerEvent::Jump {
+                document_id,
+                path,
+                line,
+                column,
+                from_line,
+                from_column,
+            } => {
+                let workspace = link_workspace.clone();
+                glib::idle_add_local_once(move || {
+                    workspace.follow_code_jump(
+                        &document_id,
+                        path,
+                        (line, column),
+                        (from_line, from_column),
+                    )
+                });
+            }
+            code_viewer::ViewerEvent::History {
+                document_id,
+                forward,
+                line,
+                column,
+            } => {
+                let workspace = link_workspace.clone();
+                glib::idle_add_local_once(move || {
+                    workspace.navigate_code_history(&document_id, forward, (line, column))
+                });
             }
             code_viewer::ViewerEvent::ViewState { tab_id, state } => {
                 view_states.borrow_mut().insert(tab_id, state);

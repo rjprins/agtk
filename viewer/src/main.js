@@ -26,12 +26,20 @@ import 'monaco-editor/languages/definitions/yaml/register';
 import 'monaco-editor/languages/features/json/register';
 // The diff markers use the icon font. Without this it only loads with the JSON chunk.
 import 'monaco-editor/features/codicon/register';
+// Go to definition, peek and find references, with Ctrl+click and the context menu.
+import 'monaco-editor/editor/contrib/clipboard/browser/clipboard';
+import 'monaco-editor/editor/contrib/contextmenu/browser/contextmenu';
+import 'monaco-editor/editor/contrib/gotoSymbol/browser/goToCommands';
+import 'monaco-editor/editor/contrib/gotoSymbol/browser/link/goToDefinitionAtPosition';
+import 'monaco-editor/editor/contrib/hover/browser/hoverContribution';
+import 'monaco-editor/editor/standalone/browser/referenceSearch/standaloneReferenceSearch';
 
 import DOMPurify from 'dompurify';
 
 import { languageForFence, languageForPath } from './language.js';
 import { headingSlug, renderMarkdown } from './markdown.js';
 import { createImageView, isImageDataUrl } from './image.js';
+import { answerLocations, historyDirection } from './lookup.js';
 import './style.css';
 
 self.MonacoEnvironment = {
@@ -95,6 +103,11 @@ let previewText = null;
 let previewIsOriginal = false;
 let previewRendered = false;
 let renderGeneration = 0;
+let lookupSequence = 0;
+// Lookups waiting for agtk, by request ID.
+const pendingLookups = new Map();
+// Other files that answers pointed into, so peek can preview them.
+const lookupModels = new Map();
 
 function sendEvent(event) {
   window.webkit?.messageHandlers?.agtk?.postMessage(event);
@@ -118,8 +131,20 @@ function activeEditor() {
   return null;
 }
 
+// The shown text's model is named after its file when agtk sends the full path,
+// so peek labels it like the other files it lists.
+function shownModelUri(sourcePath, fallback) {
+  return typeof sourcePath === 'string' && sourcePath.startsWith('/')
+    ? monaco.Uri.from({ scheme: 'agtk', path: sourcePath, query: String(modelSequence) })
+    : monaco.Uri.parse(fallback);
+}
+
 function clear() {
   imageView.clear();
+  for (const resolve of pendingLookups.values()) resolve(null);
+  pendingLookups.clear();
+  for (const model of lookupModels.values()) model.dispose();
+  lookupModels.clear();
   const models = diffEditor.getModel();
   if (models) {
     diffEditor.setModel(null);
@@ -163,6 +188,9 @@ function showDiff({
   language,
   metadata,
   viewState,
+  line,
+  column,
+  sourcePath,
   presentation: requestedPresentation,
 }) {
   if (
@@ -186,7 +214,7 @@ function showDiff({
   const modifiedModel = monaco.editor.createModel(
     modified,
     selectedLanguage,
-    monaco.Uri.parse(`${uriRoot}/modified`),
+    shownModelUri(sourcePath, `${uriRoot}/modified`),
   );
 
   mode = 'diff';
@@ -209,6 +237,7 @@ function showDiff({
     editorElement.classList.add('visible');
     diffEditor.getModifiedEditor().focus();
   }
+  if (Number.isFinite(line) && line > 0) reveal(line, column);
 }
 
 function showFile({
@@ -223,6 +252,7 @@ function showFile({
   viewState,
   line,
   column,
+  sourcePath,
   presentation: requestedPresentation,
 }) {
   if (dataUrl !== undefined) {
@@ -257,7 +287,7 @@ function showFile({
   const model = monaco.editor.createModel(
     text,
     selectedLanguage,
-    monaco.Uri.parse(`inmemory://agtk/file/${modelSequence}`),
+    shownModelUri(sourcePath, `inmemory://agtk/file/${modelSequence}`),
   );
 
   mode = 'file';
@@ -540,7 +570,140 @@ markdownElement.addEventListener('click', (event) => {
   }
 });
 
+// Go to definition and find references
+
+// agtk has language servers for these. It checks the file type itself as well.
+const LOOKUP_LANGUAGES = ['python', 'typescript', 'javascript'];
+
+function showEditorMessage(editor, message, position) {
+  editor.getContribution('editor.contrib.messageController')?.showMessage(message, position);
+}
+
+function lookupModel(path, text) {
+  const uri = monaco.Uri.file(path);
+  const model = lookupModels.get(path);
+  if (model) {
+    if (text !== null && model.getValue() !== text) model.setValue(text);
+  } else if (text !== null) {
+    lookupModels.set(path, monaco.editor.createModel(text, languageForPath(path) || 'plaintext', uri));
+  }
+  return uri;
+}
+
+function lookUp(lookup, model, position, token) {
+  const editor = activeEditor();
+  if (!editor || model !== editor.getModel() || !currentRequestId || presentation === 'preview') {
+    return null;
+  }
+  lookupSequence += 1;
+  const requestId = lookupSequence;
+  const documentId = currentRequestId;
+  const answered = new Promise((resolve) => {
+    pendingLookups.set(requestId, resolve);
+    token.onCancellationRequested(() => {
+      pendingLookups.delete(requestId);
+      resolve(null);
+    });
+  });
+  sendEvent({
+    type: 'lookUp', requestId, documentId, lookup, line: position.lineNumber, column: position.column,
+  });
+  // Holding Ctrl over a word looks up its definition too: only talk about lookups at the cursor.
+  const atCursor = () => editor.getPosition()?.equals(position) ?? false;
+  const waiting = setTimeout(() => {
+    if (atCursor()) showEditorMessage(editor, 'Asking the language server…', position);
+  }, 800);
+  return answered.then((answer) => {
+    clearTimeout(waiting);
+    editor.getContribution('editor.contrib.messageController')?.closeMessage();
+    if (!answer || documentId !== currentRequestId) return null;
+    if (typeof answer.error === 'string') {
+      // Replaces Monaco's own message that nothing was found, which shows first.
+      if (atCursor()) setTimeout(() => showEditorMessage(editor, answer.error, position), 0);
+      return null;
+    }
+    return answerLocations(answer, {
+      shownUri: model.uri,
+      fileUri: lookupModel,
+      range: (...bounds) => new monaco.Range(...bounds),
+    });
+  });
+}
+
+monaco.languages.registerDefinitionProvider(LOOKUP_LANGUAGES, {
+  provideDefinition: (model, position, token) => lookUp('definition', model, position, token),
+});
+monaco.languages.registerReferenceProvider(LOOKUP_LANGUAGES, {
+  provideReferences: (model, position, _context, token) => lookUp('references', model, position, token),
+});
+
+// Monaco opens every definition and reference through here, in this file or another.
+monaco.editor.registerEditorOpener({
+  openCodeEditor(source, resource, selectionOrPosition) {
+    const editor = activeEditor();
+    const model = editor?.getModel();
+    if (!model || source !== editor || !currentRequestId) return false;
+    const target = selectionOrPosition && 'startLineNumber' in selectionOrPosition
+      ? { lineNumber: selectionOrPosition.startLineNumber, column: selectionOrPosition.startColumn }
+      : selectionOrPosition;
+    const from = editor.getPosition();
+    const jump = {
+      type: 'jump',
+      documentId: currentRequestId,
+      line: target?.lineNumber || 1,
+      column: target?.column || 1,
+      fromLine: from?.lineNumber || 1,
+      fromColumn: from?.column || 1,
+    };
+    if (resource.toString() === model.uri.toString()) {
+      sendEvent(jump);
+      // Monaco moves the cursor itself.
+      return false;
+    }
+    if (resource.scheme !== 'file') return false;
+    editor.getContribution('editor.contrib.referencesController')?.closeWidget(false);
+    sendEvent({ ...jump, path: resource.path });
+    return true;
+  },
+});
+
+function navigateHistory(forward) {
+  const position = activeEditor()?.getPosition();
+  if (!position || !currentRequestId) return false;
+  sendEvent({
+    type: 'history',
+    documentId: currentRequestId,
+    forward,
+    line: position.lineNumber,
+    column: position.column,
+  });
+  return true;
+}
+
+window.addEventListener('keydown', (event) => {
+  const direction = historyDirection(event);
+  if (direction && navigateHistory(direction === 'forward')) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, true);
+
+// The mouse's back and forward buttons.
+window.addEventListener('mouseup', (event) => {
+  if ((event.button === 3 || event.button === 4) && navigateHistory(event.button === 4)) {
+    event.preventDefault();
+  }
+});
+
+function answerLookup(requestId, answer) {
+  const resolve = pendingLookups.get(requestId);
+  if (!resolve) return;
+  pendingLookups.delete(requestId);
+  resolve(answer && typeof answer === 'object' ? answer : null);
+}
+
 window.agtkViewer = Object.freeze({
+  answerLookup,
   clear,
   copySelection,
   find,

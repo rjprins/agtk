@@ -6,6 +6,7 @@ mod protocol;
 mod session_host;
 
 pub use kind::{SessionKind, SessionState};
+pub(crate) use launch::resolve_executable_from;
 pub use launch::{
     LaunchPlanError, SessionHostLaunchPlan, SessionLaunchPlan, is_installed, login_shell_path,
     warm_shell_path,

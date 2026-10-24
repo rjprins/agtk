@@ -50,6 +50,7 @@ mod capture;
 mod changes_ui;
 mod claude_ui;
 mod close_session_ui;
+mod code_navigation_ui;
 mod code_viewer;
 mod controls;
 mod emacs_ui;
@@ -118,6 +119,7 @@ struct Workspace {
     diff_stale_label: gtk::Label,
     diff_reload_button: gtk::Button,
     code_viewer: Rc<RefCell<Option<Rc<code_viewer::CodeViewer>>>>,
+    code_navigation: code_navigation_ui::CodeNavigation,
     diff_tab_data:
         Rc<RefCell<HashMap<crate::workspace_tabs::DiffTabKey, (ChangedFile, WorktreeContext)>>>,
     diff_document_signatures: Rc<RefCell<HashMap<crate::workspace_tabs::DiffTabKey, String>>>,
@@ -656,6 +658,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         diff_stale_label: diff_stale_label.clone(),
         diff_reload_button: diff_reload_button.clone(),
         code_viewer: Rc::new(RefCell::new(None)),
+        code_navigation: code_navigation_ui::CodeNavigation::default(),
         diff_tab_data: Rc::new(RefCell::new(HashMap::new())),
         diff_document_signatures: Rc::new(RefCell::new(HashMap::new())),
         stale_diff_tabs: Rc::new(RefCell::new(HashSet::new())),

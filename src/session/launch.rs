@@ -327,7 +327,7 @@ fn resolve_executable(command: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     )
 }
 
-fn resolve_executable_from(
+pub(crate) fn resolve_executable_from(
     command: &str,
     cwd: Option<&Path>,
     path: Option<&std::ffi::OsStr>,

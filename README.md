@@ -89,6 +89,7 @@ Optional tools:
 - `claude`, `codex`, or `gemini` for the agents you want to run
 - The Azure CLI with the Azure DevOps extension, signed in, for pull requests
 - `emacsclient` for the Emacs actions
+- `pyright` and `typescript-language-server` for go to definition and find references (`sudo pacman -S pyright typescript-language-server`)
 
 ## Features
 
@@ -126,6 +127,9 @@ Sessions do not survive a reboot, and terminal scrollback is not saved. After a 
 - Each worktree has one file tab and one diff tab. Use the arrow beside either tab to return to a previously opened file or diff. New entries appear at the top; reopening an existing entry leaves its position unchanged.
 - Relative file links in terminal output try the session's associated worktree first, then the terminal's current and launch directories and their Git roots. Changing a session's worktree also changes where these links look first.
 - Open an image from Files or a path in the terminal to view it in agtk. Use **Fit to window** or **Actual size (100%)**, with scrolling for large images. PNG, JPEG, GIF, WebP, SVG, BMP, ICO, and AVIF files up to 20 MiB are supported; decoding depends on WebKit's installed codecs. Transparent areas show a checkerboard, and changed images get the same reload banner as text files.
+- In Python, TypeScript and JavaScript files and diffs, press `F12` or `Ctrl+click` a name to go to its definition. Press `Shift+F12` to list its references, and double-click a reference to open it. Right-click a name for the same actions and for Peek.
+- Press `Alt+Left` to go back to where you were before a jump, and `Alt+Right` to go forward again. The mouse's back and forward buttons do the same.
+- In a diff, lookups read the new version of the file as you see it. Other files come from the worktree on disk. Python lookups use the worktree's `.venv`, or the one in the main checkout when the worktree has none.
 - Markdown files show rendered, with a switch between Source and Preview. File tabs start in Preview and diffs in Source, and agtk remembers your choice for each. Links to other files open them in the viewer, at the line for links like `main.rs#L12`. Web links open in the browser. Images show as placeholders, because the viewer cannot read files or reach the network.
 
 ### Worktrees
@@ -293,7 +297,7 @@ From a shell, run `agtkctl brief` to read the brief, or `agtkctl brief post --js
 - Worktrees: `~/worktrees/REPO/BRANCH`, or where `git config agtk.worktreeTemplate` says (placeholders `{repo-name}`, `{repo-root}`, `{branch}`; relative paths start at the project, `~` is your home). PR reviews use the same place with branch `pr-ID`.
 - Work saved before a worktree is removed: `attic` in the settings directory. agtk stages it in a private directory under `/tmp` first.
 
-Account quota uses `curl`, when installed, to read Claude and Codex usage once a minute using their existing local sign-ins. Credentials are sent only to the matching provider's HTTPS usage endpoint and are never stored by agtk or included in process arguments. Expired sign-ins and unavailable quota are shown in the account details; agtk does not refresh credentials. Pull requests go through the Azure CLI, and a PR review fetches the branch with `git fetch`. Building agtk downloads the crates in `Cargo.lock` and the npm packages in `viewer/package-lock.json`, without running their install scripts.
+Account quota uses `curl`, when installed, to read Claude and Codex usage once a minute using their existing local sign-ins. Credentials are sent only to the matching provider's HTTPS usage endpoint and are never stored by agtk or included in process arguments. Expired sign-ins and unavailable quota are shown in the account details; agtk does not refresh credentials. Pull requests go through the Azure CLI, and a PR review fetches the branch with `git fetch`. Go to definition starts `pyright` or `typescript-language-server` in the worktree on the first lookup, and stops it after ten minutes without lookups. `typescript-language-server` runs the TypeScript in the project's `node_modules` when there is one. Building agtk downloads the crates in `Cargo.lock` and the npm packages in `viewer/package-lock.json`, without running their install scripts.
 
 To use another program for a tool, set `AGTK_CLAUDE_BIN`, `AGTK_CODEX_BIN`, `AGTK_EMACSCLIENT`, or `AGTK_AZURE_BIN`.
 

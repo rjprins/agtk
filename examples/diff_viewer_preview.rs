@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use agtk::changes;
+use agtk::{changes, language_server};
 use code_viewer::{CodeViewer, ViewerEvent};
 use webkit6::prelude::*;
 
@@ -41,6 +41,10 @@ fn main() -> glib::ExitCode {
             }
             ViewerEvent::ViewState { .. } => {}
             ViewerEvent::OpenLink { href, .. } => println!("Link clicked: {href}"),
+            ViewerEvent::LookUp { lookup, line, column, .. } => {
+                println!("Lookup of {lookup:?} at {line}:{column}")
+            }
+            ViewerEvent::Jump { .. } | ViewerEvent::History { .. } => {}
             ViewerEvent::Error { message, .. } => eprintln!("Viewer error: {message}"),
         }));
         let window = adw::ApplicationWindow::builder()

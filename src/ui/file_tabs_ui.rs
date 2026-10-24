@@ -292,6 +292,10 @@ impl Workspace {
             .get_mut(key)
             .and_then(|state| state.pending_position.take());
         let inside_worktree = key.path.starts_with(&key.worktree_root) && link_target.is_none();
+        let shown_text = match &document {
+            FileDocumentResult::Text(document) => Some(Arc::<str>::from(document.text.as_str())),
+            _ => None,
+        };
         let (mut payload, details) = match document {
             FileDocumentResult::Text(document) => {
                 let lines = if document.line_count == 1 {
@@ -332,6 +336,7 @@ impl Workspace {
             "viewState": state,
             "line": position.map(|(line, _)| line),
             "column": position.and_then(|(_, column)| column),
+            "sourcePath": key.path.to_string_lossy(),
             "presentation": self.markdown_presentation_for(&key.path, false),
         });
         payload
@@ -346,6 +351,15 @@ impl Workspace {
         if let Err(error) = viewer.show_file(&payload) {
             self.show_viewer_placeholder(&file_tab_title(key), &error, None, &[]);
             return;
+        }
+        if let Some(text) = shown_text {
+            self.remember_shown_text(
+                &request_id,
+                WorkspaceTabId::File(key.clone()),
+                &key.worktree_root,
+                key.path.clone(),
+                text,
+            );
         }
         self.diff_placeholder.set_visible(false);
         self.diff_viewer_host.set_visible(true);
