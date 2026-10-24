@@ -89,7 +89,7 @@ Optional tools:
 - `claude`, `codex`, or `gemini` for the agents you want to run
 - The Azure CLI with the Azure DevOps extension, signed in, for pull requests
 - `emacsclient` for the Emacs actions
-- `pyright` and `typescript-language-server` for go to definition and find references (`sudo pacman -S pyright typescript-language-server`)
+- `pyright` for go to definition and find references in Python, and TypeScript 7 or `typescript-language-server` for TypeScript and JavaScript (`sudo pacman -S pyright typescript-language-server`)
 
 ## Features
 
@@ -297,7 +297,7 @@ From a shell, run `agtkctl brief` to read the brief, or `agtkctl brief post --js
 - Worktrees: `~/worktrees/REPO/BRANCH`, or where `git config agtk.worktreeTemplate` says (placeholders `{repo-name}`, `{repo-root}`, `{branch}`; relative paths start at the project, `~` is your home). PR reviews use the same place with branch `pr-ID`.
 - Work saved before a worktree is removed: `attic` in the settings directory. agtk stages it in a private directory under `/tmp` first.
 
-Account quota uses `curl`, when installed, to read Claude and Codex usage once a minute using their existing local sign-ins. Credentials are sent only to the matching provider's HTTPS usage endpoint and are never stored by agtk or included in process arguments. Expired sign-ins and unavailable quota are shown in the account details; agtk does not refresh credentials. Pull requests go through the Azure CLI, and a PR review fetches the branch with `git fetch`. Go to definition starts `pyright` or `typescript-language-server` in the worktree on the first lookup, and stops it after ten minutes without lookups. `typescript-language-server` runs the TypeScript in the project's `node_modules` when there is one. Building agtk downloads the crates in `Cargo.lock` and the npm packages in `viewer/package-lock.json`, without running their install scripts.
+Account quota uses `curl`, when installed, to read Claude and Codex usage once a minute using their existing local sign-ins. Credentials are sent only to the matching provider's HTTPS usage endpoint and are never stored by agtk or included in process arguments. Expired sign-ins and unavailable quota are shown in the account details; agtk does not refresh credentials. Pull requests go through the Azure CLI, and a PR review fetches the branch with `git fetch`. Go to definition starts a language server in the worktree on the first lookup, and stops it after ten minutes without lookups. For TypeScript it uses the project's own TypeScript from `node_modules` when there is one, so it runs that code. Building agtk downloads the crates in `Cargo.lock` and the npm packages in `viewer/package-lock.json`, without running their install scripts.
 
 To use another program for a tool, set `AGTK_CLAUDE_BIN`, `AGTK_CODEX_BIN`, `AGTK_EMACSCLIENT`, or `AGTK_AZURE_BIN`.
 

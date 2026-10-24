@@ -81,3 +81,48 @@ fn pyright_finds_definitions_and_references_across_files() {
     );
     servers.stop(&root);
 }
+
+#[test]
+fn typescript_finds_definitions_and_references_across_files() {
+    let home_bin = std::env::var_os("HOME")
+        .map(|home| Path::new(&home).join(".npm-global/bin/typescript-language-server"));
+    if !installed("typescript-language-server") && !home_bin.is_some_and(|path| path.is_file()) {
+        eprintln!("skipped: typescript-language-server is not installed");
+        return;
+    }
+    let folder = tempfile::tempdir().unwrap();
+    let root = folder.path().canonicalize().unwrap();
+    let util = root.join("util.ts");
+    let app = root.join("app.ts");
+    fs::write(
+        &util,
+        "export function double(value: number): number {\n  return value * 2;\n}\n",
+    )
+    .unwrap();
+    let text = "import { double } from \"./util\";\n\nconsole.log(double(21));\n";
+    fs::write(&app, text).unwrap();
+    let servers = LanguageServers::default();
+
+    let definition = look_up(&servers, Lookup::Definition, &root, &app, text, 2, 13).unwrap();
+    let location = definition
+        .locations
+        .iter()
+        .find(|location| location.path == util)
+        .expect("definition in util.ts");
+    assert_eq!(location.start, (0, 16));
+
+    let references = look_up(&servers, Lookup::References, &root, &app, text, 2, 13).unwrap();
+    assert!(
+        references
+            .locations
+            .iter()
+            .any(|location| location.path == util)
+    );
+    assert!(
+        references
+            .locations
+            .iter()
+            .any(|location| location.in_query && location.start == (2, 12))
+    );
+    servers.stop(&root);
+}

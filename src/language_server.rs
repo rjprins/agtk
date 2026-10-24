@@ -62,23 +62,6 @@ impl Language {
             Self::TypeScript => "TypeScript",
         }
     }
-
-    /// Servers to look for, in order of preference. All of them take `--stdio`.
-    fn commands(self) -> &'static [&'static str] {
-        match self {
-            Self::Python => &["basedpyright-langserver", "pyright-langserver"],
-            Self::TypeScript => &["typescript-language-server", "vtsls"],
-        }
-    }
-
-    fn missing_message(self) -> &'static str {
-        match self {
-            Self::Python => "Install pyright to look up Python code",
-            Self::TypeScript => {
-                "Install typescript-language-server to look up TypeScript and JavaScript code"
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -222,21 +205,25 @@ impl Server {
     fn start(language: Language, root: &Path) -> Result<Self, String> {
         let search_path = crate::session::login_shell_path().or_else(|| std::env::var_os("PATH"));
         let home = std::env::var_os("HOME");
-        let program = language
-            .commands()
-            .iter()
-            .find_map(|command| {
-                crate::session::resolve_executable_from(
-                    command,
-                    None,
-                    search_path.as_deref(),
-                    home.as_deref(),
-                )
-            })
-            .ok_or_else(|| language.missing_message().to_owned())?;
-        let mut command = Command::new(&program);
+        let find = |command: &str| {
+            crate::session::resolve_executable_from(
+                command,
+                None,
+                search_path.as_deref(),
+                home.as_deref(),
+            )
+        };
+        let found = match language {
+            Language::Python => ["basedpyright-langserver", "pyright-langserver"]
+                .into_iter()
+                .find_map(find)
+                .map(ServerCommand::stdio)
+                .ok_or_else(|| "Install pyright to look up Python code".to_owned()),
+            Language::TypeScript => ServerCommand::typescript(root, find),
+        }?;
+        let mut command = Command::new(&found.program);
         command
-            .arg("--stdio")
+            .args(found.args)
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -249,7 +236,11 @@ impl Server {
         let mut child = command.spawn().map_err(|error| {
             format!(
                 "Could not start {}: {error}",
-                program.file_name().unwrap_or_default().to_string_lossy()
+                found
+                    .program
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
             )
         })?;
         let (Some(stdin), Some(stdout), Some(stderr)) =
@@ -299,6 +290,7 @@ impl Server {
                         "references": { "dynamicRegistration": false },
                     },
                 },
+                "initializationOptions": found.options,
             }),
             START_TIMEOUT,
         )?;
@@ -463,6 +455,93 @@ impl Drop for Server {
     }
 }
 
+/// The program that answers lookups for a language in a worktree.
+#[derive(Debug, PartialEq)]
+struct ServerCommand {
+    program: PathBuf,
+    args: &'static [&'static str],
+    options: Value,
+}
+
+impl ServerCommand {
+    fn stdio(program: PathBuf) -> Self {
+        Self {
+            program,
+            args: &["--stdio"],
+            options: Value::Null,
+        }
+    }
+
+    /// TypeScript 7 has its own server. Older versions need typescript-language-server,
+    /// which drives their tsserver.
+    fn typescript(root: &Path, find: impl Fn(&str) -> Option<PathBuf>) -> Result<Self, String> {
+        let native = |tsc: PathBuf| Self {
+            program: tsc,
+            args: &["--lsp", "--stdio"],
+            options: Value::Null,
+        };
+        let wrapper = find("typescript-language-server");
+        let project = project_folders(root)
+            .into_iter()
+            .map(|folder| folder.join("node_modules/typescript"))
+            .find_map(|package| Some((typescript_major(&package)?, package)));
+        match (project, &wrapper) {
+            (Some((major, package)), _) if major >= 7 => {
+                return Ok(native(package.join("bin/tsc")));
+            }
+            (Some((_, package)), Some(wrapper)) => {
+                return Ok(Self {
+                    options: wrapper_options("path", &package.join("lib")),
+                    ..Self::stdio(wrapper.clone())
+                });
+            }
+            _ => {}
+        }
+        if let Some(tsc) = find("tsc").filter(|tsc| {
+            let package = tsc.canonicalize().ok();
+            package
+                .as_deref()
+                .and_then(|real| real.parent()?.parent())
+                .and_then(typescript_major)
+                .is_some_and(|major| major >= 7)
+        }) {
+            return Ok(native(tsc));
+        }
+        if let Some(wrapper) = wrapper
+            && let Some(lib) = typescript_beside(&wrapper)
+        {
+            return Ok(Self {
+                options: wrapper_options("fallbackPath", &lib),
+                ..Self::stdio(wrapper)
+            });
+        }
+        find("vtsls").map(Self::stdio).ok_or_else(|| {
+            "Install TypeScript 7 or typescript-language-server to look up TypeScript and JavaScript code"
+                .to_owned()
+        })
+    }
+}
+
+/// Settings for typescript-language-server with the TypeScript in `lib`. Its
+/// syntax-only server answers while the project loads, with definitions that
+/// stop at imports, so every lookup waits for the full project instead.
+fn wrapper_options(setting: &str, lib: &Path) -> Value {
+    json!({ "tsserver": { setting: lib, "useSyntaxServer": "never" } })
+}
+
+/// The major version of the TypeScript package in `package`.
+fn typescript_major(package: &Path) -> Option<u32> {
+    let manifest: Value =
+        serde_json::from_str(&fs::read_to_string(package.join("package.json")).ok()?).ok()?;
+    manifest
+        .get("version")?
+        .as_str()?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
 /// What agtk answers when a server asks for its settings.
 struct Settings {
     language: Language,
@@ -531,14 +610,18 @@ impl Settings {
     }
 }
 
-/// The worktree's virtual environment, or the one in the main checkout, since
-/// worktrees that agents create often have none of their own.
+/// The worktree, then its main checkout. Worktrees that agents create often
+/// have no virtual environment or `node_modules` of their own.
+fn project_folders(root: &Path) -> Vec<PathBuf> {
+    let mut folders = vec![root.to_owned()];
+    folders.extend(main_worktree(root).filter(|main| main != root));
+    folders
+}
+
 fn python_interpreter(root: &Path) -> Option<PathBuf> {
-    let mut roots = vec![root.to_owned()];
-    roots.extend(main_worktree(root).filter(|main| main != root));
-    roots
+    project_folders(root)
         .iter()
-        .flat_map(|root| [".venv", "venv"].map(|name| root.join(name).join("bin/python")))
+        .flat_map(|folder| [".venv", "venv"].map(|name| folder.join(name).join("bin/python")))
         .find(|python| python.is_file())
 }
 
@@ -552,6 +635,18 @@ fn main_worktree(root: &Path) -> Option<PathBuf> {
         return None;
     }
     common.parent().map(Path::to_owned)
+}
+
+/// A TypeScript before 7 installed next to typescript-language-server: in its
+/// own `node_modules`, or beside it in the global one, where npm and
+/// distribution packages put it.
+fn typescript_beside(server: &Path) -> Option<PathBuf> {
+    server
+        .canonicalize()
+        .ok()?
+        .ancestors()
+        .map(|folder| folder.join("node_modules/typescript/lib"))
+        .find(|lib| lib.join("tsserver.js").is_file())
 }
 
 fn read_messages(
@@ -906,6 +1001,79 @@ mod tests {
             python_interpreter(&linked),
             Some(linked.join(".venv/bin/python"))
         );
+    }
+
+    #[test]
+    fn finds_an_older_typescript_installed_beside_the_server() {
+        let folder = tempfile::tempdir().unwrap();
+        let modules = folder.path().join("lib/node_modules");
+        let cli = modules.join("typescript-language-server/lib/cli.mjs");
+        let lib = modules.join("typescript/lib");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(&cli, "").unwrap();
+        let bin = folder.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(&cli, bin.join("typescript-language-server")).unwrap();
+        assert_eq!(
+            typescript_beside(&bin.join("typescript-language-server")),
+            None
+        );
+        fs::write(lib.join("tsserver.js"), "").unwrap();
+        assert_eq!(
+            typescript_beside(&bin.join("typescript-language-server")),
+            Some(lib.canonicalize().unwrap())
+        );
+    }
+
+    fn typescript_package(folder: &Path, version: &str) -> PathBuf {
+        let package = folder.join("node_modules/typescript");
+        fs::create_dir_all(package.join("bin")).unwrap();
+        fs::create_dir_all(package.join("lib")).unwrap();
+        fs::write(package.join("bin/tsc"), "").unwrap();
+        fs::write(
+            package.join("package.json"),
+            format!(r#"{{ "name": "typescript", "version": "{version}" }}"#),
+        )
+        .unwrap();
+        package
+    }
+
+    #[test]
+    fn picks_a_typescript_server_by_version() {
+        let folder = tempfile::tempdir().unwrap();
+        let project = folder.path().join("project");
+        let wrapper = folder.path().join("bin/typescript-language-server");
+        let global = typescript_package(&folder.path().join("global"), "7.0.2");
+        let none = |_: &str| None;
+        let only_wrapper =
+            |command: &str| (command == "typescript-language-server").then(|| wrapper.clone());
+        let only_global = |command: &str| (command == "tsc").then(|| global.join("bin/tsc"));
+        fs::create_dir_all(&project).unwrap();
+
+        assert!(ServerCommand::typescript(&project, none).is_err());
+        let server = ServerCommand::typescript(&project, only_global).unwrap();
+        assert_eq!(server.program, global.join("bin/tsc"));
+        assert_eq!(server.args, ["--lsp", "--stdio"]);
+
+        let package = typescript_package(&project, "5.9.3");
+        let server = ServerCommand::typescript(&project, only_wrapper).unwrap();
+        assert_eq!(server.program, wrapper);
+        assert_eq!(
+            server.options,
+            json!({ "tsserver": { "path": package.join("lib"), "useSyntaxServer": "never" } })
+        );
+        // Without typescript-language-server, a TypeScript 7 elsewhere still answers.
+        assert_eq!(
+            ServerCommand::typescript(&project, only_global)
+                .unwrap()
+                .program,
+            global.join("bin/tsc")
+        );
+
+        typescript_package(&project, "7.1.0");
+        let server = ServerCommand::typescript(&project, only_wrapper).unwrap();
+        assert_eq!(server.program, package.join("bin/tsc"));
     }
 
     #[test]
