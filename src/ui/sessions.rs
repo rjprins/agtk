@@ -992,7 +992,8 @@ impl Workspace {
         );
     }
 
-    /// Rows drag their session id; dropping on another row of the same group reorders them.
+    /// Rows drag their session id; dropping on another row moves the session
+    /// there, into that row's project if it can join it.
     fn enable_session_drag(&self, row: &gtk::ListBoxRow, id: &str) {
         let source = gtk::DragSource::new();
         source.set_actions(gtk::gdk::DragAction::MOVE);
@@ -1008,7 +1009,7 @@ impl Workspace {
         row.add_controller(source);
 
         let target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
-        // Read the id on enter so motion can already refuse rows from other groups.
+        // Read the id on enter so motion can already refuse rows it cannot land on.
         target.set_preload(true);
         let motion_workspace = self.clone();
         let motion_id = id.to_owned();
@@ -1018,7 +1019,7 @@ impl Workspace {
             };
             let dragged = target.value().and_then(|value| value.get::<String>().ok());
             let allowed = dragged
-                .is_some_and(|dragged| motion_workspace.can_reorder_session(&dragged, &motion_id));
+                .is_some_and(|dragged| motion_workspace.can_move_session(&dragged, &motion_id));
             if !allowed {
                 clear_drop_marks(&row);
                 return gtk::gdk::DragAction::empty();
@@ -1043,7 +1044,7 @@ impl Workspace {
             let Ok(dragged) = value.get::<String>() else {
                 return false;
             };
-            drop_workspace.reorder_session(&dragged, &drop_id, drop_before(&row, y))
+            drop_workspace.move_session(&dragged, &drop_id, drop_before(&row, y))
         });
         row.add_controller(target);
     }

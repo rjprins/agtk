@@ -64,6 +64,9 @@ const CHROME_CSS: &str = r#"
 /* Where a dragged session will land. */
 .session-list row.drop-above { box-shadow: inset 0 3px var(--accent-bg-color); }
 .session-list row.drop-below { box-shadow: inset 0 -3px var(--accent-bg-color); }
+.navigation-sidebar row.drop-into {
+  background: color-mix(in srgb, var(--accent-bg-color) 24%, transparent);
+}
 .workspace-tab-agent:not(:checked) {
   color: var(--accent-color);
   background: color-mix(in srgb, var(--accent-bg-color) 10%, transparent);

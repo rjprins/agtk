@@ -339,36 +339,85 @@ impl Workspace {
         }
     }
 
-    /// Whether a dragged session may land on `target`: only within its own group.
-    pub(super) fn can_reorder_session(&self, dragged: &str, target: &str) -> bool {
+    /// Whether a dragged session may land on `target`: anywhere in its own
+    /// group, or in another project it can join.
+    pub(super) fn can_move_session(&self, dragged: &str, target: &str) -> bool {
         let sessions = self.sessions.borrow();
-        match (sessions.get(dragged), sessions.get(target)) {
-            (Some(dragged), Some(target)) => {
-                dragged.record.project_root == target.record.project_root
-            }
-            _ => false,
-        }
+        let (Some(dragged), Some(target)) = (sessions.get(dragged), sessions.get(target)) else {
+            return false;
+        };
+        dragged.record.project_root == target.record.project_root
+            || target
+                .record
+                .project_root
+                .as_deref()
+                .is_some_and(|root| can_join_project(&dragged.record, root))
     }
 
-    /// Moves `dragged` before or after `target` in the sidebar and saves the new order.
-    pub(super) fn reorder_session(&self, dragged: &str, target: &str, before: bool) -> bool {
-        if !self.can_reorder_session(dragged, target) {
+    /// Whether dropping `dragged` on the row of the project at `root` moves it there.
+    pub(super) fn can_move_session_to_project(&self, dragged: &str, root: &Path) -> bool {
+        self.sessions
+            .borrow()
+            .get(dragged)
+            .is_some_and(|session| can_join_project(&session.record, root))
+    }
+
+    /// Moves `dragged` before or after `target`, into `target`'s project if it
+    /// was in another, and saves the result.
+    pub(super) fn move_session(&self, dragged: &str, target: &str, before: bool) -> bool {
+        if !self.can_move_session(dragged, target) {
             return false;
         }
-        let changed = {
-            let sessions = self.sessions.borrow();
-            let root = sessions[dragged].record.project_root.clone();
+        let (joined, changed) = {
+            let mut sessions = self.sessions.borrow_mut();
+            let root = sessions[target].record.project_root.clone();
+            let Some(session) = sessions.get_mut(dragged) else {
+                return false;
+            };
+            let joined = session.record.project_root != root;
+            session.record.project_root = root.clone();
             let mut group = sessions
                 .values()
                 .filter(|session| session.record.project_root == root)
                 .map(|session| (session.record.id.clone(), session.record.position))
                 .collect::<Vec<_>>();
             group.sort_by(|left, right| (left.1, &left.0).cmp(&(right.1, &right.0)));
-            super::sidebar::reordered_positions(&group, dragged, target, before)
+            let changed = super::sidebar::reordered_positions(&group, dragged, target, before);
+            (joined, changed)
         };
-        if changed.is_empty() {
+        if changed.is_empty() && !joined {
             return true;
         }
+        self.save_moved_sessions(changed, joined.then_some(dragged));
+        true
+    }
+
+    /// Moves `dragged` to the end of the project at `root` and saves it.
+    pub(super) fn move_session_to_project(&self, dragged: &str, root: &Path) -> bool {
+        if !self.can_move_session_to_project(dragged, root) {
+            return false;
+        }
+        {
+            let mut sessions = self.sessions.borrow_mut();
+            let last = sessions
+                .values()
+                .filter(|session| session.record.project_root.as_deref() == Some(root))
+                .map(|session| session.record.position)
+                .max();
+            let Some(session) = sessions.get_mut(dragged) else {
+                return false;
+            };
+            session.record.project_root = Some(root.to_owned());
+            if let Some(last) = last {
+                session.record.position = session.record.position.max(last + 1);
+            }
+        }
+        self.save_moved_sessions(Vec::new(), Some(dragged));
+        true
+    }
+
+    /// Saves the new positions, and the session that `joined` another project.
+    fn save_moved_sessions(&self, changed: Vec<(String, i64)>, joined: Option<&str>) {
         let mut records = Vec::new();
         {
             let mut sessions = self.sessions.borrow_mut();
@@ -378,12 +427,25 @@ impl Workspace {
                     records.push(session.record.clone());
                 }
             }
+            if let Some(id) = joined
+                && !records.iter().any(|record| record.id == id)
+                && let Some(session) = sessions.get(id)
+            {
+                records.push(session.record.clone());
+            }
+        }
+        if let Some(id) = joined {
+            let root = records
+                .iter()
+                .find(|record| record.id == id)
+                .and_then(|record| record.project_root.clone());
+            self.remember_project(root.as_deref());
+            self.refresh_session_pr_button(id);
         }
         for record in records {
             self.persist_record(record);
         }
         self.rebuild_sidebar();
-        true
     }
 
     /// Moves every row after `id` down one and returns the position straight
@@ -538,7 +600,60 @@ impl Workspace {
         content.append(&more);
         menus::open_menu_on_right_click(&collapse, &more);
         row.set_child(Some(&content));
+        self.enable_project_drop(&row, root);
         row
+    }
+
+    /// Dropping a session on a project's row moves it to the end of that project.
+    fn enable_project_drop(&self, row: &gtk::ListBoxRow, root: &str) {
+        let target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+        // Read the id on enter so motion can already refuse sessions that cannot move.
+        target.set_preload(true);
+        let motion_workspace = self.clone();
+        let motion_root = PathBuf::from(root);
+        target.connect_motion(move |target, _, _| {
+            let Some(row) = target.widget() else {
+                return gtk::gdk::DragAction::empty();
+            };
+            let allowed = target
+                .value()
+                .and_then(|value| value.get::<String>().ok())
+                .is_some_and(|dragged| {
+                    motion_workspace.can_move_session_to_project(&dragged, &motion_root)
+                });
+            if !allowed {
+                row.remove_css_class("drop-into");
+                return gtk::gdk::DragAction::empty();
+            }
+            row.add_css_class("drop-into");
+            gtk::gdk::DragAction::MOVE
+        });
+        target.connect_leave(|target| {
+            if let Some(row) = target.widget() {
+                row.remove_css_class("drop-into");
+            }
+        });
+        let drop_workspace = self.clone();
+        let drop_root = PathBuf::from(root);
+        target.connect_drop(move |target, value, _, _| {
+            if let Some(row) = target.widget() {
+                row.remove_css_class("drop-into");
+            }
+            let Ok(dragged) = value.get::<String>() else {
+                return false;
+            };
+            if !drop_workspace.can_move_session_to_project(&dragged, &drop_root) {
+                return false;
+            }
+            // The move rebuilds the sidebar, which can remove this row mid-drop.
+            let workspace = drop_workspace.clone();
+            let root = drop_root.clone();
+            glib::idle_add_local_once(move || {
+                workspace.move_session_to_project(&dragged, &root);
+            });
+            true
+        });
+        row.add_controller(target);
     }
 
     /// Heads the projects without sessions; the list under it starts collapsed.
@@ -632,6 +747,7 @@ impl Workspace {
         content.append(&pin);
         content.append(&remove);
         row.set_child(Some(&content));
+        self.enable_project_drop(&row, root);
         row
     }
 
@@ -705,6 +821,13 @@ impl Workspace {
         button.connect_clicked(move |_| workspace.open_pr_for_project(&root));
         button
     }
+}
+
+/// A session in a Git worktree stays in that repository's project: closing it
+/// elsewhere would offer to remove a checkout the other project does not own.
+/// Other is not a target either, as a restart files the session back by its directory.
+fn can_join_project(record: &SessionRecord, root: &Path) -> bool {
+    record.worktree_path.is_none() && record.project_root.as_deref() != Some(root)
 }
 
 fn group_label(text: &str) -> gtk::ListBoxRow {
@@ -839,7 +962,8 @@ fn changed_range<'a>(current: &[String], wanted: &'a [String]) -> (usize, usize,
 
 #[cfg(test)]
 mod sidebar_tests {
-    use super::{ProjectSettings, SidebarKey, changed_range};
+    use super::{ProjectSettings, SessionRecord, SidebarKey, can_join_project, changed_range};
+    use std::path::{Path, PathBuf};
 
     fn keys(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
@@ -905,5 +1029,19 @@ mod sidebar_tests {
             panic!("inactive project key did not parse");
         };
         assert_eq!(root, "/work/old project");
+    }
+
+    #[test]
+    fn only_sessions_outside_a_worktree_join_another_project() {
+        let mut record = SessionRecord::discovered("s", PathBuf::from("/run/s.sock"));
+        record.cwd = Some(PathBuf::from("/home/me/notes"));
+        assert!(can_join_project(&record, Path::new("/home/me/notes")));
+
+        record.project_root = Some(PathBuf::from("/home/me/notes"));
+        assert!(!can_join_project(&record, Path::new("/home/me/notes")));
+        assert!(can_join_project(&record, Path::new("/home/me/house")));
+
+        record.worktree_path = Some(PathBuf::from("/home/me/notes"));
+        assert!(!can_join_project(&record, Path::new("/home/me/house")));
     }
 }
