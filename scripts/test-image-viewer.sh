@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify image rendering and file-opening on a private display.
+# Verify image rendering, file-opening and viewer recovery on a private display.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 if [[ ${1:-} != --private-bus ]]; then
@@ -29,4 +29,5 @@ done
 
 cd "$repo"
 cargo test --locked --test image_viewer -- --ignored
+cargo test --locked --test code_viewer_recovery -- --ignored
 cargo test --locked --test native_ui files_page_lists -- --ignored --test-threads=1

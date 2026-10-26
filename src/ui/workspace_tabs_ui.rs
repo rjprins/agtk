@@ -98,7 +98,8 @@ impl Workspace {
             .borrow()
             .visible_tab()
             .is_some_and(|tab| tab == &WorkspaceTabId::Diff(key.clone()))
-            && self.stack.visible_child_name().as_deref() == Some("changes-diff");
+            && self.stack.visible_child_name().as_deref() == Some("changes-diff")
+            && self.diff_viewer_host.is_visible();
         if same_diff_is_visible && !self.stale_diff_tabs.borrow().contains(&key) {
             if let Some(viewer) = self.code_viewer.borrow().as_ref() {
                 viewer.focus();
@@ -1001,7 +1002,12 @@ impl Workspace {
                     *error_state.borrow_mut() = Some((request_id, message));
                 }
             }
+            code_viewer::ViewerEvent::Stopped { reloading: false } => {
+                let workspace = link_workspace.clone();
+                glib::idle_add_local_once(move || workspace.show_viewer_stopped());
+            }
             code_viewer::ViewerEvent::Ready { .. }
+            | code_viewer::ViewerEvent::Stopped { reloading: true }
             | code_viewer::ViewerEvent::Error {
                 request_id: None, ..
             } => {}
@@ -1068,6 +1074,19 @@ impl Workspace {
         if let Some(viewer) = self.code_viewer.borrow().as_ref() {
             viewer.clear();
         }
+    }
+
+    /// Replaces a viewer that stopped and stays down with a message.
+    fn show_viewer_stopped(&self) {
+        if !self.diff_viewer_host.is_visible() {
+            return;
+        }
+        self.show_viewer_placeholder(
+            &self.diff_heading.text(),
+            "The viewer stopped. Open this again to retry, or restart agtk if it keeps stopping.",
+            None,
+            &[],
+        );
     }
 
     fn close_diff_tab(&self, key: &DiffTabKey) {

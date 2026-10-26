@@ -65,7 +65,8 @@ impl Workspace {
         let tab = WorkspaceTabId::File(key.clone());
         let tab_id = WorkspaceTabs::file_tab_id(&key);
         let same_file_is_visible = self.workspace_tabs.borrow().visible_tab() == Some(&tab)
-            && self.stack.visible_child_name().as_deref() == Some("changes-diff");
+            && self.stack.visible_child_name().as_deref() == Some("changes-diff")
+            && self.diff_viewer_host.is_visible();
         let stale = self
             .file_tabs
             .borrow()

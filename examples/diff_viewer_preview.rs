@@ -45,6 +45,9 @@ fn main() -> glib::ExitCode {
                 println!("Lookup of {lookup:?} at {line}:{column}")
             }
             ViewerEvent::Jump { .. } | ViewerEvent::History { .. } => {}
+            ViewerEvent::Stopped { reloading } => {
+                eprintln!("Viewer web process stopped, reloading: {reloading}")
+            }
             ViewerEvent::Error { message, .. } => eprintln!("Viewer error: {message}"),
         }));
         let window = adw::ApplicationWindow::builder()

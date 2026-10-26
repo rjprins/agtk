@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Once;
+use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use serde::Deserialize;
@@ -14,12 +15,17 @@ use webkit6::{
 
 const SCHEME: &str = "agtk-diff";
 const ORIGIN: &str = "agtk-diff://viewer/";
+const INDEX: &str = "agtk-diff://viewer/index.html";
 const RESOURCE_PREFIX: &str = "/nl/rutger/Agtk/viewer/";
 const MESSAGE_HANDLER: &str = "agtk";
 const MAX_EVENT_BYTES: usize = 32 * 1024;
 const MAX_DIFF_BYTES: usize = 4 * 1024 * 1024 + MAX_EVENT_BYTES;
 const MAX_IMAGE_PAYLOAD_BYTES: usize =
     crate::changes::MAX_IMAGE_BYTES.div_ceil(3) * 4 + MAX_EVENT_BYTES;
+
+/// The page stays down when its web process stops again this soon, since a new
+/// one would likely stop the same way, for example after a library upgrade.
+const CRASH_LOOP_WINDOW: Duration = Duration::from_secs(30);
 
 static REGISTER_RESOURCES: Once = Once::new();
 
@@ -90,6 +96,12 @@ pub(super) enum ViewerEvent {
         request_id: Option<String>,
         message: String,
     },
+    /// The page's web process stopped. agtk loads the page again and shows the
+    /// same document when `reloading`, and otherwise waits for something new to show.
+    #[serde(skip_deserializing)]
+    Stopped {
+        reloading: bool,
+    },
 }
 
 struct ViewerState {
@@ -97,8 +109,34 @@ struct ViewerState {
     queued: VecDeque<ViewerCommand>,
     /// Whether rendered Markdown shows instead of Monaco.
     preview: bool,
+    /// The commands that show the current document again in a reloaded page.
+    appearance: Option<ViewerCommand>,
+    shown: Option<ViewerCommand>,
+    presentation: Option<ViewerCommand>,
+    /// When the web process last stopped, and whether the page stays down.
+    stopped_at: Option<Instant>,
+    stopped: bool,
 }
 
+impl ViewerState {
+    fn remember(&mut self, command: &ViewerCommand) {
+        match command {
+            ViewerCommand::ShowDiff(_) | ViewerCommand::ShowFile(_) => {
+                self.shown = Some(command.clone());
+                self.presentation = None;
+            }
+            ViewerCommand::Clear => {
+                self.shown = None;
+                self.presentation = None;
+            }
+            ViewerCommand::SetPresentation { .. } => self.presentation = Some(command.clone()),
+            ViewerCommand::SetAppearance { .. } => self.appearance = Some(command.clone()),
+            _ => {}
+        }
+    }
+}
+
+#[derive(Clone)]
 enum ViewerCommand {
     ShowDiff(String),
     ShowFile(String),
@@ -174,6 +212,11 @@ impl CodeViewer {
             ready: false,
             queued: VecDeque::new(),
             preview: false,
+            appearance: None,
+            shown: None,
+            presentation: None,
+            stopped_at: None,
+            stopped: false,
         }));
         let message_state = state.clone();
         let message_view = web_view.clone();
@@ -226,7 +269,27 @@ impl CodeViewer {
             false
         });
         web_view.connect_create(|_, _| None);
-        web_view.load_uri("agtk-diff://viewer/index.html");
+        // Without this the view stays blank once its web process crashes.
+        let stopped_state = state.clone();
+        web_view.connect_web_process_terminated(move |web_view, reason| {
+            eprintln!("Code viewer's web process stopped: {reason:?}");
+            let reloading = {
+                let mut state = stopped_state.borrow_mut();
+                let again = state
+                    .stopped_at
+                    .is_some_and(|at| at.elapsed() < CRASH_LOOP_WINDOW);
+                state.stopped_at = Some(Instant::now());
+                state.ready = false;
+                state.queued.clear();
+                state.stopped = again;
+                !again
+            };
+            if reloading {
+                reload(web_view, &stopped_state);
+            }
+            on_event(ViewerEvent::Stopped { reloading });
+        });
+        web_view.load_uri(INDEX);
 
         Self { web_view, state }
     }
@@ -323,6 +386,21 @@ impl CodeViewer {
     }
 
     fn enqueue(&self, command: ViewerCommand) {
+        let stopped = {
+            let mut state = self.state.borrow_mut();
+            state.remember(&command);
+            state.stopped
+        };
+        // Something new to show gives a stopped page another try.
+        if stopped
+            && matches!(
+                command,
+                ViewerCommand::ShowDiff(_) | ViewerCommand::ShowFile(_)
+            )
+        {
+            reload(&self.web_view, &self.state);
+            return;
+        }
         if self.state.borrow().ready {
             call_command(&self.web_view, command);
             return;
@@ -364,6 +442,21 @@ impl CodeViewer {
             state.queued.pop_front();
         }
     }
+}
+
+/// Loads the page in a new web process and queues what the old one showed.
+fn reload(web_view: &WebView, state: &RefCell<ViewerState>) {
+    {
+        let state = &mut *state.borrow_mut();
+        state.ready = false;
+        state.stopped = false;
+        state.queued = [&state.appearance, &state.shown, &state.presentation]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect();
+    }
+    web_view.load_uri(INDEX);
 }
 
 fn flush_queued(web_view: &WebView, state: &Rc<RefCell<ViewerState>>) {
@@ -548,6 +641,8 @@ fn valid_event(event: &ViewerEvent) -> bool {
                 .is_none_or(|request_id| request_id.len() <= 128)
                 && message.len() <= 2048
         }
+        // Only agtk reports this, never the page.
+        ViewerEvent::Stopped { .. } => false,
     }
 }
 
