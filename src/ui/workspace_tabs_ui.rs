@@ -46,6 +46,14 @@ impl Workspace {
             viewer.clear();
         }
         *self.selected_session.borrow_mut() = Some(session_id.to_owned());
+        let context = self
+            .workspace_tabs
+            .borrow()
+            .active_context()
+            .map(str::to_owned);
+        if let Some(context) = context {
+            self.changes.show_remembered_page(&context);
+        }
         self.refresh_usage();
         self.stack.set_visible_child_name(session_id);
         self.session_context_bar.set_visible(true);

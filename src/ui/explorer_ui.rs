@@ -14,6 +14,7 @@ use crate::explorer::{FileNode, FileTree, StatusOverlay, filter_files, status_gl
 pub(super) const FILES_PAGE: &str = "files";
 pub(super) const CHANGES_PAGE: &str = "changes";
 pub(super) const SIDEBAR_PAGE_PREFERENCE: &str = "changesSidebarPage";
+pub(super) const SIDEBAR_PAGES_PREFERENCE: &str = "changesSidebarPages";
 
 type OpenHandler = Rc<dyn Fn(Arc<FileNode>)>;
 
@@ -632,6 +633,23 @@ impl Workspace {
                 let worktree_page = page != brief_ui::BRIEF_PAGE;
                 workspace.changes.branch.set_visible(worktree_page);
                 workspace.changes.refresh.set_visible(worktree_page);
+                // Selecting a session restores its worktree's page; it refreshes and keeps focus.
+                if workspace.changes.restoring_page.get() {
+                    return;
+                }
+                let context = workspace
+                    .workspace_tabs
+                    .borrow()
+                    .active_context()
+                    .map(str::to_owned);
+                if let Some(context) = context {
+                    workspace.changes.remember_page(&context, &page);
+                    workspace.save_preference(
+                        SIDEBAR_PAGES_PREFERENCE,
+                        serde_json::to_value(workspace.changes.page_preferences())
+                            .unwrap_or_default(),
+                    );
+                }
                 if page == FILES_PAGE {
                     workspace.refresh_explorer_from_snapshot();
                     workspace.changes.explorer.filter.grab_focus();

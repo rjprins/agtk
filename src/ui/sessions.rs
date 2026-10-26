@@ -217,6 +217,10 @@ impl Workspace {
                     .preference_or_default::<std::collections::HashMap<String, String>>(
                         "changesBaseRefs",
                     )?;
+                let changes_sidebar_pages = store
+                    .preference_or_default::<std::collections::HashMap<String, String>>(
+                        explorer_ui::SIDEBAR_PAGES_PREFERENCE,
+                    )?;
                 let markdown_preview = store
                     .preference(file_tabs_ui::MARKDOWN_PREVIEW_PREFERENCE)?
                     .and_then(|value| serde_json::from_value(value).ok())
@@ -303,6 +307,7 @@ impl Workspace {
                     changes_sidebar_open,
                     changes_sidebar_page,
                     changes_base_refs,
+                    changes_sidebar_pages,
                     changes_commits_ago,
                     markdown_preview,
                     recovered,
@@ -331,6 +336,7 @@ impl Workspace {
                     changes_sidebar_open,
                     changes_sidebar_page,
                     changes_base_refs,
+                    changes_sidebar_pages,
                     changes_commits_ago,
                     markdown_preview,
                     recovered,
@@ -359,7 +365,11 @@ impl Workspace {
                     workspace.load_claude_presets(claude_presets);
                     workspace.brief_hidden_expanded.set(brief_hidden_expanded);
                     workspace.load_brief(brief);
-                    workspace.changes.state.borrow_mut().base_ref_by_context = changes_base_refs;
+                    {
+                        let mut state = workspace.changes.state.borrow_mut();
+                        state.base_ref_by_context = changes_base_refs;
+                        state.page_by_context = changes_sidebar_pages;
+                    }
                     workspace.changes.updating_base.set(true);
                     workspace
                         .changes

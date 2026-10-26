@@ -35,6 +35,8 @@ pub(super) struct ChangesSidebar {
     pub brief: BriefPage,
     pub(crate) state: Rc<RefCell<ChangesSidebarState>>,
     pub updating_base: Rc<std::cell::Cell<bool>>,
+    /// Set while switching to a worktree's remembered page, so the switch is not remembered.
+    pub restoring_page: Rc<std::cell::Cell<bool>>,
 }
 
 #[derive(Default)]
@@ -50,6 +52,7 @@ pub(crate) struct ChangesSidebarState {
     pub expansion_by_context: HashMap<String, HashMap<String, bool>>,
     pub base_refs: Vec<String>,
     pub base_ref_by_context: HashMap<String, String>,
+    pub page_by_context: HashMap<String, String>,
 }
 
 impl ChangesSidebar {
@@ -205,7 +208,34 @@ impl ChangesSidebar {
             brief,
             state: Rc::new(RefCell::new(ChangesSidebarState::default())),
             updating_base: Rc::new(std::cell::Cell::new(false)),
+            restoring_page: Rc::new(std::cell::Cell::new(false)),
         }
+    }
+
+    /// Shows the page last picked in `context`, keeping the current page if none was.
+    pub fn show_remembered_page(&self, context: &str) {
+        let Some(page) = self.state.borrow().page_by_context.get(context).cloned() else {
+            return;
+        };
+        if !matches!(page.as_str(), CHANGES_PAGE | FILES_PAGE | BRIEF_PAGE)
+            || self.pages.visible_child_name().as_deref() == Some(page.as_str())
+        {
+            return;
+        }
+        self.restoring_page.set(true);
+        self.pages.set_visible_child_name(&page);
+        self.restoring_page.set(false);
+    }
+
+    pub fn remember_page(&self, context: &str, page: &str) {
+        self.state
+            .borrow_mut()
+            .page_by_context
+            .insert(context.to_owned(), page.to_owned());
+    }
+
+    pub fn page_preferences(&self) -> HashMap<String, String> {
+        self.state.borrow().page_by_context.clone()
     }
 
     /// The title of the page the sidebar shows, for the inspection tree.
