@@ -150,6 +150,45 @@ fn worktree_files_list_existing_tracked_untracked_and_ignored_paths() {
 }
 
 #[test]
+fn recent_files_put_the_newest_edit_first_and_leave_out_ignored_and_deleted_ones() {
+    use std::time::{Duration, SystemTime};
+
+    let dir = repository();
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/new.rs"), "fn main() {}\n").unwrap();
+    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::create_dir_all(root.join("target")).unwrap();
+    fs::write(root.join("target/ignored.txt"), "ignored\n").unwrap();
+    fs::write(root.join("deleted.txt"), "deleted\n").unwrap();
+    git(root, &["add", "deleted.txt"]);
+    fs::remove_file(root.join("deleted.txt")).unwrap();
+    let now = SystemTime::now();
+    for (path, minutes_ago) in [
+        ("file.txt", 1),
+        ("src/new.rs", 30),
+        (".gitignore", 10),
+        ("target/ignored.txt", 0),
+    ] {
+        fs::File::options()
+            .write(true)
+            .open(root.join(path))
+            .unwrap()
+            .set_modified(now - Duration::from_secs(minutes_ago * 60))
+            .unwrap();
+    }
+
+    assert_eq!(
+        agtk::changes::list_recent_files(root).unwrap(),
+        [
+            b"file.txt".to_vec(),
+            b".gitignore".to_vec(),
+            b"src/new.rs".to_vec(),
+        ]
+    );
+}
+
+#[test]
 fn worktree_files_list_nested_repositories_without_git_metadata() {
     let dir = repository();
     let root = dir.path();

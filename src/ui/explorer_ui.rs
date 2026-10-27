@@ -1,4 +1,5 @@
-//! The Files page of the right sidebar: a lazy tree of the worktree plus a flat filter.
+//! The Files page of the right sidebar: a lazy tree of the worktree plus a flat filter,
+//! or a flat list with the most recently edited files first.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -9,12 +10,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use super::*;
-use crate::explorer::{FileNode, FileTree, StatusOverlay, filter_files, status_glyph};
+use crate::explorer::{
+    FileNode, FileTree, StatusOverlay, file_nodes, filter_files, filter_in_order, status_glyph,
+};
 
 pub(super) const FILES_PAGE: &str = "files";
 pub(super) const CHANGES_PAGE: &str = "changes";
 pub(super) const SIDEBAR_PAGE_PREFERENCE: &str = "changesSidebarPage";
 pub(super) const SIDEBAR_PAGES_PREFERENCE: &str = "changesSidebarPages";
+pub(super) const RECENT_FIRST_PREFERENCE: &str = "filesRecentFirst";
 
 type OpenHandler = Rc<dyn Fn(Arc<FileNode>)>;
 
@@ -22,6 +26,7 @@ type OpenHandler = Rc<dyn Fn(Arc<FileNode>)>;
 pub(super) struct FileExplorer {
     pub root: gtk::Box,
     pub filter: gtk::SearchEntry,
+    pub recent_first: gtk::ToggleButton,
     pub views: gtk::Stack,
     pub tree_view: gtk::ListView,
     pub match_view: gtk::ListView,
@@ -38,6 +43,10 @@ pub(crate) struct ExplorerState {
     pub worktree_root: Option<PathBuf>,
     pub tree: Option<FileTree>,
     pub overlay: StatusOverlay,
+    /// Whether the page lists files most recently edited first instead of the tree.
+    pub recent_first: bool,
+    /// The files, newest edit first, once listed for `recent_first`.
+    recent: Option<Vec<Arc<FileNode>>>,
     /// Expanded directories per worktree, restored when its tree is rebuilt.
     expanded_by_root: HashMap<PathBuf, HashSet<Vec<u8>>>,
     pub request_generation: u64,
@@ -56,12 +65,26 @@ impl FileExplorer {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let filter = gtk::SearchEntry::builder()
             .placeholder_text("Filter files")
+            .hexpand(true)
+            .build();
+        filter.update_property(&[gtk::accessible::Property::Label("Filter files")]);
+        let recent_first = gtk::ToggleButton::builder()
+            .icon_name("document-open-recent-symbolic")
+            .tooltip_text("Most Recently Edited First")
+            .build();
+        recent_first.add_css_class("flat");
+        recent_first.update_property(&[gtk::accessible::Property::Label(
+            "Most recently edited first",
+        )]);
+        let header = gtk::Box::builder()
+            .spacing(6)
             .margin_start(12)
             .margin_end(12)
             .margin_bottom(8)
             .build();
-        filter.update_property(&[gtk::accessible::Property::Label("Filter files")]);
-        root.append(&filter);
+        header.append(&filter);
+        header.append(&recent_first);
+        root.append(&header);
 
         let state = Rc::new(RefCell::new(ExplorerState::default()));
         let tree_store = gio::ListStore::new::<glib::BoxedAnyObject>();
@@ -139,6 +162,7 @@ impl FileExplorer {
         let explorer = Self {
             root,
             filter,
+            recent_first,
             views,
             tree_view,
             match_view,
@@ -272,6 +296,7 @@ impl FileExplorer {
             let mut state = self.state.borrow_mut();
             state.worktree_root = None;
             state.tree = None;
+            state.recent = None;
             state.overlay = StatusOverlay::default();
         }
         self.tree_store.remove_all();
@@ -286,9 +311,11 @@ impl FileExplorer {
     }
 
     /// Shows a freshly listed tree, keeping the widgets when nothing was added or removed.
-    pub fn set_tree(&self, root: PathBuf, tree: FileTree) {
+    /// `recent` holds the files newest edit first, when listed for `recent_first`.
+    pub fn set_tree(&self, root: PathBuf, tree: FileTree, recent: Option<Vec<Arc<FileNode>>>) {
         let unchanged = {
-            let state = self.state.borrow();
+            let mut state = self.state.borrow_mut();
+            state.recent = recent.filter(|_| state.recent_first);
             state.worktree_root.as_ref() == Some(&root)
                 && state
                     .tree
@@ -297,7 +324,7 @@ impl FileExplorer {
         };
         if unchanged {
             self.state.borrow_mut().tree = Some(tree);
-            self.show_lists();
+            self.apply_filter();
             return;
         }
         self.remember_expansion();
@@ -315,23 +342,17 @@ impl FileExplorer {
         }
         self.restore_expansion();
         self.apply_filter();
-        self.show_lists();
     }
 
-    fn show_lists(&self) {
-        let file_count = self
-            .state
-            .borrow()
-            .tree
-            .as_ref()
-            .map_or(0, |tree| tree.file_count);
-        if self.filter.text().trim().is_empty() {
-            let files = if file_count == 1 { "file" } else { "files" };
-            self.footer.set_text(&format!("{file_count} {files}"));
-            self.views.set_visible_child_name("tree");
-        } else {
-            self.views.set_visible_child_name("matches");
+    /// Switches between the tree and the recent list. The recent list waits for
+    /// the next listing, which reads the edit times.
+    pub fn set_recent_first(&self, recent_first: bool) {
+        {
+            let mut state = self.state.borrow_mut();
+            state.recent_first = recent_first;
+            state.recent = None;
         }
+        self.apply_filter();
     }
 
     /// Marks changed files and the folders that hold them without rebuilding rows.
@@ -346,6 +367,7 @@ impl FileExplorer {
         }
     }
 
+    /// Shows the tree, or the flat list of filter matches or recent edits.
     fn apply_filter(&self) {
         let query = self.filter.text();
         let query = query.trim();
@@ -353,30 +375,60 @@ impl FileExplorer {
         let Some(tree) = state.tree.as_ref() else {
             return;
         };
-        if query.is_empty() {
-            drop(state);
-            self.match_store.remove_all();
-            self.show_lists();
-            return;
-        }
-        let (matches, total) = filter_files(tree, query);
+        let file_count = tree.file_count;
+        let (matches, total) = match (state.recent_first, state.recent.as_deref()) {
+            (true, Some(recent)) => filter_in_order(recent, query),
+            (true, None) => (Vec::new(), 0),
+            (false, _) if !query.is_empty() => filter_files(tree, query),
+            (false, _) => {
+                drop(state);
+                self.show_matches(&[]);
+                let files = if file_count == 1 { "file" } else { "files" };
+                self.footer.set_text(&format!("{file_count} {files}"));
+                self.views.set_visible_child_name("tree");
+                return;
+            }
+        };
+        let listed = !state.recent_first || state.recent.is_some();
         drop(state);
-        let items = matches
-            .iter()
-            .map(|node| glib::BoxedAnyObject::new(node.clone()))
-            .collect::<Vec<_>>();
-        self.match_store.remove_all();
-        self.match_store.splice(0, 0, &items);
-        self.footer.set_text(&if total == 0 {
+        self.show_matches(&matches);
+        self.footer.set_text(&if !listed {
+            "Reading edit times…".to_owned()
+        } else if total == 0 && query.is_empty() {
+            "No files".to_owned()
+        } else if total == 0 {
             "No matching files".to_owned()
         } else if total > matches.len() {
-            format!("Showing {} of {total} matches", matches.len())
+            let what = if query.is_empty() { "files" } else { "matches" };
+            format!("Showing {} of {total} {what}", matches.len())
+        } else if query.is_empty() {
+            let files = if total == 1 { "file" } else { "files" };
+            format!("{total} {files}, recently edited first")
         } else if total == 1 {
             "1 match".to_owned()
         } else {
             format!("{total} matches")
         });
         self.views.set_visible_child_name("matches");
+    }
+
+    /// Fills the flat list, leaving it alone when it already shows these files,
+    /// so a refresh keeps the scroll position.
+    fn show_matches(&self, nodes: &[Arc<FileNode>]) {
+        let same = self.match_store.n_items() as usize == nodes.len()
+            && nodes.iter().enumerate().all(|(position, node)| {
+                node_of(self.match_store.item(position as u32).as_ref())
+                    .is_some_and(|shown| shown.path == node.path)
+            });
+        if same {
+            return;
+        }
+        let items = nodes
+            .iter()
+            .map(|node| glib::BoxedAnyObject::new(node.clone()))
+            .collect::<Vec<_>>();
+        self.match_store
+            .splice(0, self.match_store.n_items(), &items);
     }
 
     fn remember_expansion(&self) {
@@ -570,19 +622,17 @@ fn bind_row(
         "text-x-generic-symbolic"
     }));
     name.set_text(&node.name);
-    name.set_hexpand(!show_directory);
     let path = node.display_path();
     widget.set_tooltip_text(Some(&path));
-    if show_directory {
-        let parent = path
-            .rsplit_once('/')
-            .map(|(parent, _)| parent)
-            .unwrap_or("");
-        directory.set_text(parent);
-        directory.set_visible(!parent.is_empty());
-    } else {
-        directory.set_visible(false);
-    }
+    let parent = path
+        .rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .filter(|_| show_directory)
+        .unwrap_or("");
+    directory.set_text(parent);
+    directory.set_visible(!parent.is_empty());
+    // Whichever label shows last fills the row, so the status mark stays at the end.
+    name.set_hexpand(parent.is_empty());
     let mut state = state.borrow_mut();
     apply_status(&status, &node, &state.overlay);
     state
@@ -620,6 +670,23 @@ impl Workspace {
         self.changes
             .explorer
             .set_open_handler(move |node| workspace.open_explorer_file(&node));
+        let workspace = self.clone();
+        self.changes
+            .explorer
+            .recent_first
+            .connect_toggled(move |button| {
+                let explorer = &workspace.changes.explorer;
+                let recent_first = button.is_active();
+                // Loading the preference sets the state first, so it is not saved again.
+                if explorer.state.borrow().recent_first == recent_first {
+                    return;
+                }
+                explorer.set_recent_first(recent_first);
+                workspace.save_preference(RECENT_FIRST_PREFERENCE, serde_json::json!(recent_first));
+                if recent_first {
+                    workspace.refresh_explorer_from_snapshot();
+                }
+            });
         let workspace = self.clone();
         self.changes
             .pages
@@ -678,12 +745,13 @@ impl Workspace {
             return;
         }
         let root = snapshot.context.root.clone();
-        let (generation, root_changed) = {
+        let (generation, root_changed, recent_first) = {
             let mut state = explorer.state.borrow_mut();
             state.request_generation = state.request_generation.wrapping_add(1);
             (
                 state.request_generation,
                 state.worktree_root.as_ref() != Some(&root),
+                state.recent_first,
             )
         };
         // GTK updates can borrow explorer state too, so release it on both paths.
@@ -692,7 +760,12 @@ impl Workspace {
         }
         let listed_root = root.clone();
         let result = self.changes_io.submit(move || {
-            crate::changes::list_worktree_files(&listed_root).map(crate::explorer::build_tree)
+            let tree = crate::changes::list_worktree_files(&listed_root)
+                .map(crate::explorer::build_tree)?;
+            let recent = recent_first
+                .then(|| crate::changes::list_recent_files(&listed_root).map(file_nodes))
+                .transpose()?;
+            Ok((tree, recent))
         });
         let workspace = self.clone();
         glib::spawn_future_local(async move {
@@ -704,7 +777,7 @@ impl Workspace {
                 return;
             }
             match result {
-                Ok(tree) => explorer.set_tree(root, tree),
+                Ok((tree, recent)) => explorer.set_tree(root, tree, recent),
                 Err(error) => explorer.set_message(&format!("Could not list files: {error}")),
             }
         });

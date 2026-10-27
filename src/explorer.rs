@@ -129,21 +129,45 @@ pub fn build_tree(paths: impl IntoIterator<Item = Vec<u8>>) -> FileTree {
     }
 }
 
+/// Flat file nodes for worktree-relative paths, kept in the order given.
+pub fn file_nodes(paths: Vec<Vec<u8>>) -> Vec<Arc<FileNode>> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let name = path.rsplit(|byte| *byte == b'/').next().unwrap_or(&path);
+            Arc::new(FileNode {
+                name: String::from_utf8_lossy(name).into_owned(),
+                path,
+                is_dir: false,
+                children: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+fn query_words(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>()
+}
+
+fn path_has_words(file: &FileNode, words: &[String]) -> bool {
+    let path = file.display_path().to_lowercase();
+    words.iter().all(|word| path.contains(word.as_str()))
+}
+
 /// Files whose path contains every whitespace-separated word of `query`, ignoring case.
 /// Basename matches come first so `mod.rs` finds `src/ui/mod.rs` before `src/module/x.rs`.
 pub fn filter_files(tree: &FileTree, query: &str) -> (Vec<Arc<FileNode>>, usize) {
-    let words = query
-        .split_whitespace()
-        .map(str::to_lowercase)
-        .collect::<Vec<_>>();
+    let words = query_words(query);
     if words.is_empty() {
         return (Vec::new(), 0);
     }
     let mut by_name = Vec::new();
     let mut by_path = Vec::new();
     for file in &tree.files {
-        let path = file.display_path().to_lowercase();
-        if !words.iter().all(|word| path.contains(word.as_str())) {
+        if !path_has_words(file, &words) {
             continue;
         }
         let name = file.name.to_lowercase();
@@ -157,6 +181,19 @@ pub fn filter_files(tree: &FileTree, query: &str) -> (Vec<Arc<FileNode>>, usize)
     by_name.extend(by_path);
     by_name.truncate(MAX_FILTER_MATCHES);
     (by_name, total)
+}
+
+/// Like `filter_files`, but keeps the order of `files`, and an empty query keeps them all.
+pub fn filter_in_order(files: &[Arc<FileNode>], query: &str) -> (Vec<Arc<FileNode>>, usize) {
+    let words = query_words(query);
+    let mut matches = files
+        .iter()
+        .filter(|file| path_has_words(file, &words))
+        .cloned()
+        .collect::<Vec<_>>();
+    let total = matches.len();
+    matches.truncate(MAX_FILTER_MATCHES);
+    (matches, total)
 }
 
 /// What the tree shows next to each changed path and the folders that contain one.
@@ -197,7 +234,7 @@ pub fn status_glyph(status: ChangeStatus) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileNode, build_tree, filter_files};
+    use super::{FileNode, build_tree, file_nodes, filter_files, filter_in_order};
     use std::sync::Arc;
 
     fn paths(tree: &[Arc<FileNode>]) -> Vec<String> {
@@ -259,5 +296,25 @@ mod tests {
         let (matches, _) = filter_files(&tree, "ui rs");
         assert_eq!(paths(&matches), ["src/ui/mod.rs"]);
         assert_eq!(filter_files(&tree, "   ").1, 0);
+    }
+
+    #[test]
+    fn ordered_filter_keeps_the_given_order() {
+        let files = file_nodes(vec![
+            b"src/ui/mod.rs".to_vec(),
+            b"README.md".to_vec(),
+            b"src/main.rs".to_vec(),
+        ]);
+        assert_eq!(files[0].name, "mod.rs");
+        assert!(!files[0].is_dir);
+        let (matches, total) = filter_in_order(&files, "  ");
+        assert_eq!(total, 3);
+        assert_eq!(
+            paths(&matches),
+            ["src/ui/mod.rs", "README.md", "src/main.rs"]
+        );
+        let (matches, total) = filter_in_order(&files, "SRC rs");
+        assert_eq!(total, 2);
+        assert_eq!(paths(&matches), ["src/ui/mod.rs", "src/main.rs"]);
     }
 }

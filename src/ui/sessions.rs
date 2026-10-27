@@ -222,6 +222,10 @@ impl Workspace {
                     .preference_or_default::<std::collections::HashMap<String, String>>(
                         explorer_ui::SIDEBAR_PAGES_PREFERENCE,
                     )?;
+                let files_recent_first = store
+                    .preference(explorer_ui::RECENT_FIRST_PREFERENCE)?
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
                 let markdown_preview = store
                     .preference(file_tabs_ui::MARKDOWN_PREVIEW_PREFERENCE)?
                     .and_then(|value| serde_json::from_value(value).ok())
@@ -309,6 +313,7 @@ impl Workspace {
                     changes_sidebar_page,
                     changes_base_refs,
                     changes_sidebar_pages,
+                    files_recent_first,
                     changes_commits_ago,
                     markdown_preview,
                     recovered,
@@ -338,6 +343,7 @@ impl Workspace {
                     changes_sidebar_page,
                     changes_base_refs,
                     changes_sidebar_pages,
+                    files_recent_first,
                     changes_commits_ago,
                     markdown_preview,
                     recovered,
@@ -378,6 +384,15 @@ impl Workspace {
                         .set_value(changes_commits_ago as f64);
                     workspace.changes.updating_base.set(false);
                     workspace.markdown_preview.set(markdown_preview);
+                    workspace
+                        .changes
+                        .explorer
+                        .set_recent_first(files_recent_first);
+                    workspace
+                        .changes
+                        .explorer
+                        .recent_first
+                        .set_active(files_recent_first);
                     if let Some(page @ (explorer_ui::FILES_PAGE | brief_ui::BRIEF_PAGE)) =
                         changes_sidebar_page.as_deref()
                     {

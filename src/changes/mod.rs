@@ -63,6 +63,41 @@ pub fn list_worktree_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
     Ok(files)
 }
 
+/// The tracked and untracked files below `root`, most recently modified first.
+/// Git-ignored files are left out, or build output would fill the top.
+pub fn list_recent_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
+    let output = git::run_checked(
+        root,
+        [
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )?;
+    let mut paths = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>();
+    // Unmerged files are listed once per stage.
+    paths.sort_unstable();
+    paths.dedup();
+    // Deleted files and submodule folders have no file to show.
+    let mut files = paths
+        .into_iter()
+        .filter_map(|path| {
+            let metadata = fs::symlink_metadata(root.join(OsStr::from_bytes(path))).ok()?;
+            (!metadata.is_dir()).then_some((metadata.modified().ok()?, path.to_vec()))
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|(a_time, a_path), (b_time, b_path)| {
+        b_time.cmp(a_time).then_with(|| a_path.cmp(b_path))
+    });
+    Ok(files.into_iter().map(|(_, path)| path).collect())
+}
+
 pub fn commit_is_in_branch(context: &WorktreeContext, commit_oid: &str) -> Result<bool, String> {
     let (Some(base), Some(head)) = (context.base_oid.as_deref(), context.head_oid.as_deref())
     else {

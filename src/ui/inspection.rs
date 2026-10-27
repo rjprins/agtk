@@ -1009,6 +1009,16 @@ fn files_page_node(workspace: &Workspace) -> UiNode {
                 children: Vec::new(),
             },
             UiNode {
+                id: "files-recent-first".to_owned(),
+                role: "togglebutton".to_owned(),
+                label: Some("Most recently edited first".to_owned()),
+                is_visible: page_visible,
+                is_enabled: explorer.recent_first.is_sensitive(),
+                is_selected: explorer.recent_first.is_active(),
+                bounds: widget_bounds(&explorer.recent_first, &workspace.window),
+                children: Vec::new(),
+            },
+            UiNode {
                 id: "files-tree".to_owned(),
                 role: "tree".to_owned(),
                 label: Some(format!(
