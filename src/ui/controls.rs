@@ -23,6 +23,56 @@ impl Workspace {
         });
     }
 
+    /// Types `text` into a running session, and submits it with Enter when
+    /// `append_enter`. Returns the bytes written, or `None` when the session is gone.
+    pub(super) fn send_session_input(
+        &self,
+        session_id: &str,
+        text: &str,
+        append_enter: bool,
+    ) -> Option<usize> {
+        let (terminal, is_agent, tracker) = self
+            .sessions
+            .borrow()
+            .get(session_id)
+            .filter(|session| session.record.state != SessionState::Exited)
+            .map(|session| {
+                (
+                    session.terminal.clone(),
+                    status_ui::is_agent(session.record.kind),
+                    session.input_tracker.clone(),
+                )
+            })?;
+        // VTE sends these bytes directly to the attached child PTY.
+        // Source: https://gnome.pages.gitlab.gnome.org/vte/gtk4/method.Terminal.feed_child.html
+        let mut bytes_written = text.len();
+        if append_enter {
+            // Agents only submit on a carriage return, and only keep a
+            // multi-line message together when it arrives as a paste.
+            if is_agent && !text.is_empty() {
+                terminal.paste_text(text);
+            } else {
+                tracker.borrow_mut().push(text);
+                terminal.feed_child(text.as_bytes());
+            }
+            terminal.feed_child(b"\r");
+            let submitted = tracker.borrow_mut().push("\r");
+            if let Some(input) = submitted {
+                self.record_typed_input(session_id, input);
+            }
+            bytes_written += 1;
+            self.mark_agent_busy(session_id);
+        } else {
+            let submitted = tracker.borrow_mut().push(text);
+            if let Some(input) = submitted {
+                self.record_typed_input(session_id, input);
+            }
+            terminal.feed_child(text.as_bytes());
+        }
+        self.remember_pending_input(session_id, tracker.borrow().has_pending_input());
+        Some(bytes_written)
+    }
+
     pub(super) fn handle_control_request(&self, pending: PendingRequest) {
         if matches!(&pending.request.command, ControlCommand::UiOpenDiff(_)) {
             self.open_diff_control(pending);
@@ -316,55 +366,13 @@ impl Workspace {
                 }
             }
             ControlCommand::SessionSendInput(params) => {
-                let terminal = self
-                    .sessions
-                    .borrow()
-                    .get(&params.session_id)
-                    .filter(|session| session.record.state != SessionState::Exited)
-                    .map(|session| {
-                        (
-                            session.terminal.clone(),
-                            status_ui::is_agent(session.record.kind),
-                            session.input_tracker.clone(),
-                        )
-                    });
-                if let Some((terminal, is_agent, tracker)) = terminal {
-                    // VTE sends these bytes directly to the attached child PTY.
-                    // Source: https://gnome.pages.gitlab.gnome.org/vte/gtk4/method.Terminal.feed_child.html
-                    let mut bytes_written = params.text.len();
-                    if params.append_enter {
-                        // Agents only submit on a carriage return, and only keep a
-                        // multi-line message together when it arrives as a paste.
-                        if is_agent && !params.text.is_empty() {
-                            terminal.paste_text(&params.text);
-                        } else {
-                            tracker.borrow_mut().push(&params.text);
-                            terminal.feed_child(params.text.as_bytes());
-                        }
-                        terminal.feed_child(b"\r");
-                        let submitted = tracker.borrow_mut().push("\r");
-                        if let Some(input) = submitted {
-                            self.record_typed_input(&params.session_id, input);
-                        }
-                        bytes_written += 1;
-                        self.mark_agent_busy(&params.session_id);
-                    } else {
-                        let submitted = tracker.borrow_mut().push(&params.text);
-                        if let Some(input) = submitted {
-                            self.record_typed_input(&params.session_id, input);
-                        }
-                        terminal.feed_child(params.text.as_bytes());
-                    }
-                    self.remember_pending_input(
-                        &params.session_id,
-                        tracker.borrow().has_pending_input(),
-                    );
-                    ControlResponse::success(
+                match self.send_session_input(&params.session_id, &params.text, params.append_enter)
+                {
+                    Some(bytes_written) => ControlResponse::success(
                         id,
                         serde_json::json!({ "bytesWritten": bytes_written }),
-                    )
-                } else {
-                    session_not_found(id, &params.session_id)
+                    ),
+                    None => session_not_found(id, &params.session_id),
                 }
             }
             ControlCommand::SessionRename(params) => session_not_found(id, &params.session_id),

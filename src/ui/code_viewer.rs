@@ -91,6 +91,18 @@ pub(super) enum ViewerEvent {
         line: u32,
         column: u32,
     },
+    /// Selected text with a comment for an agent session, from one-based
+    /// `start_line` to `end_line`. `text` is absent when it was too long to send.
+    Comment {
+        comment_id: u32,
+        document_id: String,
+        session_id: String,
+        comment: String,
+        start_line: u32,
+        end_line: u32,
+        #[serde(default)]
+        text: Option<String>,
+    },
     Error {
         #[serde(default)]
         request_id: Option<String>,
@@ -111,6 +123,7 @@ struct ViewerState {
     preview: bool,
     /// The commands that show the current document again in a reloaded page.
     appearance: Option<ViewerCommand>,
+    comment_sessions: Option<ViewerCommand>,
     shown: Option<ViewerCommand>,
     presentation: Option<ViewerCommand>,
     /// When the web process last stopped, and whether the page stays down.
@@ -131,6 +144,7 @@ impl ViewerState {
             }
             ViewerCommand::SetPresentation { .. } => self.presentation = Some(command.clone()),
             ViewerCommand::SetAppearance { .. } => self.appearance = Some(command.clone()),
+            ViewerCommand::SetCommentSessions(_) => self.comment_sessions = Some(command.clone()),
             _ => {}
         }
     }
@@ -164,6 +178,12 @@ enum ViewerCommand {
     AnswerLookup {
         request_id: u32,
         answer: String,
+    },
+    /// The agent sessions a comment can go to, as JSON.
+    SetCommentSessions(String),
+    AnswerComment {
+        comment_id: u32,
+        error: String,
     },
 }
 
@@ -213,6 +233,7 @@ impl CodeViewer {
             queued: VecDeque::new(),
             preview: false,
             appearance: None,
+            comment_sessions: None,
             shown: None,
             presentation: None,
             stopped_at: None,
@@ -373,6 +394,38 @@ impl CodeViewer {
         });
     }
 
+    /// Offers `sessions`, as `(id, name)`, for comments on selected text, with
+    /// `preferred` chosen first. Nothing is offered when the list is empty.
+    pub(super) fn set_comment_sessions(
+        &self,
+        sessions: &[(String, String)],
+        preferred: Option<&str>,
+    ) {
+        let json = serde_json::json!({
+            "sessions": sessions
+                .iter()
+                .map(|(id, name)| serde_json::json!({ "id": id, "name": name }))
+                .collect::<Vec<_>>(),
+            "preferred": preferred,
+        })
+        .to_string();
+        let unchanged = matches!(
+            &self.state.borrow().comment_sessions,
+            Some(ViewerCommand::SetCommentSessions(sent)) if *sent == json
+        );
+        if !unchanged {
+            self.enqueue(ViewerCommand::SetCommentSessions(json));
+        }
+    }
+
+    /// Answers a `Comment` event: sent when `error` is empty.
+    pub(super) fn answer_comment(&self, comment_id: u32, error: &str) {
+        self.enqueue(ViewerCommand::AnswerComment {
+            comment_id,
+            error: error.to_owned(),
+        });
+    }
+
     pub(super) fn focus(&self) {
         self.web_view.grab_focus();
     }
@@ -429,6 +482,12 @@ impl CodeViewer {
                     .retain(|queued| !matches!(queued, ViewerCommand::SetPresentation { .. }));
                 state.queued.push_back(command);
             }
+            ViewerCommand::SetCommentSessions(_) => {
+                state
+                    .queued
+                    .retain(|queued| !matches!(queued, ViewerCommand::SetCommentSessions(_)));
+                state.queued.push_back(command);
+            }
             ViewerCommand::Find { .. }
             | ViewerCommand::Copy
             | ViewerCommand::PreviousChange
@@ -436,6 +495,7 @@ impl CodeViewer {
             | ViewerCommand::Reveal { .. }
             | ViewerCommand::SaveViewState
             | ViewerCommand::AnswerLookup { .. }
+            | ViewerCommand::AnswerComment { .. }
             | ViewerCommand::Clear => state.queued.push_back(command),
         }
         while state.queued.len() > 16 {
@@ -450,11 +510,16 @@ fn reload(web_view: &WebView, state: &RefCell<ViewerState>) {
         let state = &mut *state.borrow_mut();
         state.ready = false;
         state.stopped = false;
-        state.queued = [&state.appearance, &state.shown, &state.presentation]
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect();
+        state.queued = [
+            &state.appearance,
+            &state.comment_sessions,
+            &state.shown,
+            &state.presentation,
+        ]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
     }
     web_view.load_uri(INDEX);
 }
@@ -520,6 +585,23 @@ fn call_command(web_view: &WebView, command: ViewerCommand) {
             args.insert("answerJson", answer);
             (
                 "window.agtkViewer.answerLookup(requestId, JSON.parse(answerJson))".to_owned(),
+                Some(args.end()),
+            )
+        }
+        ViewerCommand::SetCommentSessions(json) => {
+            let args = glib::VariantDict::new(None);
+            args.insert("sessionsJson", json);
+            (
+                "window.agtkViewer.setCommentSessions(JSON.parse(sessionsJson))".to_owned(),
+                Some(args.end()),
+            )
+        }
+        ViewerCommand::AnswerComment { comment_id, error } => {
+            let args = glib::VariantDict::new(None);
+            args.insert("commentId", comment_id);
+            args.insert("error", error);
+            (
+                "window.agtkViewer.answerComment(commentId, error)".to_owned(),
                 Some(args.end()),
             )
         }
@@ -632,6 +714,24 @@ fn valid_event(event: &ViewerEvent) -> bool {
             column,
             ..
         } => valid_document_id(document_id) && valid_position(*line, *column),
+        ViewerEvent::Comment {
+            document_id,
+            session_id,
+            comment,
+            start_line,
+            end_line,
+            text,
+            ..
+        } => {
+            valid_document_id(document_id)
+                && !session_id.is_empty()
+                && session_id.len() <= 128
+                && !comment.trim().is_empty()
+                && valid_position(*start_line, 1)
+                && valid_position(*end_line, 1)
+                && start_line <= end_line
+                && text.as_ref().is_none_or(|text| !text.is_empty())
+        }
         ViewerEvent::Error {
             request_id,
             message,

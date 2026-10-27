@@ -281,6 +281,7 @@ impl Workspace {
         *self.file_rendered.borrow_mut() = None;
         *self.diff_error.borrow_mut() = None;
         self.ensure_code_viewer();
+        self.refresh_comment_sessions();
         let (theme, font_family, font_size) = self.viewer_appearance();
         let Some(viewer) = self.code_viewer.borrow().as_ref().cloned() else {
             return;

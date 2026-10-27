@@ -332,3 +332,85 @@ body[data-theme='dark'] #markdown {
   --surface: #262c36;
   --link: #4493f8;
 }
+
+.comment-box {
+  --comment-border: #c8c8c8;
+  --comment-surface: #ffffff;
+  --comment-muted: #666666;
+  display: grid;
+  gap: 6px;
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  margin: 4px 0;
+  padding: 8px;
+  color: #242424;
+  font: 13px system-ui, sans-serif;
+  background: var(--comment-surface);
+  border: 1px solid var(--comment-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+}
+
+.comment-box textarea {
+  display: block;
+  width: 100%;
+  max-height: 10em;
+  padding: 4px 6px;
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  border: 1px solid var(--comment-border);
+  border-radius: 4px;
+  resize: none;
+}
+
+.comment-box-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.comment-box select,
+.comment-box button {
+  color: inherit;
+  font: inherit;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid var(--comment-border);
+  border-radius: 4px;
+}
+
+.comment-box select {
+  min-width: 0;
+  max-width: 50%;
+}
+
+.comment-box button {
+  cursor: pointer;
+}
+
+.comment-box button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.comment-box-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--comment-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-theme='dark'] .comment-box {
+  --comment-border: #454545;
+  --comment-surface: #252526;
+  --comment-muted: #aaaaaa;
+  color: #dddddd;
+}
+
+body[data-theme='dark'] .comment-box option {
+  background: #252526;
+}

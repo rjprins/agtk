@@ -40,6 +40,7 @@ import { languageForFence, languageForPath } from './language.js';
 import { headingSlug, renderMarkdown } from './markdown.js';
 import { createImageView, isImageDataUrl } from './image.js';
 import { answerLocations, historyDirection } from './lookup.js';
+import { commentEvent, commentSessions, createCommentBox, selectedLines } from './comment.js';
 import './style.css';
 
 self.MonacoEnvironment = {
@@ -108,6 +109,16 @@ let lookupSequence = 0;
 const pendingLookups = new Map();
 // Other files that answers pointed into, so peek can preview them.
 const lookupModels = new Map();
+// The agent sessions agtk offers for comments on the selection.
+let commentTargets = { sessions: [], preferred: null };
+let commentSequence = 0;
+// The comment waiting for agtk's answer.
+let pendingComment = null;
+// The selection the comment box sits under, and the editor that shows it.
+let commentRange = null;
+let commentHost = null;
+// Whether a mouse button went down in an editor and is not up yet.
+let selecting = false;
 
 function sendEvent(event) {
   window.webkit?.messageHandlers?.agtk?.postMessage(event);
@@ -121,6 +132,7 @@ function ensureFileEditor() {
     occurrencesHighlight: 'singleFile',
   });
   applyAppearance(fileEditor);
+  offerComments(fileEditor);
   return fileEditor;
 }
 
@@ -140,6 +152,10 @@ function shownModelUri(sourcePath, fallback) {
 }
 
 function clear() {
+  hideCommentBox();
+  commentBox.reset();
+  if (pendingComment) clearTimeout(pendingComment.timeout);
+  pendingComment = null;
   imageView.clear();
   for (const resolve of pendingLookups.values()) resolve(null);
   pendingLookups.clear();
@@ -470,6 +486,7 @@ function previewEditor() {
 
 function showPreview(scrollTop) {
   presentation = 'preview';
+  hideCommentBox();
   editorElement.classList.remove('visible');
   fileEditorElement.classList.remove('visible');
   if (!previewRendered) renderPreview();
@@ -681,6 +698,7 @@ function navigateHistory(forward) {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (commentBox.element.contains(event.target)) return;
   const direction = historyDirection(event);
   if (direction && navigateHistory(direction === 'forward')) {
     event.preventDefault();
@@ -702,7 +720,143 @@ function answerLookup(requestId, answer) {
   resolve(answer && typeof answer === 'object' ? answer : null);
 }
 
+// Comments on the selection
+
+const commentBox = createCommentBox({
+  onSend: sendComment,
+  onClose: () => {
+    const editor = commentHost;
+    hideCommentBox();
+    editor?.focus();
+  },
+});
+
+const commentWidget = {
+  getId: () => 'agtk.comment',
+  getDomNode: () => commentBox.element,
+  getPosition() {
+    if (!commentRange) return null;
+    const { startLine, endLine } = selectedLines(commentRange);
+    return {
+      position: { lineNumber: endLine, column: startLine === endLine ? commentRange.startColumn : 1 },
+      preference: [
+        monaco.editor.ContentWidgetPositionPreference.BELOW,
+        monaco.editor.ContentWidgetPositionPreference.ABOVE,
+      ],
+    };
+  },
+};
+
+function hideCommentBox() {
+  commentHost?.removeContentWidget(commentWidget);
+  commentHost = null;
+  commentRange = null;
+}
+
+// Puts the box under the selection, or hides it when nothing is selected. While
+// the mouse is still selecting it only hides, so it does not follow the drag.
+function updateCommentBox(onlyHide = false) {
+  if (commentBox.sending) return;
+  const editor = activeEditor();
+  const selection = editor?.getSelection();
+  if (
+    !editor || !selection || selection.isEmpty() || presentation === 'preview'
+    || commentTargets.sessions.length === 0
+  ) {
+    hideCommentBox();
+    return;
+  }
+  if (onlyHide) return;
+  commentRange = selection;
+  if (commentHost === editor) {
+    editor.layoutContentWidget(commentWidget);
+  } else {
+    commentHost?.removeContentWidget(commentWidget);
+    commentHost = editor;
+    editor.addContentWidget(commentWidget);
+  }
+  const { startLine, endLine } = selectedLines(selection);
+  commentBox.setPlaceholder(startLine === endLine
+    ? `Comment on line ${startLine}…`
+    : `Comment on lines ${startLine}–${endLine}…`);
+}
+
+function offerComments(editor) {
+  editor.onMouseDown(() => {
+    selecting = true;
+  });
+  editor.onDidChangeCursorSelection(() => {
+    if (editor === activeEditor()) updateCommentBox(selecting);
+  });
+  // Typing over the selection starts the comment, since the text itself is read only.
+  editor.onKeyDown((event) => {
+    if (commentHost !== editor) return;
+    const { key } = event.browserEvent;
+    const typed = key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey;
+    if (!typed && key !== 'Enter') return;
+    event.preventDefault();
+    event.stopPropagation();
+    commentBox.type(typed ? key : '');
+  });
+}
+
+window.addEventListener('mouseup', () => {
+  if (!selecting) return;
+  selecting = false;
+  updateCommentBox();
+});
+
+function sendComment(comment, sessionId) {
+  const editor = commentHost;
+  const model = editor?.getModel();
+  if (!commentRange || !model || !currentRequestId) return false;
+  commentSequence += 1;
+  const commentId = commentSequence;
+  const range = commentRange;
+  const { startLine, endLine } = selectedLines(range);
+  sendEvent(commentEvent({
+    commentId,
+    documentId: currentRequestId,
+    sessionId,
+    comment,
+    startLine,
+    endLine,
+    text: model.getValueInRange(range, monaco.editor.EndOfLinePreference.LF),
+  }));
+  pendingComment = {
+    commentId,
+    sessionId,
+    editor,
+    range,
+    timeout: setTimeout(() => answerComment(commentId, 'agtk did not answer'), 5000),
+  };
+  return true;
+}
+
+// agtk's answer to a comment: an empty error when the session got it.
+function answerComment(commentId, error) {
+  if (pendingComment?.commentId !== commentId) return;
+  const { sessionId, editor, range, timeout } = pendingComment;
+  clearTimeout(timeout);
+  pendingComment = null;
+  const name = commentBox.sessionName(sessionId);
+  commentBox.finish(typeof error === 'string' ? error : '');
+  if (error) return;
+  hideCommentBox();
+  editor.focus();
+  showEditorMessage(editor, name ? `Sent to ${name}` : 'Sent', range.getEndPosition());
+}
+
+function setCommentSessions(value) {
+  commentTargets = commentSessions(value);
+  commentBox.setSessions(commentTargets.sessions, commentTargets.preferred);
+  if (commentTargets.sessions.length === 0 && !commentBox.sending) hideCommentBox();
+}
+
+offerComments(diffEditor.getModifiedEditor());
+
 window.agtkViewer = Object.freeze({
+  answerComment,
   answerLookup,
   clear,
   copySelection,
@@ -711,6 +865,7 @@ window.agtkViewer = Object.freeze({
   reveal,
   saveViewState: sendViewState,
   setAppearance,
+  setCommentSessions,
   setPresentation,
   showDiff,
   showFile,

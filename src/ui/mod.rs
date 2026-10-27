@@ -50,6 +50,7 @@ mod capture;
 mod changes_ui;
 mod claude_ui;
 mod close_session_ui;
+mod code_comments_ui;
 mod code_navigation_ui;
 mod code_viewer;
 mod controls;

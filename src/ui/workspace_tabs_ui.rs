@@ -867,6 +867,7 @@ impl Workspace {
         *self.diff_rendered.borrow_mut() = None;
         *self.diff_error.borrow_mut() = None;
         self.ensure_code_viewer();
+        self.refresh_comment_sessions();
         let (theme, font_family, font_size) = self.viewer_appearance();
         if let Some(viewer) = self.code_viewer.borrow().as_ref() {
             viewer.set_appearance(theme, &font_family, font_size);
@@ -968,6 +969,28 @@ impl Workspace {
                 let workspace = link_workspace.clone();
                 glib::idle_add_local_once(move || {
                     workspace.navigate_code_history(&document_id, forward, (line, column))
+                });
+            }
+            code_viewer::ViewerEvent::Comment {
+                comment_id,
+                document_id,
+                session_id,
+                comment,
+                start_line,
+                end_line,
+                text,
+            } => {
+                let workspace = link_workspace.clone();
+                glib::idle_add_local_once(move || {
+                    workspace.send_code_comment(code_comments_ui::SelectionComment {
+                        comment_id,
+                        document_id,
+                        session_id,
+                        comment,
+                        start_line,
+                        end_line,
+                        text,
+                    })
                 });
             }
             code_viewer::ViewerEvent::ViewState { tab_id, state } => {
@@ -1178,6 +1201,7 @@ impl Workspace {
     }
 
     pub(super) fn render_workspace_tabs(&self) {
+        self.refresh_comment_sessions();
         while let Some(child) = self.center_tabs.first_child() {
             self.center_tabs.remove(&child);
         }

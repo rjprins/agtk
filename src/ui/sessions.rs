@@ -72,6 +72,7 @@ impl Workspace {
                     }
                     workspace.send_pending_agent_name(&updated.id);
                     workspace.refresh_content_title();
+                    workspace.refresh_comment_sessions();
                     if let Some(pending) = pending {
                         match workspace.session_summary(&updated.id).and_then(|summary| {
                             serde_json::to_value(summary).map_err(|error| error.to_string())
@@ -1127,6 +1128,7 @@ impl Workspace {
                 })
             };
             eof_workspace.apply_session_state(&eof_id);
+            eof_workspace.refresh_comment_sessions();
             if let Some(record) = record
                 && !eof_workspace.closing_sessions.borrow().contains(&eof_id)
             {
