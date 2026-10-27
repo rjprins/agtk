@@ -91,15 +91,18 @@ pub(super) enum ViewerEvent {
         line: u32,
         column: u32,
     },
-    /// Selected text with a comment for an agent session, from one-based
-    /// `start_line` to `end_line`. `text` is absent when it was too long to send.
+    /// Selected text with a comment for an agent session. Source text comes with
+    /// its one-based `start_line` and `end_line`, and without `text` when it was
+    /// too long to send. Words selected in rendered Markdown come without lines.
     Comment {
         comment_id: u32,
         document_id: String,
         session_id: String,
         comment: String,
-        start_line: u32,
-        end_line: u32,
+        #[serde(default)]
+        start_line: Option<u32>,
+        #[serde(default)]
+        end_line: Option<u32>,
         #[serde(default)]
         text: Option<String>,
     },
@@ -727,10 +730,16 @@ fn valid_event(event: &ViewerEvent) -> bool {
                 && !session_id.is_empty()
                 && session_id.len() <= 128
                 && !comment.trim().is_empty()
-                && valid_position(*start_line, 1)
-                && valid_position(*end_line, 1)
-                && start_line <= end_line
-                && text.as_ref().is_none_or(|text| !text.is_empty())
+                && match (start_line, end_line, text) {
+                    (Some(start), Some(end), text) => {
+                        valid_position(*start, 1)
+                            && valid_position(*end, 1)
+                            && start <= end
+                            && text.as_ref().is_none_or(|text| !text.is_empty())
+                    }
+                    (None, None, Some(text)) => !text.trim().is_empty(),
+                    _ => false,
+                }
         }
         ViewerEvent::Error {
             request_id,

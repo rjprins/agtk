@@ -114,7 +114,8 @@ let commentTargets = { sessions: [], preferred: null };
 let commentSequence = 0;
 // The comment waiting for agtk's answer.
 let pendingComment = null;
-// The selection the comment box sits under, and the editor that shows it.
+// What the comment box is about: a Monaco selection, or `{ text, range }` for
+// words selected in the Markdown preview. The host is the editor or the preview.
 let commentRange = null;
 let commentHost = null;
 // Whether a mouse button went down in an editor and is not up yet.
@@ -154,6 +155,7 @@ function shownModelUri(sourcePath, fallback) {
 function clear() {
   hideCommentBox();
   commentBox.reset();
+  for (const note of markdownElement.querySelectorAll('.comment-note')) note.remove();
   if (pendingComment) clearTimeout(pendingComment.timeout);
   pendingComment = null;
   imageView.clear();
@@ -465,6 +467,7 @@ function setPresentation(next) {
     return;
   }
   const line = firstVisiblePreviewLine();
+  hideCommentBox();
   presentation = 'source';
   markdownElement.classList.remove('visible');
   (mode === 'diff' ? editorElement : fileEditorElement).classList.add('visible');
@@ -725,9 +728,9 @@ function answerLookup(requestId, answer) {
 const commentBox = createCommentBox({
   onSend: sendComment,
   onClose: () => {
-    const editor = commentHost;
+    const host = commentHost;
     hideCommentBox();
-    editor?.focus();
+    host?.focus({ preventScroll: true });
   },
 });
 
@@ -735,7 +738,7 @@ const commentWidget = {
   getId: () => 'agtk.comment',
   getDomNode: () => commentBox.element,
   getPosition() {
-    if (!commentRange) return null;
+    if (!commentRange || commentHost === markdownElement) return null;
     const { startLine, endLine } = selectedLines(commentRange);
     return {
       position: { lineNumber: endLine, column: startLine === endLine ? commentRange.startColumn : 1 },
@@ -747,8 +750,17 @@ const commentWidget = {
   },
 };
 
+// Keeps the commented words marked in the preview once the focus moves to the box.
+const previewHighlight = typeof Highlight === 'function' && CSS.highlights ? new Highlight() : null;
+if (previewHighlight) CSS.highlights.set('agtk-comment', previewHighlight);
+
 function hideCommentBox() {
-  commentHost?.removeContentWidget(commentWidget);
+  if (commentHost === markdownElement) {
+    commentBox.element.remove();
+    previewHighlight?.clear();
+  } else {
+    commentHost?.removeContentWidget(commentWidget);
+  }
   commentHost = null;
   commentRange = null;
 }
@@ -757,12 +769,13 @@ function hideCommentBox() {
 // the mouse is still selecting it only hides, so it does not follow the drag.
 function updateCommentBox(onlyHide = false) {
   if (commentBox.sending) return;
+  if (presentation === 'preview') {
+    updatePreviewCommentBox(onlyHide);
+    return;
+  }
   const editor = activeEditor();
   const selection = editor?.getSelection();
-  if (
-    !editor || !selection || selection.isEmpty() || presentation === 'preview'
-    || commentTargets.sessions.length === 0
-  ) {
+  if (!editor || !selection || selection.isEmpty() || commentTargets.sessions.length === 0) {
     hideCommentBox();
     return;
   }
@@ -771,7 +784,8 @@ function updateCommentBox(onlyHide = false) {
   if (commentHost === editor) {
     editor.layoutContentWidget(commentWidget);
   } else {
-    commentHost?.removeContentWidget(commentWidget);
+    hideCommentBox();
+    commentRange = selection;
     commentHost = editor;
     editor.addContentWidget(commentWidget);
   }
@@ -779,6 +793,56 @@ function updateCommentBox(onlyHide = false) {
   commentBox.setPlaceholder(startLine === endLine
     ? `Comment on line ${startLine}…`
     : `Comment on lines ${startLine}–${endLine}…`);
+}
+
+// The preview sends the selected words without lines: they are what the comment is about.
+function updatePreviewCommentBox(onlyHide) {
+  // Focus in the box moves the page's selection into it.
+  if (commentBox.hasFocus) return;
+  const selection = window.getSelection();
+  const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+  const text = range && !range.collapsed && markdownBodyElement.contains(range.commonAncestorContainer)
+    ? selection.toString().trim()
+    : '';
+  // A deleted file's preview shows text that is no longer there.
+  if (!text || previewIsOriginal || commentTargets.sessions.length === 0) {
+    hideCommentBox();
+    return;
+  }
+  if (onlyHide) return;
+  if (commentHost !== markdownElement) {
+    hideCommentBox();
+    commentHost = markdownElement;
+    markdownElement.append(commentBox.element);
+  }
+  commentRange = { text, range: range.cloneRange() };
+  placeInPreview(commentBox.element, commentRange.range);
+  previewHighlight?.clear();
+  previewHighlight?.add(commentRange.range);
+  commentBox.setPlaceholder('Comment on the selection…');
+}
+
+// Puts `element` under the end of `range`, within the preview's width.
+function placeInPreview(element, range) {
+  const rects = range.getClientRects();
+  const last = rects[rects.length - 1] ?? range.getBoundingClientRect();
+  const area = markdownElement.getBoundingClientRect();
+  element.style.position = 'absolute';
+  element.style.visibility = '';
+  element.style.top = `${last.bottom - area.top + markdownElement.scrollTop}px`;
+  const room = markdownElement.clientWidth - element.offsetWidth - 8;
+  const left = Math.min(last.left - area.left + markdownElement.scrollLeft, room);
+  element.style.left = `${Math.max(8, left)}px`;
+}
+
+function showPreviewNote(text, range) {
+  const note = document.createElement('div');
+  note.className = 'comment-note';
+  note.setAttribute('role', 'status');
+  note.textContent = text;
+  markdownElement.append(note);
+  placeInPreview(note, range);
+  setTimeout(() => note.remove(), 2500);
 }
 
 function offerComments(editor) {
@@ -800,51 +864,73 @@ function offerComments(editor) {
   });
 }
 
+markdownElement.addEventListener('mousedown', () => {
+  selecting = true;
+});
+document.addEventListener('selectionchange', () => {
+  if (presentation === 'preview') updateCommentBox(selecting);
+});
+// Typing over selected words in the preview starts the comment too.
+document.addEventListener('keydown', (event) => {
+  if (commentHost !== markdownElement || commentBox.element.contains(event.target)) return;
+  const typed = event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey;
+  if (!typed && event.key !== 'Enter') return;
+  event.preventDefault();
+  commentBox.type(typed ? event.key : '');
+});
+
 window.addEventListener('mouseup', () => {
   if (!selecting) return;
   selecting = false;
   updateCommentBox();
 });
 
+// Sends the comment, or returns why it cannot.
 function sendComment(comment, sessionId) {
-  const editor = commentHost;
-  const model = editor?.getModel();
-  if (!commentRange || !model || !currentRequestId) return false;
+  const host = commentHost;
+  if (!commentRange || !host || !currentRequestId) return 'Nothing is selected';
+  let place;
+  if (host === markdownElement) {
+    place = { text: commentRange.text };
+  } else {
+    const model = host.getModel();
+    if (!model) return 'Nothing is selected';
+    place = {
+      ...selectedLines(commentRange),
+      text: model.getValueInRange(commentRange, monaco.editor.EndOfLinePreference.LF),
+    };
+  }
   commentSequence += 1;
   const commentId = commentSequence;
-  const range = commentRange;
-  const { startLine, endLine } = selectedLines(range);
-  sendEvent(commentEvent({
-    commentId,
-    documentId: currentRequestId,
-    sessionId,
-    comment,
-    startLine,
-    endLine,
-    text: model.getValueInRange(range, monaco.editor.EndOfLinePreference.LF),
-  }));
+  const event = commentEvent({
+    commentId, documentId: currentRequestId, sessionId, comment, ...place,
+  });
+  if (!('text' in event) && !('startLine' in event)) return 'The selection is too long to send';
+  sendEvent(event);
   pendingComment = {
     commentId,
     sessionId,
-    editor,
-    range,
+    host,
+    range: commentRange,
     timeout: setTimeout(() => answerComment(commentId, 'agtk did not answer'), 5000),
   };
-  return true;
+  return '';
 }
 
 // agtk's answer to a comment: an empty error when the session got it.
 function answerComment(commentId, error) {
   if (pendingComment?.commentId !== commentId) return;
-  const { sessionId, editor, range, timeout } = pendingComment;
+  const { sessionId, host, range, timeout } = pendingComment;
   clearTimeout(timeout);
   pendingComment = null;
   const name = commentBox.sessionName(sessionId);
   commentBox.finish(typeof error === 'string' ? error : '');
   if (error) return;
   hideCommentBox();
-  editor.focus();
-  showEditorMessage(editor, name ? `Sent to ${name}` : 'Sent', range.getEndPosition());
+  host.focus({ preventScroll: true });
+  const message = name ? `Sent to ${name}` : 'Sent';
+  if (host === markdownElement) showPreviewNote(message, range.range);
+  else showEditorMessage(host, message, range.getEndPosition());
 }
 
 function setCommentSessions(value) {

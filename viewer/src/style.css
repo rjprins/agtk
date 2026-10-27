@@ -70,6 +70,7 @@ body {
 
 #markdown {
   display: none;
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -402,6 +403,26 @@ body[data-theme='dark'] #markdown {
   color: var(--comment-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#markdown .comment-box {
+  z-index: 1;
+}
+
+.comment-note {
+  position: absolute;
+  z-index: 1;
+  margin: 4px 0;
+  padding: 2px 8px;
+  color: #ffffff;
+  font: 13px system-ui, sans-serif;
+  background: #0969da;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+::highlight(agtk-comment) {
+  background-color: rgb(9 105 218 / 25%);
 }
 
 body[data-theme='dark'] .comment-box {

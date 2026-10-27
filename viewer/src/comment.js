@@ -35,7 +35,8 @@ export function commentEvent(fields) {
   return withoutText;
 }
 
-// The box's elements. `onSend(comment, sessionId)` sends; `onClose()` gives focus back.
+// The box's elements. `onSend(comment, sessionId)` sends, or returns why it cannot.
+// `onClose()` gives focus back.
 export function createCommentBox({ onSend, onClose }) {
   const element = document.createElement('form');
   element.className = 'comment-box';
@@ -76,7 +77,8 @@ export function createCommentBox({ onSend, onClose }) {
     input.readOnly = true;
     send.disabled = true;
     status.textContent = 'Sending…';
-    if (!onSend(comment, session.value)) finish('Nothing is selected');
+    const error = onSend(comment, session.value);
+    if (error) finish(error);
   }
 
   // Ends sending: clears the comment when it went out, or shows why not.
@@ -112,8 +114,12 @@ export function createCommentBox({ onSend, onClose }) {
     // Keys typed here are not the editor's.
     event.stopPropagation();
   });
-  // Clicks here are not the editor's either, so they keep its selection.
-  element.addEventListener('mousedown', (event) => event.stopPropagation());
+  // Clicks here are not the editor's either, so they keep its selection. Only the
+  // comment and the session list take focus, so the selected words stay selected.
+  element.addEventListener('mousedown', (event) => {
+    event.stopPropagation();
+    if (event.target !== input && event.target !== session) event.preventDefault();
+  });
 
   return {
     element,

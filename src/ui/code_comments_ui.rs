@@ -11,8 +11,8 @@ pub(super) struct SelectionComment {
     pub(super) document_id: String,
     pub(super) session_id: String,
     pub(super) comment: String,
-    pub(super) start_line: u32,
-    pub(super) end_line: u32,
+    /// The first and last line, absent for words selected in rendered Markdown.
+    pub(super) lines: Option<(u32, u32)>,
     /// Absent when the selection was too long to send.
     pub(super) text: Option<String>,
 }
@@ -104,7 +104,7 @@ impl Workspace {
         let message = comment_message(
             &path,
             version.as_deref(),
-            (comment.start_line, comment.end_line),
+            comment.lines,
             comment.text.as_deref(),
             &comment.comment,
         );
@@ -118,19 +118,19 @@ impl Workspace {
 fn comment_message(
     path: &str,
     version: Option<&str>,
-    (start_line, end_line): (u32, u32),
+    lines: Option<(u32, u32)>,
     text: Option<&str>,
     comment: &str,
 ) -> String {
-    let lines = if start_line == end_line {
-        format!("line {start_line}")
-    } else {
-        format!("lines {start_line}-{end_line}")
+    let lines = match lines {
+        Some((start, end)) if start == end => format!(", line {start}"),
+        Some((start, end)) => format!(", lines {start}-{end}"),
+        None => String::new(),
     };
     let version = version
         .map(|version| format!(" ({version})"))
         .unwrap_or_default();
-    let mut message = format!("Comment on {}{version}, {lines}:\n", printable(path));
+    let mut message = format!("Comment on {}{version}{lines}:\n", printable(path));
     match text {
         Some(text) => {
             let text = printable(text);
@@ -169,7 +169,7 @@ mod tests {
             comment_message(
                 "src/main.rs",
                 None,
-                (3, 4),
+                Some((3, 4)),
                 Some("fn main() {\n}\n"),
                 "  Why?\n"
             ),
@@ -180,21 +180,33 @@ mod tests {
     #[test]
     fn names_one_line_and_the_version() {
         assert_eq!(
-            comment_message("a.py", Some("staged version"), (7, 7), Some("x"), "Rename"),
+            comment_message(
+                "a.py",
+                Some("staged version"),
+                Some((7, 7)),
+                Some("x"),
+                "Rename"
+            ),
             "Comment on a.py (staged version), line 7:\n```\nx\n```\nRename"
         );
     }
 
     #[test]
     fn fences_longer_than_backticks_inside() {
-        let message = comment_message("README.md", None, (1, 3), Some("```\ncode\n```"), "Ok");
+        let message = comment_message(
+            "README.md",
+            None,
+            Some((1, 3)),
+            Some("```\ncode\n```"),
+            "Ok",
+        );
         assert!(message.contains("````\n```\ncode\n```\n````\n"));
     }
 
     #[test]
     fn points_at_the_file_when_the_selection_is_too_long() {
         assert_eq!(
-            comment_message("big.txt", None, (1, 900), None, "Summarize"),
+            comment_message("big.txt", None, Some((1, 900)), None, "Summarize"),
             "Comment on big.txt, lines 1-900:\n\
              (Too long to quote here: read these lines in the file.)\nSummarize"
         );
@@ -202,10 +214,24 @@ mod tests {
 
     #[test]
     fn drops_control_characters() {
-        let message = comment_message("a.txt", None, (1, 1), Some("a\x1b[201~b\r\tc"), "d\x03e");
+        let message = comment_message(
+            "a.txt",
+            None,
+            Some((1, 1)),
+            Some("a\x1b[201~b\r\tc"),
+            "d\x03e",
+        );
         assert_eq!(
             message,
             "Comment on a.txt, line 1:\n```\na[201~b\tc\n```\nde"
+        );
+    }
+
+    #[test]
+    fn quotes_words_from_rendered_markdown_without_lines() {
+        assert_eq!(
+            comment_message("README.md", None, None, Some("some words"), "Clearer?"),
+            "Comment on README.md:\n```\nsome words\n```\nClearer?"
         );
     }
 }

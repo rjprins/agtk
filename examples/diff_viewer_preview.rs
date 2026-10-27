@@ -47,11 +47,9 @@ fn main() -> glib::ExitCode {
             ViewerEvent::Jump { .. } | ViewerEvent::History { .. } => {}
             ViewerEvent::Comment {
                 session_id,
-                start_line,
-                end_line,
                 comment,
                 ..
-            } => println!("Comment for {session_id} on lines {start_line}-{end_line}: {comment}"),
+            } => println!("Comment for {session_id}: {comment}"),
             ViewerEvent::Stopped { reloading } => {
                 eprintln!("Viewer web process stopped, reloading: {reloading}")
             }

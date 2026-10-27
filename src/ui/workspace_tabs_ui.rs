@@ -987,8 +987,7 @@ impl Workspace {
                         document_id,
                         session_id,
                         comment,
-                        start_line,
-                        end_line,
+                        lines: start_line.zip(end_line),
                         text,
                     })
                 });
