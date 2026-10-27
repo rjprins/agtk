@@ -64,8 +64,9 @@ pub fn list_worktree_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
 }
 
 /// The tracked and untracked files below `root`, most recently modified first.
-/// Git-ignored files are left out, or build output would fill the top.
-pub fn list_recent_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
+/// Git-ignored files are left out, or build output would fill the top, except
+/// the notes among `on_disk`, the files `list_worktree_files` found.
+pub fn list_recent_files(root: &Path, on_disk: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     let output = git::run_checked(
         root,
         [
@@ -81,7 +82,13 @@ pub fn list_recent_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
         .collect::<Vec<_>>();
-    // Unmerged files are listed once per stage.
+    paths.extend(
+        on_disk
+            .iter()
+            .map(Vec::as_slice)
+            .filter(|path| is_ignored_note(path)),
+    );
+    // Unmerged files are listed once per stage, and notes may also be untracked.
     paths.sort_unstable();
     paths.dedup();
     // Deleted files and submodule folders have no file to show.
@@ -96,6 +103,14 @@ pub fn list_recent_files(root: &Path) -> Result<Vec<Vec<u8>>, String> {
         b_time.cmp(a_time).then_with(|| a_path.cmp(b_path))
     });
     Ok(files.into_iter().map(|(_, path)| path).collect())
+}
+
+/// Notes that a global ignore keeps out of Git but that are still worth opening.
+fn is_ignored_note(path: &[u8]) -> bool {
+    let mut components = path.rsplit(|byte| *byte == b'/');
+    let name = components.next().unwrap_or_default();
+    matches!(name, b"CLAUDE.md" | b"REVIEW.md")
+        || components.any(|directory| directory == b"rut-notes")
 }
 
 pub fn commit_is_in_branch(context: &WorktreeContext, commit_oid: &str) -> Result<bool, String> {

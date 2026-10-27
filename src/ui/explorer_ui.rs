@@ -760,12 +760,11 @@ impl Workspace {
         }
         let listed_root = root.clone();
         let result = self.changes_io.submit(move || {
-            let tree = crate::changes::list_worktree_files(&listed_root)
-                .map(crate::explorer::build_tree)?;
+            let paths = crate::changes::list_worktree_files(&listed_root)?;
             let recent = recent_first
-                .then(|| crate::changes::list_recent_files(&listed_root).map(file_nodes))
+                .then(|| crate::changes::list_recent_files(&listed_root, &paths).map(file_nodes))
                 .transpose()?;
-            Ok((tree, recent))
+            Ok((crate::explorer::build_tree(paths), recent))
         });
         let workspace = self.clone();
         glib::spawn_future_local(async move {

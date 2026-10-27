@@ -150,16 +150,24 @@ fn worktree_files_list_existing_tracked_untracked_and_ignored_paths() {
 }
 
 #[test]
-fn recent_files_put_the_newest_edit_first_and_leave_out_ignored_and_deleted_ones() {
+fn recent_files_put_the_newest_edit_first_and_leave_out_ignored_and_deleted_ones_but_notes() {
     use std::time::{Duration, SystemTime};
 
     let dir = repository();
     let root = dir.path();
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(root.join("src/new.rs"), "fn main() {}\n").unwrap();
-    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::write(
+        root.join(".gitignore"),
+        "target/\nCLAUDE.md\nREVIEW.md\nrut-notes\n",
+    )
+    .unwrap();
     fs::create_dir_all(root.join("target")).unwrap();
     fs::write(root.join("target/ignored.txt"), "ignored\n").unwrap();
+    fs::write(root.join("target/REVIEW.md"), "review\n").unwrap();
+    fs::create_dir_all(root.join("docs/rut-notes/old")).unwrap();
+    fs::write(root.join("docs/rut-notes/old/plan.md"), "plan\n").unwrap();
+    fs::write(root.join("CLAUDE.md"), "instructions\n").unwrap();
     fs::write(root.join("deleted.txt"), "deleted\n").unwrap();
     git(root, &["add", "deleted.txt"]);
     fs::remove_file(root.join("deleted.txt")).unwrap();
@@ -169,6 +177,9 @@ fn recent_files_put_the_newest_edit_first_and_leave_out_ignored_and_deleted_ones
         ("src/new.rs", 30),
         (".gitignore", 10),
         ("target/ignored.txt", 0),
+        ("target/REVIEW.md", 20),
+        ("docs/rut-notes/old/plan.md", 5),
+        ("CLAUDE.md", 40),
     ] {
         fs::File::options()
             .write(true)
@@ -178,12 +189,16 @@ fn recent_files_put_the_newest_edit_first_and_leave_out_ignored_and_deleted_ones
             .unwrap();
     }
 
+    let on_disk = agtk::changes::list_worktree_files(root).unwrap();
     assert_eq!(
-        agtk::changes::list_recent_files(root).unwrap(),
+        agtk::changes::list_recent_files(root, &on_disk).unwrap(),
         [
             b"file.txt".to_vec(),
+            b"docs/rut-notes/old/plan.md".to_vec(),
             b".gitignore".to_vec(),
+            b"target/REVIEW.md".to_vec(),
             b"src/new.rs".to_vec(),
+            b"CLAUDE.md".to_vec(),
         ]
     );
 }
