@@ -3569,24 +3569,35 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     let inspection = app.request("ui.inspect", json!({}));
     let page = find(&inspection["root"], "brief-page").unwrap();
     assert_eq!(page["label"], "1 unread");
-    let shown = page["children"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|node| !node["id"].as_str().unwrap().starts_with("brief-link:"))
-        .map(|node| {
-            (
-                node["id"].as_str().unwrap(),
-                node["isSelected"].as_bool().unwrap(),
-            )
-        })
-        .collect::<Vec<_>>();
+    let selected = |nodes: &Value| {
+        nodes
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|node| !node["id"].as_str().unwrap().starts_with("brief-link:"))
+            .map(|node| {
+                (
+                    node["id"].as_str().unwrap().to_owned(),
+                    node["isSelected"].as_bool().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    // Tasks has only a hidden item, so it has no section on show.
     assert_eq!(
-        shown,
+        selected(&page["children"]),
         [
-            ("brief-item:ado-pr:1", false),
-            ("brief-item:gmail:abc", true),
-            ("brief-hidden", false)
+            ("brief-section:Waiting on you".to_owned(), true),
+            ("brief-hidden".to_owned(), false)
+        ]
+    );
+    let section = find(page, "brief-section:Waiting on you").unwrap();
+    assert_eq!(section["label"], "Waiting on you 2, 1 unread");
+    assert_eq!(
+        selected(&section["children"]),
+        [
+            ("brief-item:ado-pr:1".to_owned(), false),
+            ("brief-item:gmail:abc".to_owned(), true)
         ]
     );
     // Hidden starts collapsed; opening it lists the hidden item and is remembered.
@@ -3649,6 +3660,75 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     assert_eq!(marks(&brief)[2], ("gmail:abc".to_owned(), true, false));
     let inspection = app.request("ui.inspect", json!({}));
     assert!(find(&inspection["root"], "brief-hidden").is_none());
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn collapsed_brief_sections_are_remembered_by_name_and_change_no_marks() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+    let section = |app: &App, name: &str| {
+        app.request("ui.show", json!({"surface":"brief"}));
+        let inspection = app.request("ui.inspect", json!({}));
+        find(&inspection["root"], &format!("brief-section:{name}")).cloned()
+    };
+    let item_visible =
+        |section: &Value, index: usize| section["children"][index]["isVisible"].as_bool().unwrap();
+
+    let mut app = App::new();
+    let agenda = json!([
+        {"id":"cal:standup","section":"Agenda","text":"09:30 Stand-up"},
+        {"id":"cal:review","section":"Agenda","text":"14:00 Sprint review"}
+    ]);
+    app.request("brief.post", json!({"items":agenda}));
+    app.request(
+        "brief.post",
+        json!({"items":[{"id":"todoist:7","section":"To do","text":"Renew passport"}]}),
+    );
+    app.activate_target_action("brief-toggle-read", "cal:standup");
+    let before = app.request("brief.get", json!({}));
+    let shown = section(&app, "Agenda").unwrap();
+    assert_eq!(shown["isSelected"], true);
+    assert!(item_visible(&shown, 0) && item_visible(&shown, 1));
+
+    // Collapsing hides the items but keeps the unread count on the header and
+    // changes nothing the assistant sees.
+    app.activate_target_action("brief-toggle-section", "Agenda");
+    assert_eq!(app.request("brief.get", json!({})), before);
+    let collapsed = section(&app, "Agenda").unwrap();
+    assert_eq!(collapsed["isSelected"], false);
+    assert_eq!(collapsed["label"], "Agenda 2, 1 unread");
+    assert!(!item_visible(&collapsed, 0) && !item_visible(&collapsed, 1));
+    assert_eq!(section(&app, "To do").unwrap()["isSelected"], true);
+    let inspection = app.request("ui.inspect", json!({}));
+    assert_eq!(
+        find(&inspection["root"], "brief-page").unwrap()["label"],
+        "2 unread"
+    );
+
+    app.stop();
+    app.start();
+    assert_eq!(section(&app, "Agenda").unwrap()["isSelected"], false);
+    // The section leaves the brief and comes back the next day, still collapsed.
+    app.request(
+        "brief.post",
+        json!({"items":[],"replaceSections":["Agenda"]}),
+    );
+    assert!(section(&app, "Agenda").is_none());
+    app.request("brief.post", json!({"items":agenda}));
+    assert_eq!(section(&app, "Agenda").unwrap()["isSelected"], false);
+
+    app.activate_target_action("brief-toggle-section", "Agenda");
+    let expanded = section(&app, "Agenda").unwrap();
+    assert_eq!(expanded["isSelected"], true);
+    assert!(item_visible(&expanded, 0));
 }
 
 #[test]

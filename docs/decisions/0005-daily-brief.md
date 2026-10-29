@@ -36,3 +36,9 @@ Decisions:
    from the assistant with `links`, not from agtk. A post without `links`
    keeps them, so the assistant sets them once.
 10. No keyboard shortcut for now.
+11. Each section heading collapses its items, like Hidden. A collapsed heading
+    shows how many items it holds, with a dot when any is unread. agtk keeps
+    the collapsed section names in the `briefCollapsedSections` preference.
+    Assistants name sections freely, so a section that leaves the brief and
+    comes back stays collapsed. Collapsing only changes the view: it sets no
+    read, hidden or done marks, and `get_brief` does not report it.

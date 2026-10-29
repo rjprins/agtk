@@ -208,6 +208,9 @@ impl Workspace {
                     .preference(brief_ui::HIDDEN_EXPANDED_PREFERENCE)?
                     .and_then(|value| value.as_bool())
                     .unwrap_or(false);
+                let brief_collapsed_sections = store.preference_or_default::<BTreeSet<String>>(
+                    brief_ui::COLLAPSED_SECTIONS_PREFERENCE,
+                )?;
                 let changes_sidebar_open = store
                     .preference("changesSidebarOpen")?
                     .and_then(|value| value.as_bool());
@@ -309,6 +312,7 @@ impl Workspace {
                     claude_presets,
                     brief,
                     brief_hidden_expanded,
+                    brief_collapsed_sections,
                     changes_sidebar_open,
                     changes_sidebar_page,
                     changes_base_refs,
@@ -339,6 +343,7 @@ impl Workspace {
                     claude_presets,
                     brief,
                     brief_hidden_expanded,
+                    brief_collapsed_sections,
                     changes_sidebar_open,
                     changes_sidebar_page,
                     changes_base_refs,
@@ -371,6 +376,7 @@ impl Workspace {
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
                     workspace.brief_hidden_expanded.set(brief_hidden_expanded);
+                    *workspace.brief_collapsed_sections.borrow_mut() = brief_collapsed_sections;
                     workspace.load_brief(brief);
                     {
                         let mut state = workspace.changes.state.borrow_mut();

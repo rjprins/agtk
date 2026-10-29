@@ -1,7 +1,7 @@
 #![allow(deprecated)]
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::io::{self, Write};
@@ -216,6 +216,8 @@ struct Workspace {
     brief: Rc<RefCell<crate::brief::Brief>>,
     /// Whether the Brief page lists its hidden items.
     brief_hidden_expanded: Rc<Cell<bool>>,
+    /// The Brief sections the user collapsed, by name.
+    brief_collapsed_sections: Rc<RefCell<BTreeSet<String>>>,
     selected_pr: Rc<RefCell<Option<SelectedPrContext>>>,
     /// The session in front of the user and since when; see `acknowledge_session`.
     viewing: Rc<RefCell<Option<Viewing>>>,
@@ -744,6 +746,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         brief: Rc::new(RefCell::new(crate::brief::Brief::default())),
         brief_hidden_expanded: Rc::new(Cell::new(false)),
+        brief_collapsed_sections: Rc::default(),
         selected_pr: Rc::new(RefCell::new(None)),
         viewing: Rc::new(RefCell::new(None)),
     };

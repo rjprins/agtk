@@ -892,7 +892,8 @@ fn current_diff_scope_label(workspace: &Workspace) -> &'static str {
 }
 
 /// The Files page: its filter, the rows on show and any message instead of a tree.
-/// One child per item the panel shows; selected while it is unread.
+/// One group per section, selected while expanded, then the hidden group.
+/// Each item is selected while it is unread.
 fn brief_page_node(workspace: &Workspace) -> UiNode {
     let page = &workspace.changes.brief;
     let page_visible = workspace.changes.split.shows_sidebar()
@@ -943,12 +944,36 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
             children: Vec::new(),
         })
         .collect::<Vec<_>>();
+    let collapsed = workspace.brief_collapsed_sections.borrow();
     children.extend(
         brief
             .visible_sections()
             .into_iter()
-            .flat_map(|(_, items)| items)
-            .map(|item| item_node(item, page_visible)),
+            .map(|(section, items)| {
+                let expanded = !collapsed.contains(section);
+                let unread = items.iter().filter(|item| !item.read).count();
+                let header = brief_ui::section_widget_name(section);
+                UiNode {
+                    id: format!("brief-section:{section}"),
+                    role: "group".to_owned(),
+                    label: Some(if unread > 0 {
+                        format!("{section} {}, {unread} unread", items.len())
+                    } else {
+                        format!("{section} {}", items.len())
+                    }),
+                    is_visible: page_visible,
+                    is_enabled: true,
+                    is_selected: expanded,
+                    bounds: rows
+                        .iter()
+                        .find(|row| row.widget_name() == header.as_str())
+                        .map_or_else(Bounds::default, |row| widget_bounds(row, &workspace.window)),
+                    children: items
+                        .into_iter()
+                        .map(|item| item_node(item, page_visible && expanded))
+                        .collect(),
+                }
+            }),
     );
     let hidden = brief.hidden_items();
     if !hidden.is_empty() {

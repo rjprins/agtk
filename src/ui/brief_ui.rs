@@ -9,6 +9,8 @@ use crate::providers::AgentProvider;
 
 pub(super) const BRIEF_PAGE: &str = "brief";
 pub(super) const HIDDEN_EXPANDED_PREFERENCE: &str = "briefHiddenExpanded";
+/// The names of the sections the user collapsed. Assistants pick the names.
+pub(super) const COLLAPSED_SECTIONS_PREFERENCE: &str = "briefCollapsedSections";
 const EMPTY_TEXT: &str = "No brief yet. Your assistant posts it with the post_brief MCP tool.";
 
 #[derive(Clone)]
@@ -136,6 +138,18 @@ impl Workspace {
             workspace.render_brief();
         });
         self.window.add_action(&action);
+        // Only the view changes: no read, hidden or done mark, and not the brief itself.
+        self.add_target_action("brief-toggle-section", |workspace, section| {
+            let value = {
+                let mut collapsed = workspace.brief_collapsed_sections.borrow_mut();
+                if !collapsed.remove(section) {
+                    collapsed.insert(section.to_owned());
+                }
+                serde_json::json!(*collapsed)
+            };
+            workspace.save_preference(COLLAPSED_SECTIONS_PREFERENCE, value);
+            workspace.render_brief();
+        });
     }
 
     pub(super) fn load_brief(&self, brief: Brief) {
@@ -300,17 +314,14 @@ impl Workspace {
             page.rows.append(&message);
             return;
         }
+        let collapsed = self.brief_collapsed_sections.borrow();
         for (section, items) in sections {
-            let heading = gtk::Label::new(Some(section));
-            heading.set_xalign(0.0);
-            heading.set_margin_top(10);
-            heading.set_margin_start(6);
-            heading.set_margin_bottom(2);
-            heading.add_css_class("caption-heading");
-            heading.add_css_class("dim-label");
-            page.rows.append(&heading);
-            for item in items {
-                page.rows.append(&brief_row(item));
+            let expanded = !collapsed.contains(section);
+            page.rows.append(&section_header(section, &items, expanded));
+            if expanded {
+                for item in items {
+                    page.rows.append(&brief_row(item));
+                }
             }
         }
         if hidden.is_empty() {
@@ -326,34 +337,80 @@ impl Workspace {
     }
 }
 
+/// Heads a section. Collapsed, it shows how many items it holds, and a dot
+/// when any of them is unread.
+fn section_header(section: &str, items: &[&BriefItem], expanded: bool) -> gtk::Button {
+    let unread = items.iter().filter(|item| !item.read).count();
+    let toggle = if expanded {
+        collapsible_header(section, None, 0, true)
+    } else {
+        collapsible_header(section, Some(items.len()), unread, false)
+    };
+    toggle.set_widget_name(&section_widget_name(section));
+    toggle.set_action_name(Some("win.brief-toggle-section"));
+    toggle.set_action_target_value(Some(&section.to_variant()));
+    let noun = if items.len() == 1 { "item" } else { "items" };
+    toggle.set_tooltip_text(Some(&match (expanded, unread) {
+        (true, _) => "Collapse this section".to_owned(),
+        (false, 0) => format!("Show {} {noun}", items.len()),
+        (false, _) => format!("Show {} {noun}, {unread} unread", items.len()),
+    }));
+    toggle
+}
+
+/// Names a section's header widget apart from the item rows, which use item ids.
+pub(super) fn section_widget_name(section: &str) -> String {
+    format!("brief-section:{section}")
+}
+
 /// Heads the hidden items at the bottom; the list under it starts collapsed.
 fn hidden_header(count: usize, expanded: bool) -> gtk::Button {
+    let toggle = collapsible_header("Hidden", Some(count), 0, expanded);
+    toggle.set_action_name(Some("win.brief-toggle-hidden"));
+    toggle.set_tooltip_text(Some(if expanded {
+        "Collapse hidden items"
+    } else {
+        "Show hidden items"
+    }));
+    toggle
+}
+
+/// A chevron, the name and, when given, a count. Dim like a caption, unless
+/// it holds unread items out of sight.
+fn collapsible_header(
+    name: &str,
+    count: Option<usize>,
+    unread: usize,
+    expanded: bool,
+) -> gtk::Button {
     let contents = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    contents.add_css_class("dim-label");
+    if unread == 0 {
+        contents.add_css_class("dim-label");
+    }
     let icon = gtk::Image::from_icon_name(if expanded {
         "pan-down-symbolic"
     } else {
         "pan-end-symbolic"
     });
     icon.set_pixel_size(14);
-    let label = gtk::Label::new(Some("Hidden"));
+    let label = gtk::Label::new(Some(name));
     label.set_xalign(0.0);
     label.set_hexpand(true);
     label.add_css_class("caption-heading");
-    let count_label = gtk::Label::new(Some(&count.to_string()));
-    count_label.add_css_class("numeric");
     contents.append(&icon);
     contents.append(&label);
-    contents.append(&count_label);
-    let toggle = gtk::Button::builder()
-        .child(&contents)
-        .action_name("win.brief-toggle-hidden")
-        .tooltip_text(if expanded {
-            "Collapse hidden items"
-        } else {
-            "Show hidden items"
-        })
-        .build();
+    if unread > 0 {
+        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        dot.set_valign(gtk::Align::Center);
+        dot.add_css_class("brief-unread-dot");
+        contents.append(&dot);
+    }
+    if let Some(count) = count {
+        let count_label = gtk::Label::new(Some(&count.to_string()));
+        count_label.add_css_class("numeric");
+        contents.append(&count_label);
+    }
+    let toggle = gtk::Button::builder().child(&contents).build();
     toggle.set_margin_top(10);
     toggle.add_css_class("flat");
     toggle.update_state(&[gtk::accessible::State::Expanded(Some(expanded))]);
