@@ -407,6 +407,8 @@ impl Workspace {
                         let (control, attachment) =
                             connected.map_or((None, None), |(c, a)| (Some(c), Some(a)));
                         let id = record.id.clone();
+                        // Its redraw waits in the PTY until the terminal reads past the replay.
+                        resume_claude(&record, attachment.as_ref());
                         // Selecting marks a finished turn as seen, so select only once below.
                         match workspace.attach(record, control, attachment, false) {
                             Ok(()) => last = Some(id),
@@ -1480,6 +1482,25 @@ fn runs_sgr_tui(record: &SessionRecord) -> bool {
             .is_some_and(|name| name == "claude" || name == "codex")
 }
 
+/// A reattached terminal starts without the alternate screen and mouse reporting
+/// a fullscreen Claude set up. Its frames then scroll into VTE's scrollback, and
+/// the wheel scrolls those stale frames instead of Claude. Claude re-sends that
+/// setup and redraws when it resumes, so ask it to.
+fn resume_claude(record: &SessionRecord, attachment: Option<&Attachment>) {
+    let runs_claude = record.kind == SessionKind::Claude
+        || record
+            .program
+            .file_name()
+            .is_some_and(|name| name == "claude");
+    let Some(attachment) = attachment.filter(|_| runs_claude) else {
+        return;
+    };
+    // forkpty makes the agent its session's leader, so it leads the foreground group.
+    if let Ok(agent) = nix::unistd::tcgetpgrp(&attachment.pty) {
+        let _ = nix::sys::signal::kill(agent, nix::sys::signal::Signal::SIGCONT);
+    }
+}
+
 /// Send normalized SGR wheel events to agent TUIs even after reattachment loses
 /// their mouse-reporting setup. Ordinary scrollback follows touchpad pixels.
 fn route_wheel_to_fullscreen_app(terminal: &vte::Terminal, sgr_tui: bool) {
@@ -1941,6 +1962,65 @@ mod tests {
         assert!(emit(0.5));
         assert_eq!(&*input.borrow(), "\x1b[<65;1;1M");
         window.close();
+    }
+
+    #[test]
+    fn restoring_claude_resumes_the_agent_on_its_terminal() {
+        use nix::fcntl::{FcntlArg, OFlag, fcntl};
+        use std::io::Read;
+        use std::os::unix::process::CommandExt;
+        use std::time::{Duration, Instant};
+
+        let descriptors = nix::pty::openpty(None, None).unwrap();
+        let slave = descriptors.slave;
+        let mut command = std::process::Command::new("sh");
+        command
+            .args([
+                "-c",
+                "trap 'echo resumed; exit' CONT; echo ready; while :; do sleep 0.05; done",
+            ])
+            .stdin(slave.try_clone().unwrap())
+            .stdout(slave.try_clone().unwrap())
+            .stderr(slave);
+        // SAFETY: setsid and ioctl are async-signal-safe.
+        unsafe {
+            command.pre_exec(|| {
+                nix::unistd::setsid()?;
+                if libc::ioctl(0, libc::TIOCSCTTY, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut agent = command.spawn().unwrap();
+        fcntl(&descriptors.master, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).unwrap();
+        let mut master = std::fs::File::from(descriptors.master);
+        let mut output = String::new();
+        let mut wait_for = |text: &str| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut buffer = [0_u8; 256];
+            while !output.contains(text) {
+                assert!(Instant::now() < deadline, "no {text:?} in {output:?}");
+                match master.read(&mut buffer) {
+                    Ok(count) => output.push_str(&String::from_utf8_lossy(&buffer[..count])),
+                    Err(_) => std::thread::sleep(Duration::from_millis(10)),
+                }
+            }
+            master.try_clone().unwrap()
+        };
+        let pty = wait_for("ready");
+
+        let record = SessionRecord {
+            kind: SessionKind::Claude,
+            ..SessionRecord::discovered("restore-test", "/unused".into())
+        };
+        let attachment = super::Attachment {
+            replay: Vec::new(),
+            pty: pty.into(),
+        };
+        super::resume_claude(&record, Some(&attachment));
+        wait_for("resumed");
+        agent.wait().unwrap();
     }
 
     #[test]
