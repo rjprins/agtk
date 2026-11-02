@@ -696,7 +696,8 @@ impl Workspace {
         row
     }
 
-    /// Opening an inactive project launches in it; pinning keeps it among the active ones.
+    /// Opening an inactive project launches in it, and its clock button resumes a session there.
+    /// Pinning keeps it among the active ones.
     fn inactive_project_row(&self, root: &str) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
         row.set_selectable(false);
@@ -722,6 +723,15 @@ impl Workspace {
         let workspace = self.clone();
         let open_root = root.to_owned();
         open.connect_clicked(move |_| workspace.open_launch_for_project(&open_root));
+        let resume = gtk::Button::builder()
+            .icon_name("document-open-recent-symbolic")
+            .valign(gtk::Align::Center)
+            .tooltip_text("Resume recent session")
+            .build();
+        resume.add_css_class("flat");
+        let workspace = self.clone();
+        let resume_root = root.to_owned();
+        resume.connect_clicked(move |_| workspace.open_agent_for_project(&resume_root));
         let pin = gtk::Button::builder()
             .icon_name("non-starred-symbolic")
             .valign(gtk::Align::Center)
@@ -744,6 +754,7 @@ impl Workspace {
         remove.connect_clicked(move |_| workspace.remove_project(&remove_root, None));
         content.append(&open);
         content.append(&self.project_repository_link(root));
+        content.append(&resume);
         content.append(&pin);
         content.append(&remove);
         row.set_child(Some(&content));
