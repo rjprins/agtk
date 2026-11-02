@@ -96,6 +96,26 @@ vte-terminal { padding: 6px 10px; }
   border-radius: 50%;
   background: var(--accent-bg-color);
 }
+.brief-entry {
+  padding: 8px 6px;
+}
+.brief-entry + .brief-entry {
+  border-top: 1px solid alpha(currentColor, 0.12);
+}
+.brief-entry:hover {
+  background: alpha(currentColor, 0.04);
+}
+button.brief-action.image-button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  opacity: 0.6;
+}
+button.brief-action.image-button:hover,
+button.brief-action.image-button:focus-visible,
+button.brief-action.image-button.success {
+  opacity: 1;
+}
 .brief-comment {
   padding: 2px 0 2px 8px;
   border-left: 2px solid var(--accent-bg-color);

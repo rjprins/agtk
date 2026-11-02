@@ -51,11 +51,11 @@ impl BriefPage {
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
             .build();
-        let rows = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
         rows.set_margin_start(6);
         rows.set_margin_end(6);
         rows.set_margin_bottom(8);
-        let hidden = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let hidden = gtk::Box::new(gtk::Orientation::Vertical, 0);
         hidden.set_margin_start(6);
         hidden.set_margin_end(6);
         hidden.set_margin_bottom(8);
@@ -335,6 +335,7 @@ impl Workspace {
         }));
         let entry = gtk::Box::new(gtk::Orientation::Vertical, 2);
         entry.set_widget_name(&item.id);
+        entry.add_css_class("brief-entry");
         entry.append(&row);
         if self.brief_comment_drafts.borrow().contains_key(&item.id) {
             entry.append(&self.comment_box(&item.id));
@@ -658,7 +659,6 @@ fn collapsible_header(
 
 fn hidden_row(item: &BriefItem) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    row.set_margin_start(6);
     let text = gtk::Label::new(Some(&item.text));
     text.set_xalign(0.0);
     text.set_hexpand(true);
@@ -707,7 +707,6 @@ fn done_button(item: &BriefItem) -> gtk::Button {
 
 fn brief_row(item: &BriefItem) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    row.set_margin_start(6);
     let text = gtk::Label::new(Some(&item.text));
     text.set_xalign(0.0);
     text.set_hexpand(true);
@@ -770,5 +769,6 @@ fn brief_button(icon: &str, tooltip: &str) -> gtk::Button {
         .valign(gtk::Align::Start)
         .build();
     button.add_css_class("flat");
+    button.add_css_class("brief-action");
     button
 }
