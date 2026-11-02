@@ -15,6 +15,8 @@ pub(super) const COLLAPSED_SECTIONS_PREFERENCE: &str = "briefCollapsedSections";
 const BRIEF_TITLE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
 /// Lines a comment up under the item's text.
 const COMMENT_MARGIN: i32 = 12;
+/// About four lines. A longer comment scrolls inside the box.
+const COMMENT_BOX_HEIGHT: i32 = 84;
 const EMPTY_TEXT: &str = "No brief yet. Your assistant posts it with the post_brief MCP tool.";
 
 /// An open comment box. It outlives the rows, which every change rebuilds, so
@@ -371,11 +373,11 @@ impl Workspace {
             .left_margin(6)
             .right_margin(6)
             .build();
-        view.add_css_class("brief-comment-box");
         view.update_property(&[gtk::accessible::Property::Label("Comment")]);
         let buffer = view.buffer();
         buffer.set_text(&draft.text);
         buffer.place_cursor(&buffer.iter_at_offset(draft.cursor));
+        view.scroll_mark_onscreen(&buffer.get_insert());
         let changed_drafts = self.brief_comment_drafts.clone();
         let changed_id = id.to_owned();
         buffer.connect_changed(move |buffer| {
@@ -424,6 +426,14 @@ impl Workspace {
         let focus_id = id.to_owned();
         focus.connect_enter(move |_| *focused.borrow_mut() = Some(focus_id.clone()));
         view.add_controller(focus);
+        // The Brief's scrolled list gives its rows only their minimum height, and
+        // a text view's minimum can be a bare line until its text is laid out.
+        let field = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .min_content_height(COMMENT_BOX_HEIGHT)
+            .child(&view)
+            .build();
+        field.add_css_class("brief-comment-box");
         let hint = gtk::Label::new(Some("Enter saves, Shift+Enter adds a line, Esc closes"));
         hint.set_xalign(0.0);
         hint.set_wrap(true);
@@ -433,7 +443,7 @@ impl Workspace {
         comment_box.set_margin_start(COMMENT_MARGIN);
         comment_box.set_margin_end(COMMENT_MARGIN);
         comment_box.set_margin_bottom(4);
-        comment_box.append(&view);
+        comment_box.append(&field);
         comment_box.append(&hint);
         comment_box
     }
@@ -759,7 +769,13 @@ fn on_click(widget: &impl IsA<gtk::Widget>, target: &glib::Variant) {
 
 /// The text view of an item's open comment box.
 fn comment_view(entry: &gtk::Widget) -> Option<gtk::TextView> {
-    entry.last_child()?.first_child()?.downcast().ok()
+    let field = entry.last_child()?.first_child()?;
+    field
+        .downcast::<gtk::ScrolledWindow>()
+        .ok()?
+        .child()?
+        .downcast()
+        .ok()
 }
 
 fn brief_button(icon: &str, tooltip: &str) -> gtk::Button {

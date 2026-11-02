@@ -124,6 +124,7 @@ button.brief-action.image-button.success {
 .brief-comment-box {
   border: 1px solid alpha(currentColor, 0.2);
   border-radius: 6px;
+  overflow: hidden;
 }
 .attention-dot {
   min-width: 6px;

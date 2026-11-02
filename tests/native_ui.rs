@@ -3722,6 +3722,49 @@ fn collapsed_brief_sections_are_remembered_by_name_and_change_no_marks() {
 }
 
 #[test]
+#[ignore = "requires a private compositor via AGTK_TEST_DISPLAY"]
+fn a_comment_box_keeps_its_height_in_a_brief_that_scrolls() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
+    let app = App::new();
+    let items = (0..30)
+        .map(|index| {
+            json!({
+                "id":format!("todoist:{index}"),
+                "section":"Tasks",
+                "text":"An item long enough to wrap, so that the whole list has to scroll",
+            })
+        })
+        .collect::<Vec<_>>();
+    app.request("brief.post", json!({"items":items}));
+    app.request("ui.show", json!({"surface":"brief"}));
+    app.activate_target_action("brief-comment", "todoist:1");
+    // The list gives a row its minimum height, which must still fit some lines.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let inspection = app.request("ui.inspect", json!({}));
+        let height = find(&inspection["root"], "brief-comment:todoist:1")
+            .map_or(0.0, |node| node["bounds"]["height"].as_f64().unwrap());
+        if height >= 84.0 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the comment box is only {height}px high"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+}
+
+#[test]
 #[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
 fn clicking_a_brief_row_opens_its_comment_done_survives_restarts_and_sessions_restore() {
     use glib::variant::ToVariant;

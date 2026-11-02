@@ -34,6 +34,7 @@ done
 cd "$repo"
 cargo test --locked --test native_ui ctrl_scroll -- --ignored --test-threads=1
 cargo test --locked --test native_ui clicking_a_brief_row -- --ignored --test-threads=1
+cargo test --locked --test native_ui a_comment_box_keeps -- --ignored --test-threads=1
 cargo test --locked --lib real_touchpad_input -- --ignored --test-threads=1
 cargo test --locked --lib fullscreen_wheel_input -- --ignored --test-threads=1
 cargo test --locked --test history_scroll -- --ignored --test-threads=1
