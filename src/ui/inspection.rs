@@ -893,7 +893,7 @@ fn current_diff_scope_label(workspace: &Workspace) -> &'static str {
 
 /// The Files page: its filter, the rows on show and any message instead of a tree.
 /// One group per section, selected while expanded, then the hidden group.
-/// Each item is selected while it is unread.
+/// An item's child is its open comment box, or else its pending comment.
 fn brief_page_node(workspace: &Workspace) -> UiNode {
     let page = &workspace.changes.brief;
     let page_visible = workspace.changes.split.shows_sidebar()
@@ -903,23 +903,48 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
         .into_iter()
         .flat_map(|rows| std::iter::successors(rows.first_child(), |row| row.next_sibling()))
         .collect::<Vec<_>>();
-    let item_node = |item: &crate::brief::BriefItem, visible: bool| UiNode {
-        id: format!("brief-item:{}", item.id),
-        role: "listitem".to_owned(),
-        label: Some(format!(
-            "{}: {}{}",
-            item.section,
-            item.text,
-            if item.done { " (done)" } else { "" }
-        )),
-        is_visible: visible,
-        is_enabled: true,
-        is_selected: !item.read,
-        bounds: rows
+    let drafts = workspace.brief_comment_drafts.borrow();
+    let item_node = |item: &crate::brief::BriefItem, visible: bool| {
+        let row = rows
             .iter()
-            .find(|row| row.widget_name() == item.id.as_str())
-            .map_or_else(Bounds::default, |row| widget_bounds(row, &workspace.window)),
-        children: Vec::new(),
+            .find(|row| row.widget_name() == item.id.as_str());
+        let draft = drafts.get(&item.id);
+        let comment = draft
+            .map(|draft| ("textbox", draft.text.as_str()))
+            .or_else(|| item.comment.as_deref().map(|comment| ("note", comment)));
+        let comment_node = comment.map(|(role, text)| {
+            let widget = row.and_then(|row| row.last_child());
+            UiNode {
+                id: format!("brief-comment:{}", item.id),
+                role: role.to_owned(),
+                label: Some(text.to_owned()),
+                is_visible: visible,
+                is_enabled: true,
+                is_selected: widget.as_ref().is_some_and(|widget| {
+                    GtkWindowExt::focus(&workspace.window)
+                        .is_some_and(|focus| focus.is_ancestor(widget))
+                }),
+                bounds: widget.map_or_else(Bounds::default, |widget| {
+                    widget_bounds(&widget, &workspace.window)
+                }),
+                children: Vec::new(),
+            }
+        });
+        UiNode {
+            id: format!("brief-item:{}", item.id),
+            role: "listitem".to_owned(),
+            label: Some(format!(
+                "{}: {}{}",
+                item.section,
+                item.text,
+                if item.done { " (done)" } else { "" }
+            )),
+            is_visible: visible,
+            is_enabled: true,
+            is_selected: false,
+            bounds: row.map_or_else(Bounds::default, |row| widget_bounds(row, &workspace.window)),
+            children: comment_node.into_iter().collect(),
+        }
     };
     let links = std::iter::successors(page.links.first_child(), |link| link.next_sibling())
         .collect::<Vec<_>>();
@@ -951,13 +976,13 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
             .into_iter()
             .map(|(section, items)| {
                 let expanded = !collapsed.contains(section);
-                let unread = items.iter().filter(|item| !item.read).count();
+                let waiting = items.iter().filter(|item| item.comment.is_some()).count();
                 let header = brief_ui::section_widget_name(section);
                 UiNode {
                     id: format!("brief-section:{section}"),
                     role: "group".to_owned(),
-                    label: Some(if unread > 0 {
-                        format!("{section} {}, {unread} unread", items.len())
+                    label: Some(if waiting > 0 {
+                        format!("{section} {}, {waiting} waiting", items.len())
                     } else {
                         format!("{section} {}", items.len())
                     }),
@@ -995,7 +1020,7 @@ fn brief_page_node(workspace: &Workspace) -> UiNode {
     UiNode {
         id: "brief-page".to_owned(),
         role: "tabpanel".to_owned(),
-        label: Some(format!("{} unread", brief.unread_count())),
+        label: None,
         is_visible: page_visible,
         is_enabled: page.root.is_sensitive(),
         is_selected: page_visible,

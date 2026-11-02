@@ -1,7 +1,7 @@
 #![allow(deprecated)]
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::io::{self, Write};
@@ -218,6 +218,12 @@ struct Workspace {
     brief_hidden_expanded: Rc<Cell<bool>>,
     /// The Brief sections the user collapsed, by name.
     brief_collapsed_sections: Rc<RefCell<BTreeSet<String>>>,
+    /// The open comment boxes, by item id.
+    brief_comment_drafts: Rc<RefCell<BTreeMap<String, brief_ui::CommentDraft>>>,
+    /// The comment box last opened or typed in.
+    brief_comment_focus: Rc<RefCell<Option<String>>>,
+    /// What had the focus before a comment box took it.
+    brief_comment_return_focus: glib::WeakRef<gtk::Widget>,
     selected_pr: Rc<RefCell<Option<SelectedPrContext>>>,
     /// The session in front of the user and since when; see `acknowledge_session`.
     viewing: Rc<RefCell<Option<Viewing>>>,
@@ -747,6 +753,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         brief: Rc::new(RefCell::new(crate::brief::Brief::default())),
         brief_hidden_expanded: Rc::new(Cell::new(false)),
         brief_collapsed_sections: Rc::default(),
+        brief_comment_drafts: Rc::default(),
+        brief_comment_focus: Rc::default(),
+        brief_comment_return_focus: glib::WeakRef::new(),
         selected_pr: Rc::new(RefCell::new(None)),
         viewing: Rc::new(RefCell::new(None)),
     };

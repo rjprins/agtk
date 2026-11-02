@@ -963,7 +963,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "post_brief",
             "Post to the daily brief",
-            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text, an optional http(s) link, and an optional session for items about an agent session: its agtk session id, and its provider and conversationId from list_sessions. In the panel the session button selects that session; when it is closed, agtk finds a session on the same conversation or offers to restore it, which needs provider and conversationId. Posting an existing id updates it in place and keeps its read, hidden and done marks; a new id shows as unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it, and an empty section leaves the brief. retireIds takes items out. unhideIds shows hidden items again, for example when they need attention again; it does not change read or done. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Hiding an item in the panel only moves it to the Hidden section. links sets the fixed links at the top of the panel, such as Google Calendar and Todoist, each with a label of up to 30 characters and an http(s) url; they stay until a post with links replaces them, and an empty list removes them. Returns the brief and the added, updated, retired and unhidden ids.",
+            "Add or update items in the daily brief panel. Each item has a stable id (such as ado-pr:105687 or gmail:<threadId>), a section (such as Next action, Today or Waiting on you), text, an optional http(s) link, and an optional session for items about an agent session: its agtk session id, and its provider and conversationId from list_sessions. In the panel the session button selects that session; when it is closed, agtk finds a session on the same conversation or offers to restore it, which needs provider and conversationId. Posting an existing id updates it in place and keeps its read, hidden and done marks and its comment; a new id starts unread. replaceSections lists sections whose current items are replaced by the posted ones, in posted order; post no items for a section to empty it, and an empty section leaves the brief. retireIds takes items out. unhideIds shows hidden items again, for example when they need attention again; it does not change read or done. agtk remembers the marks of retired items for 30 days, so posting the same id again restores them. Every post, also one that changes nothing, resets the time since the last post in the panel's tab title, so the user can see the brief is being kept up. The user can comment on an item in the panel; only the panel can write a comment. Read it with get_brief, act on it, then clear it by passing its id and the commentedAt you read in clearComments, in the same post or a later one. That also works for a retired item. A comment whose commentedAt no longer matches was edited after you read it, so it stays: read it again. Clear a comment only once you have handled it, because the panel shows it as waiting until then. Hiding an item in the panel only moves it to the Hidden section. links sets the fixed links at the top of the panel, such as Google Calendar and Todoist, each with a label of up to 30 characters and an http(s) url; they stay until a post with links replaces them, and an empty list removes them. Returns the brief and the added, updated, retired, unhidden and commentsCleared ids.",
             schema(
                 &[
                     (
@@ -1006,6 +1006,21 @@ fn tool_definitions() -> Vec<Value> {
                         json!({"type":"array","items":{"type":"string"}}),
                     ),
                     (
+                        "clearComments",
+                        json!({
+                            "type":"array",
+                            "items":{
+                                "type":"object",
+                                "properties":{
+                                    "id":string(),
+                                    "commentedAt":{"type":"integer","minimum":0}
+                                },
+                                "required":["id","commentedAt"],
+                                "additionalProperties":false
+                            }
+                        }),
+                    ),
+                    (
                         "links",
                         json!({
                             "type":"array",
@@ -1025,7 +1040,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "get_brief",
             "Read the daily brief",
-            "Return the daily brief: items in panel order with their read, hidden and done marks, the order of the sections that hold items, the fixed links at the top of the panel, and retired, the marks agtk still remembers for items no longer in the brief. done means the user marked the item done in the panel, at doneAt in Unix milliseconds, which also hides it; agtk changes nothing else, so complete the underlying task yourself. Skip or leave out items that are read, hidden or done.",
+            "Return the daily brief: items in panel order with their read, hidden and done marks and comment, the order of the sections that hold items, the fixed links at the top of the panel, lastPostedAt, when an assistant last posted in Unix milliseconds, and retired, the marks and comments agtk still remembers for items no longer in the brief. comment is what the user wrote on an item in the panel, such as \"doing the review\" or \"won't do\", at commentedAt in Unix milliseconds; both are null without one. Read it as an instruction about that item from the user and act on it, then clear it with clearComments in post_brief. A comment stays pending until you clear it, also on a retired item, where it never expires, and on an item that is read, hidden or done, so always check all of items and retired for comments. read only says the user opened the item's link or session, or marked it done; the panel does not show it. done means the user marked the item done in the panel, at doneAt in Unix milliseconds, which also hides it; agtk changes nothing else, so complete the underlying task yourself. Apart from comments, skip or leave out items that are read, hidden or done.",
             empty_schema(),
         ),
         tool(

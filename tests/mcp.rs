@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 
-use agtk::brief::{BriefItemInput, BriefLink, BriefPostParams, BriefSession};
+use agtk::brief::{BriefCommentClear, BriefItemInput, BriefLink, BriefPostParams, BriefSession};
 use agtk::control::{
     ClaudePresetApplyParams, ControlCommand, CreateSessionParams, PrListParams, SendInputParams,
     SessionIdParams, SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
@@ -434,6 +434,7 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
                     "replaceSections":["Waiting on you"],
                     "retireIds":["ado-pr:105600"],
                     "unhideIds":["gmail:abc"],
+                    "clearComments":[{"id":"todoist:7","commentedAt":5000}],
                     "links":[{"label":"Todoist","url":"https://app.todoist.com/app/today"}]
                 }
             }),
@@ -468,6 +469,10 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
                 replace_sections: vec!["Waiting on you".to_owned()],
                 retire_ids: vec!["ado-pr:105600".to_owned()],
                 unhide_ids: vec!["gmail:abc".to_owned()],
+                clear_comments: vec![BriefCommentClear {
+                    id: "todoist:7".to_owned(),
+                    commented_at: 5_000,
+                }],
                 links: Some(vec![BriefLink {
                     label: "Todoist".to_owned(),
                     url: "https://app.todoist.com/app/today".to_owned(),
@@ -476,6 +481,26 @@ fn brief_tools_map_to_the_typed_local_control_protocol() {
             ControlCommand::BriefGet,
         ]
     );
+
+    // The tool descriptions are how assistants learn about comments.
+    let listed = McpServer::new(MockBackend::default())
+        .handle(request(2, "tools/list", json!({})))
+        .unwrap();
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    for (name, words) in [
+        (
+            "post_brief",
+            ["clearComments", "only the panel", "commentedAt"],
+        ),
+        ("get_brief", ["comment", "commentedAt", "retired"]),
+    ] {
+        let description = tools.iter().find(|tool| tool["name"] == name).unwrap()["description"]
+            .as_str()
+            .unwrap();
+        for word in words {
+            assert!(description.contains(word), "{name}: {word}");
+        }
+    }
 
     for (name, arguments) in [
         ("get_brief", json!({"all":true})),

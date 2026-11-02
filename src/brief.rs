@@ -1,5 +1,6 @@
 //! The daily brief an assistant posts over MCP: items grouped in sections,
-//! each with read, hidden and done marks that survive re-posts of the same id.
+//! each with read, hidden and done marks and the user's comment, which all
+//! survive re-posts of the same id.
 
 use std::collections::HashSet;
 
@@ -15,8 +16,10 @@ const MAX_ITEMS: usize = 500;
 const MAX_POSTED_ITEMS: usize = 200;
 const MAX_REMEMBERED: usize = 2000;
 const MAX_LINKS: usize = 8;
-/// How long agtk remembers the marks of an item the assistant took out.
+/// How long agtk remembers the marks of an item the assistant took out. A
+/// pending comment stays until an assistant clears it.
 pub const REMEMBER_MILLIS: u64 = 30 * 24 * 60 * 60 * 1000;
+pub const MAX_COMMENT_CHARS: usize = 4000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -118,9 +121,21 @@ pub struct BriefPostParams {
     /// Hidden items the assistant shows again because they need attention.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unhide_ids: Vec<String>,
+    /// Comments the assistant has handled, also those on retired items.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clear_comments: Vec<BriefCommentClear>,
     /// Replaces the links at the top of the page; left out, they stay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub links: Option<Vec<BriefLink>>,
+}
+
+/// Clears an item's comment, only if it is still the one the assistant read.
+/// So an edit made while the assistant worked is not lost.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BriefCommentClear {
+    pub id: String,
+    pub commented_at: u64,
 }
 
 /// A fixed link at the top of the Brief page, such as the calendar.
@@ -163,6 +178,9 @@ impl BriefPostParams {
         }
         for id in &self.unhide_ids {
             validate_id(id)?;
+        }
+        for clear in &self.clear_comments {
+            validate_id(&clear.id)?;
         }
         if let Some(links) = &self.links {
             if links.len() > MAX_LINKS {
@@ -209,6 +227,12 @@ pub struct BriefItem {
     /// When it was marked done, in Unix milliseconds.
     #[serde(default)]
     pub done_at: Option<u64>,
+    /// The user's comment, set in the panel, until an assistant clears it.
+    #[serde(default)]
+    pub comment: Option<String>,
+    /// When the comment was last written, in Unix milliseconds.
+    #[serde(default)]
+    pub commented_at: Option<u64>,
 }
 
 /// The marks of an item that left the brief, kept so a re-post restores them.
@@ -223,7 +247,17 @@ pub struct RetiredItem {
     pub done: bool,
     #[serde(default)]
     pub done_at: Option<u64>,
+    #[serde(default)]
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub commented_at: Option<u64>,
     pub retired_at: u64,
+}
+
+impl RetiredItem {
+    fn holds_anything(&self) -> bool {
+        self.read || self.hidden || self.done || self.comment.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,6 +267,7 @@ pub struct BriefChanges {
     pub updated: Vec<String>,
     pub retired: Vec<String>,
     pub unhidden: Vec<String>,
+    pub comments_cleared: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,6 +284,10 @@ pub struct Brief {
     /// Links at the top of the page, kept until a post replaces them.
     #[serde(default)]
     pub links: Vec<BriefLink>,
+    /// When an assistant last posted, also a post that changed nothing, in
+    /// Unix milliseconds.
+    #[serde(default)]
+    pub last_posted_at: Option<u64>,
 }
 
 impl Brief {
@@ -327,7 +366,9 @@ impl Brief {
                     read: marks.as_ref().is_some_and(|marks| marks.read),
                     hidden: marks.as_ref().is_some_and(|marks| marks.hidden),
                     done: marks.as_ref().is_some_and(|marks| marks.done),
-                    done_at: marks.and_then(|marks| marks.done_at),
+                    done_at: marks.as_ref().and_then(|marks| marks.done_at),
+                    comment: marks.as_ref().and_then(|marks| marks.comment.clone()),
+                    commented_at: marks.and_then(|marks| marks.commented_at),
                 });
                 changes.added.push(input.id.clone());
             }
@@ -340,7 +381,7 @@ impl Brief {
         }
         for item in taken {
             changes.retired.push(item.id.clone());
-            if item.read || item.hidden || item.done {
+            if item.read || item.hidden || item.done || item.comment.is_some() {
                 next.retired.retain(|retired| retired.id != item.id);
                 next.retired.push(RetiredItem {
                     id: item.id,
@@ -348,6 +389,8 @@ impl Brief {
                     hidden: item.hidden,
                     done: item.done,
                     done_at: item.done_at,
+                    comment: item.comment,
+                    commented_at: item.commented_at,
                     retired_at: now,
                 });
             }
@@ -357,9 +400,15 @@ impl Brief {
                 changes.unhidden.push(id.clone());
             }
         }
+        for clear in &params.clear_comments {
+            if next.clear_comment(clear) {
+                changes.comments_cleared.push(clear.id.clone());
+            }
+        }
         if let Some(links) = &params.links {
             next.links = links.clone();
         }
+        next.last_posted_at = Some(now);
         next.forget_old(now);
         *self = next;
         Ok(changes)
@@ -375,15 +424,6 @@ impl Brief {
         }
     }
 
-    pub fn mark_all_read(&mut self) -> bool {
-        let mut changed = false;
-        for item in self.items.iter_mut().filter(|item| !item.hidden) {
-            changed |= !item.read;
-            item.read = true;
-        }
-        changed
-    }
-
     /// Marks one item done, which also reads and hides it, or not done again,
     /// which brings it back.
     pub fn toggle_done(&mut self, id: &str, now: u64) -> bool {
@@ -397,12 +437,58 @@ impl Brief {
         true
     }
 
-    /// Marks one item read, or unread again.
-    pub fn toggle_read(&mut self, id: &str) -> bool {
+    /// Writes the user's comment on an item; an empty one removes it. Returns
+    /// whether anything changed, so saving the same words keeps `commented_at`.
+    pub fn set_comment(&mut self, id: &str, text: &str, now: u64) -> BriefResult<bool> {
+        let printable = text
+            .chars()
+            .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
+            .collect::<String>();
+        let text = printable.trim();
+        if text.chars().count() > MAX_COMMENT_CHARS {
+            return Err(
+                format!("a comment holds no more than {MAX_COMMENT_CHARS} characters").into(),
+            );
+        }
         let Some(item) = self.items.iter_mut().find(|item| item.id == id) else {
+            return Ok(false);
+        };
+        let comment = (!text.is_empty()).then(|| text.to_owned());
+        if item.comment == comment {
+            return Ok(false);
+        }
+        item.commented_at = comment.is_some().then_some(now);
+        item.comment = comment;
+        Ok(true)
+    }
+
+    /// Clears a comment an assistant handled, unless the user has changed it since.
+    fn clear_comment(&mut self, clear: &BriefCommentClear) -> bool {
+        let current = Some(clear.commented_at);
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == clear.id) {
+            let matches = item.comment.is_some() && item.commented_at == current;
+            if matches {
+                item.comment = None;
+                item.commented_at = None;
+            }
+            return matches;
+        }
+        let Some(position) = self
+            .retired
+            .iter()
+            .position(|retired| retired.id == clear.id)
+        else {
             return false;
         };
-        item.read = !item.read;
+        let retired = &mut self.retired[position];
+        if retired.comment.is_none() || retired.commented_at != current {
+            return false;
+        }
+        retired.comment = None;
+        retired.commented_at = None;
+        if !retired.holds_anything() {
+            self.retired.remove(position);
+        }
         true
     }
 
@@ -430,7 +516,7 @@ impl Brief {
         let retired = &mut self.retired[position];
         let changed = retired.hidden;
         retired.hidden = false;
-        if !retired.read && !retired.done {
+        if !retired.holds_anything() {
             self.retired.remove(position);
         }
         changed
@@ -458,11 +544,22 @@ impl Brief {
         sections
     }
 
-    /// What get_brief returns: the stored brief plus the unread count.
+    /// What get_brief returns: the stored brief plus the unread count. The
+    /// panel no longer shows read; the phone page and assistants still use it.
     pub fn summary(&self) -> Value {
         let mut value = serde_json::to_value(self).unwrap_or_default();
         value["unreadCount"] = serde_json::json!(self.unread_count());
         value
+    }
+
+    /// The tab's title, with the time since the last post: "Brief (2m)". A
+    /// brief saved before posts were timed goes by its newest item.
+    pub fn tab_title(&self, now: u64) -> String {
+        let newest = self.items.iter().map(|item| item.updated_at).max();
+        match self.last_posted_at.or(newest) {
+            Some(posted) => format!("Brief ({})", short_age(now.saturating_sub(posted))),
+            None => "Brief".to_owned(),
+        }
     }
 
     pub fn unread_count(&self) -> usize {
@@ -473,10 +570,16 @@ impl Brief {
     }
 
     fn forget_old(&mut self, now: u64) {
-        self.retired
-            .retain(|retired| now.saturating_sub(retired.retired_at) < REMEMBER_MILLIS);
-        let excess = self.retired.len().saturating_sub(MAX_REMEMBERED);
-        self.retired.drain(..excess);
+        // A pending comment is the user's words, so only an assistant ends it.
+        self.retired.retain(|retired| {
+            retired.comment.is_some() || now.saturating_sub(retired.retired_at) < REMEMBER_MILLIS
+        });
+        let mut excess = self.retired.len().saturating_sub(MAX_REMEMBERED);
+        self.retired.retain(|retired| {
+            let forget = excess > 0 && retired.comment.is_none();
+            excess -= usize::from(forget);
+            !forget
+        });
         self.drop_empty_sections();
     }
 
@@ -508,6 +611,16 @@ impl BriefItem {
             self.updated_at = now;
         }
         changed
+    }
+}
+
+fn short_age(millis: u64) -> String {
+    let minutes = millis / 60_000;
+    match minutes {
+        0 => "now".to_owned(),
+        1..60 => format!("{minutes}m"),
+        60..1440 => format!("{}h", minutes / 60),
+        _ => format!("{}d", minutes / 1440),
     }
 }
 

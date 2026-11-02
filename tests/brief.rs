@@ -1,5 +1,6 @@
 use agtk::brief::{
-    Brief, BriefItemInput, BriefLink, BriefPostParams, BriefSession, REMEMBER_MILLIS, SessionTarget,
+    Brief, BriefCommentClear, BriefItemInput, BriefLink, BriefPostParams, BriefSession,
+    REMEMBER_MILLIS, SessionTarget,
 };
 use agtk::providers::AgentProvider;
 use serde_json::json;
@@ -191,8 +192,8 @@ fn retired_marks_come_back_on_a_repost_and_are_forgotten_after_thirty_days() {
     assert_eq!(
         serde_json::to_value(&brief.retired).unwrap(),
         json!([
-            {"id":"todoist:1","read":false,"hidden":true,"done":false,"doneAt":null,"retiredAt":2_000},
-            {"id":"gmail:abc","read":true,"hidden":false,"done":false,"doneAt":null,"retiredAt":2_000}
+            {"id":"todoist:1","read":false,"hidden":true,"done":false,"doneAt":null,"comment":null,"commentedAt":null,"retiredAt":2_000},
+            {"id":"gmail:abc","read":true,"hidden":false,"done":false,"doneAt":null,"comment":null,"commentedAt":null,"retiredAt":2_000}
         ])
     );
 
@@ -259,10 +260,9 @@ fn marking_from_the_panel_reports_only_real_changes() {
     assert!(!brief.hide("missing"));
     assert!(brief.hide("b"));
     assert!(!brief.hide("b"));
-    assert!(brief.mark_all_read());
-    assert!(!brief.mark_all_read());
+    assert!(brief.mark_read("a"));
     assert!(!brief.mark_read("a"));
-    // Hidden items keep their own read mark.
+    // Hidden items keep their own read mark and do not count as unread.
     assert!(!get(&brief, "b").read);
     assert_eq!(brief.summary()["unreadCount"], 0);
 }
@@ -389,7 +389,7 @@ fn done_survives_reposts_and_retirement() {
         serde_json::to_value(&brief.retired).unwrap(),
         json!([{
             "id":"todoist:7","read":true,"hidden":true,
-            "done":true,"doneAt":2_000,"retiredAt":4_000
+            "done":true,"doneAt":2_000,"comment":null,"commentedAt":null,"retiredAt":4_000
         }])
     );
     brief
@@ -409,27 +409,13 @@ fn a_brief_saved_before_done_and_hidden_existed_still_loads() {
         "items":[{"id":"a","section":"Today","text":"A","link":null,
                   "postedAt":1,"updatedAt":1,"read":true,"removed":false}],
         "sections":["Today"],
-        "retired":[{"id":"b","read":false,"removed":true,"retiredAt":1}]
+        "retired":[{"id":"b","read":false,"removed":true,"comment":null,"commentedAt":null,"retiredAt":1}]
     });
     let brief = Brief::from_value_lossy(saved);
     assert_eq!(brief.items.len(), 1);
     assert!(brief.items[0].read && !brief.items[0].done);
     assert_eq!(brief.items[0].done_at, None);
     assert!(brief.retired[0].hidden && !brief.retired[0].done);
-}
-
-#[test]
-fn clicking_toggles_read_both_ways() {
-    let mut brief = Brief::default();
-    brief
-        .post(&post(vec![item("a", "Today", "A")]), 1_000)
-        .unwrap();
-    assert!(!brief.toggle_read("missing"));
-    assert!(brief.toggle_read("a"));
-    assert!(get(&brief, "a").read);
-    assert!(brief.toggle_read("a"));
-    assert!(!get(&brief, "a").read);
-    assert_eq!(brief.unread_count(), 1);
 }
 
 #[test]
@@ -512,7 +498,7 @@ fn the_assistant_unhides_items_but_cannot_change_read_or_done() {
         serde_json::to_value(&brief.retired).unwrap(),
         json!([{
             "id":"gmail:abc","read":true,"hidden":false,
-            "done":true,"doneAt":1_500,"retiredAt":2_000
+            "done":true,"doneAt":1_500,"comment":null,"commentedAt":null,"retiredAt":2_000
         }])
     );
     brief
@@ -750,4 +736,275 @@ fn header_links_are_kept_until_a_post_replaces_them() {
         )
         .unwrap();
     assert!(brief.links.is_empty());
+}
+
+fn clear(id: &str, commented_at: u64) -> BriefPostParams {
+    BriefPostParams {
+        clear_comments: vec![BriefCommentClear {
+            id: id.to_owned(),
+            commented_at,
+        }],
+        ..BriefPostParams::default()
+    }
+}
+
+fn retire(id: &str) -> BriefPostParams {
+    BriefPostParams {
+        retire_ids: vec![id.to_owned()],
+        ..BriefPostParams::default()
+    }
+}
+
+fn commented(id: &str) -> Brief {
+    let mut brief = Brief::default();
+    brief
+        .post(&post(vec![item(id, "Today", "A")]), 1_000)
+        .unwrap();
+    assert!(brief.set_comment(id, "won't do", 2_000).unwrap());
+    brief
+}
+
+#[test]
+fn comments_are_written_edited_and_removed_in_the_panel() {
+    let mut brief = commented("a");
+    assert_eq!(get(&brief, "a").comment.as_deref(), Some("won't do"));
+    assert_eq!(get(&brief, "a").commented_at, Some(2_000));
+    assert!(!get(&brief, "a").read, "a comment sets no other mark");
+
+    // The same words change nothing, so a clear that read them still applies.
+    assert!(!brief.set_comment("a", "  won't do\n", 3_000).unwrap());
+    assert_eq!(get(&brief, "a").commented_at, Some(2_000));
+    assert!(brief.set_comment("a", "doing\nthe review", 4_000).unwrap());
+    assert_eq!(get(&brief, "a").commented_at, Some(4_000));
+    // Pasted control characters do not reach the assistant.
+    assert!(brief.set_comment("a", "x\x1b[2Jy\r", 5_000).unwrap());
+    assert_eq!(get(&brief, "a").comment.as_deref(), Some("x[2Jy"));
+
+    assert!(brief.set_comment("a", "  \n ", 6_000).unwrap());
+    assert_eq!(get(&brief, "a").comment, None);
+    assert_eq!(get(&brief, "a").commented_at, None);
+    assert!(!brief.set_comment("a", "", 7_000).unwrap());
+    assert!(!brief.set_comment("missing", "hello", 7_000).unwrap());
+}
+
+#[test]
+fn too_long_a_comment_is_refused_and_changes_nothing() {
+    let mut brief = commented("a");
+    let longest = "x".repeat(agtk::brief::MAX_COMMENT_CHARS);
+    assert!(
+        brief
+            .set_comment("a", &format!("{longest}y"), 3_000)
+            .is_err()
+    );
+    assert_eq!(get(&brief, "a").comment.as_deref(), Some("won't do"));
+    assert!(brief.set_comment("a", &longest, 3_000).unwrap());
+}
+
+#[test]
+fn get_brief_reports_comments_and_saved_briefs_without_them_load() {
+    let brief = commented("a");
+    let summary = brief.summary();
+    assert_eq!(summary["items"][0]["comment"], "won't do");
+    assert_eq!(summary["items"][0]["commentedAt"], 2_000);
+    let mut saved = serde_json::to_value(&brief).unwrap();
+    let item = saved["items"][0].as_object_mut().unwrap();
+    item.remove("comment");
+    item.remove("commentedAt");
+    assert_eq!(Brief::from_value_lossy(saved).items[0].comment, None);
+}
+
+#[test]
+fn a_repost_keeps_the_comment_and_done_leaves_it_alone() {
+    let mut brief = commented("a");
+    brief
+        .post(&post(vec![item("a", "Tomorrow", "Changed")]), 3_000)
+        .unwrap();
+    assert_eq!(get(&brief, "a").comment.as_deref(), Some("won't do"));
+    assert_eq!(get(&brief, "a").commented_at, Some(2_000));
+    brief
+        .post(
+            &replace(&["Tomorrow"], vec![item("a", "Tomorrow", "Again")]),
+            4_000,
+        )
+        .unwrap();
+    assert_eq!(get(&brief, "a").comment.as_deref(), Some("won't do"));
+
+    assert!(brief.toggle_done("a", 5_000));
+    assert_eq!(get(&brief, "a").comment.as_deref(), Some("won't do"));
+    assert_eq!(brief.summary()["items"][0]["comment"], "won't do");
+}
+
+#[test]
+fn clearing_a_comment_needs_the_one_the_assistant_read() {
+    let mut brief = commented("a");
+    // The user edited it after the assistant read it at 2_000.
+    brief.set_comment("a", "actually, do it", 3_000).unwrap();
+    let changes = brief.post(&clear("a", 2_000), 4_000).unwrap();
+    assert!(changes.comments_cleared.is_empty());
+    assert_eq!(get(&brief, "a").comment.as_deref(), Some("actually, do it"));
+
+    let changes = brief.post(&clear("a", 3_000), 5_000).unwrap();
+    assert_eq!(changes.comments_cleared, ["a"]);
+    assert_eq!(get(&brief, "a").comment, None);
+    assert_eq!(get(&brief, "a").commented_at, None);
+    // Clearing again, or something unknown, is not an error.
+    assert!(
+        brief
+            .post(&clear("a", 3_000), 6_000)
+            .unwrap()
+            .comments_cleared
+            .is_empty()
+    );
+    assert!(
+        brief
+            .post(&clear("gone", 3_000), 6_000)
+            .unwrap()
+            .comments_cleared
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_retired_item_keeps_its_pending_comment_and_a_repost_restores_it() {
+    for params in [retire("a"), replace(&["Today"], Vec::new())] {
+        let mut brief = commented("a");
+        let changes = brief.post(&params, 3_000).unwrap();
+        assert_eq!(changes.retired, ["a"]);
+        assert!(brief.items.is_empty());
+        let summary = brief.summary();
+        assert_eq!(summary["retired"][0]["id"], "a");
+        assert_eq!(summary["retired"][0]["comment"], "won't do");
+        assert_eq!(summary["retired"][0]["commentedAt"], 2_000);
+
+        let changes = brief
+            .post(&post(vec![item("a", "Today", "A")]), 4_000)
+            .unwrap();
+        assert_eq!(changes.added, ["a"]);
+        assert_eq!(get(&brief, "a").comment.as_deref(), Some("won't do"));
+        assert_eq!(get(&brief, "a").commented_at, Some(2_000));
+        assert!(brief.retired.is_empty());
+    }
+}
+
+#[test]
+fn clearing_a_retired_comment_forgets_the_entry_only_when_nothing_else_is_kept() {
+    let mut brief = commented("a");
+    brief.post(&retire("a"), 3_000).unwrap();
+    assert!(
+        brief
+            .post(&clear("a", 1), 4_000)
+            .unwrap()
+            .comments_cleared
+            .is_empty()
+    );
+    assert_eq!(brief.retired.len(), 1);
+    assert_eq!(
+        brief
+            .post(&clear("a", 2_000), 4_000)
+            .unwrap()
+            .comments_cleared,
+        ["a"]
+    );
+    assert!(brief.retired.is_empty());
+
+    let mut brief = commented("a");
+    brief.hide("a");
+    brief.post(&retire("a"), 3_000).unwrap();
+    brief.post(&clear("a", 2_000), 4_000).unwrap();
+    assert_eq!(brief.retired.len(), 1);
+    assert!(brief.retired[0].hidden);
+    assert_eq!(brief.retired[0].comment, None);
+}
+
+#[test]
+fn one_post_can_retire_an_item_and_clear_its_comment() {
+    let mut brief = commented("a");
+    let mut params = retire("a");
+    params.clear_comments = clear("a", 2_000).clear_comments;
+    let changes = brief.post(&params, 3_000).unwrap();
+    assert_eq!(changes.comments_cleared, ["a"]);
+    assert!(brief.retired.is_empty());
+}
+
+#[test]
+fn a_pending_comment_outlasts_the_thirty_days_and_the_cap_and_unhide() {
+    let mut brief = commented("a");
+    brief.hide("a");
+    brief.post(&retire("a"), 3_000).unwrap();
+    // Unhiding leaves no mark, but the comment keeps the entry.
+    assert!(brief.unhide("a"));
+    assert_eq!(brief.retired[0].comment.as_deref(), Some("won't do"));
+
+    brief
+        .post(&post(Vec::new()), 3_000 + REMEMBER_MILLIS + 1)
+        .unwrap();
+    assert_eq!(brief.retired[0].comment.as_deref(), Some("won't do"));
+
+    // The cap forgets marks, oldest first, before any comment. Items are
+    // retired 200 at a time, because a post holds no more than that.
+    let now = 3_000 + REMEMBER_MILLIS + 2;
+    for round in 0..11 {
+        let items = (0..200)
+            .map(|index| item(&format!("r{round}-{index}"), "Today", "R"))
+            .collect::<Vec<_>>();
+        brief.post(&post(items), now).unwrap();
+        for index in 0..200 {
+            brief.hide(&format!("r{round}-{index}"));
+        }
+        brief.post(&replace(&["Today"], Vec::new()), now).unwrap();
+    }
+    assert_eq!(brief.retired.len(), 2000);
+    assert_eq!(brief.retired[0].id, "a");
+
+    // Once cleared, its age counts again.
+    assert_eq!(
+        brief
+            .post(&clear("a", 2_000), now)
+            .unwrap()
+            .comments_cleared,
+        ["a"]
+    );
+    assert!(brief.retired.iter().all(|retired| retired.id != "a"));
+}
+
+#[test]
+fn the_tab_title_counts_from_the_last_post_even_one_that_changes_nothing() {
+    const MINUTE: u64 = 60_000;
+    let mut brief = Brief::default();
+    assert_eq!(brief.tab_title(MINUTE), "Brief");
+    brief
+        .post(&post(vec![item("a", "Today", "A")]), MINUTE)
+        .unwrap();
+    assert_eq!(brief.summary()["lastPostedAt"], MINUTE);
+    for (age, title) in [
+        (0, "Brief (now)"),
+        (MINUTE - 1, "Brief (now)"),
+        (MINUTE, "Brief (1m)"),
+        (2 * MINUTE, "Brief (2m)"),
+        (59 * MINUTE, "Brief (59m)"),
+        (60 * MINUTE, "Brief (1h)"),
+        (24 * 60 * MINUTE - 1, "Brief (23h)"),
+        (24 * 60 * MINUTE, "Brief (1d)"),
+    ] {
+        assert_eq!(brief.tab_title(MINUTE + age), title);
+    }
+    // A clock that went back is not a negative age.
+    assert_eq!(brief.tab_title(0), "Brief (now)");
+
+    brief.post(&post(Vec::new()), 10 * MINUTE).unwrap();
+    assert_eq!(get(&brief, "a").updated_at, MINUTE);
+    assert_eq!(brief.tab_title(12 * MINUTE), "Brief (2m)");
+
+    // A refused post is no update.
+    let refused = post(vec![item("", "Today", "A")]);
+    assert!(brief.post(&refused, 11 * MINUTE).is_err());
+    assert_eq!(brief.tab_title(12 * MINUTE), "Brief (2m)");
+
+    // A brief saved before posts were timed goes by its newest item.
+    let mut saved = serde_json::to_value(&brief).unwrap();
+    saved.as_object_mut().unwrap().remove("lastPostedAt");
+    assert_eq!(
+        Brief::from_value_lossy(saved).tab_title(3 * MINUTE),
+        "Brief (2m)"
+    );
 }

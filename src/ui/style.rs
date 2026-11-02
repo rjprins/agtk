@@ -90,11 +90,20 @@ vte-terminal { padding: 6px 10px; }
 .session-state.state-waiting { color: var(--warning-color); }
 .session-state.state-exited { color: var(--error-color); }
 .session-state.state-running { color: var(--accent-color); }
-.brief-unread-dot {
+.brief-comment-dot {
   min-width: 8px;
   min-height: 8px;
   border-radius: 50%;
   background: var(--accent-bg-color);
+}
+.brief-comment {
+  padding: 2px 0 2px 8px;
+  border-left: 2px solid var(--accent-bg-color);
+  font-size: 0.9em;
+}
+.brief-comment-box {
+  border: 1px solid alpha(currentColor, 0.2);
+  border-radius: 6px;
 }
 .attention-dot {
   min-width: 6px;

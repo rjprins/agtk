@@ -664,6 +664,10 @@ fn brief_posts_are_validated_and_round_trip() {
             replace_sections: vec!["Mail".to_owned()],
             retire_ids: vec!["gmail:old".to_owned()],
             unhide_ids: vec!["gmail:hidden".to_owned()],
+            clear_comments: vec![agtk::brief::BriefCommentClear {
+                id: "gmail:commented".to_owned(),
+                commented_at: 5_000,
+            }],
             links: Some(vec![agtk::brief::BriefLink {
                 label: "Calendar".to_owned(),
                 url: "https://calendar.google.com/".to_owned(),
@@ -677,12 +681,18 @@ fn brief_posts_are_validated_and_round_trip() {
     };
     assert_eq!(params.retire_ids, ["gmail:old"]);
     assert_eq!(params.unhide_ids, ["gmail:hidden"]);
+    assert_eq!(params.clear_comments[0].commented_at, 5_000);
 
     for params in [
         r#"{"items":[{"id":"a","section":"Today","text":"A"},{"id":"a","section":"Today","text":"B"}]}"#,
         r#"{"items":[{"id":"a","section":"Today","text":"A","link":"javascript:alert(1)"}]}"#,
         r#"{"items":[{"id":"a","section":"Today","text":"A","extra":true}]}"#,
         r#"{"replaceSections":[""]}"#,
+        // Only the panel writes comments, and a clear must name the one it read.
+        r#"{"items":[{"id":"a","section":"Today","text":"A","comment":"mine"}]}"#,
+        r#"{"clearComments":["a"]}"#,
+        r#"{"clearComments":[{"id":"a"}]}"#,
+        r#"{"clearComments":[{"id":"","commentedAt":1}]}"#,
         r#"{"links":[{"label":"Mail","url":"mailto:me@example.com"}]}"#,
         r#"{"links":[{"label":"","url":"https://calendar.google.com/"}]}"#,
     ] {

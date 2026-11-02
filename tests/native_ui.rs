@@ -3522,7 +3522,8 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     let items = |suffix: &str| {
         json!([
             {"id":"ado-pr:1","section":"Waiting on you","text":format!("Review PR 1{suffix}"),
-             "link":"https://dev.azure.com/org/project/_git/repo/pullrequest/1"},
+             "link":"https://dev.azure.com/org/project/_git/repo/pullrequest/1",
+             "session":{"id":"shell-gone"}},
             {"id":"todoist:7","section":"Tasks","text":format!("Renew passport{suffix}")},
             {"id":"gmail:abc","section":"Waiting on you","text":format!("Reply to the landlord{suffix}")}
         ])
@@ -3540,7 +3541,8 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
         json!(["ado-pr:1", "todoist:7", "gmail:abc"])
     );
 
-    app.activate_target_action("brief-toggle-read", "ado-pr:1");
+    // The session button still marks an item read, though the panel does not show it.
+    app.activate_target_action("brief-session", "ado-pr:1");
     app.activate_target_action("brief-hide", "todoist:7");
     let brief = app.request("brief.get", json!({}));
     assert_eq!(brief["unreadCount"], 1, "{brief}");
@@ -3568,7 +3570,6 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     app.request("ui.show", json!({"surface":"brief"}));
     let inspection = app.request("ui.inspect", json!({}));
     let page = find(&inspection["root"], "brief-page").unwrap();
-    assert_eq!(page["label"], "1 unread");
     let selected = |nodes: &Value| {
         nodes
             .as_array()
@@ -3592,12 +3593,12 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
         ]
     );
     let section = find(page, "brief-section:Waiting on you").unwrap();
-    assert_eq!(section["label"], "Waiting on you 2, 1 unread");
+    assert_eq!(section["label"], "Waiting on you 2");
     assert_eq!(
         selected(&section["children"]),
         [
             ("brief-item:ado-pr:1".to_owned(), false),
-            ("brief-item:gmail:abc".to_owned(), true)
+            ("brief-item:gmail:abc".to_owned(), false)
         ]
     );
     // Hidden starts collapsed; opening it lists the hidden item and is remembered.
@@ -3645,11 +3646,7 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     assert_eq!(reposted["changes"]["added"], json!([]));
     assert_eq!(reposted["items"][0]["text"], "Review PR 1 (updated)");
 
-    app.activate_action("brief-read-all");
-    assert_eq!(app.request("brief.get", json!({}))["unreadCount"], 0);
-
-    // The assistant unhides an item that needs attention again; read stays,
-    // and Mark all read skipped it while it was hidden.
+    // The assistant unhides an item that needs attention again; read stays.
     let unhidden = app.request("brief.post", json!({"items":[],"unhideIds":["todoist:7"]}));
     assert_eq!(unhidden["changes"]["unhidden"], json!(["todoist:7"]));
     assert_eq!(marks(&unhidden)[1], ("todoist:7".to_owned(), false, false));
@@ -3657,7 +3654,7 @@ fn brief_read_and_hidden_marks_survive_reposts_and_restarts() {
     app.activate_target_action("brief-hide", "gmail:abc");
     app.activate_target_action("brief-unhide", "gmail:abc");
     let brief = app.request("brief.get", json!({}));
-    assert_eq!(marks(&brief)[2], ("gmail:abc".to_owned(), true, false));
+    assert_eq!(marks(&brief)[2], ("gmail:abc".to_owned(), false, false));
     let inspection = app.request("ui.inspect", json!({}));
     assert!(find(&inspection["root"], "brief-hidden").is_none());
 }
@@ -3692,26 +3689,19 @@ fn collapsed_brief_sections_are_remembered_by_name_and_change_no_marks() {
         "brief.post",
         json!({"items":[{"id":"todoist:7","section":"To do","text":"Renew passport"}]}),
     );
-    app.activate_target_action("brief-toggle-read", "cal:standup");
     let before = app.request("brief.get", json!({}));
     let shown = section(&app, "Agenda").unwrap();
     assert_eq!(shown["isSelected"], true);
     assert!(item_visible(&shown, 0) && item_visible(&shown, 1));
 
-    // Collapsing hides the items but keeps the unread count on the header and
-    // changes nothing the assistant sees.
+    // Collapsing hides the items and changes nothing the assistant sees.
     app.activate_target_action("brief-toggle-section", "Agenda");
     assert_eq!(app.request("brief.get", json!({})), before);
     let collapsed = section(&app, "Agenda").unwrap();
     assert_eq!(collapsed["isSelected"], false);
-    assert_eq!(collapsed["label"], "Agenda 2, 1 unread");
+    assert_eq!(collapsed["label"], "Agenda 2");
     assert!(!item_visible(&collapsed, 0) && !item_visible(&collapsed, 1));
     assert_eq!(section(&app, "To do").unwrap()["isSelected"], true);
-    let inspection = app.request("ui.inspect", json!({}));
-    assert_eq!(
-        find(&inspection["root"], "brief-page").unwrap()["label"],
-        "2 unread"
-    );
 
     app.stop();
     app.start();
@@ -3733,7 +3723,7 @@ fn collapsed_brief_sections_are_remembered_by_name_and_change_no_marks() {
 
 #[test]
 #[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
-fn clicking_a_brief_row_toggles_read_done_survives_restarts_and_sessions_restore() {
+fn clicking_a_brief_row_opens_its_comment_done_survives_restarts_and_sessions_restore() {
     use glib::variant::ToVariant;
 
     fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
@@ -3826,32 +3816,183 @@ fn clicking_a_brief_row_toggles_read_done_survives_restarts_and_sessions_restore
             .unwrap()
             .clone()
     };
-    let click_row = |id: &str, read: bool| {
+    let row_bounds = |id: &str| {
         let inspection = app.request("ui.inspect", json!({}));
-        let bounds =
-            find(&inspection["root"], &format!("brief-item:{id}")).unwrap()["bounds"].clone();
-        // The row's text, left of its buttons.
+        find(&inspection["root"], &format!("brief-item:{id}")).unwrap()["bounds"].clone()
+    };
+    // The row's text, left of its buttons.
+    let click_text = |id: &str| {
+        let bounds = row_bounds(id);
         click(
             bounds["x"].as_f64().unwrap() + 40.0,
-            bounds["y"].as_f64().unwrap() + bounds["height"].as_f64().unwrap() / 2.0,
+            bounds["y"].as_f64().unwrap() + 10.0,
         );
+    };
+    let tap = |code: u32| {
+        key(code, true);
+        key(code, false);
+    };
+    const O: u32 = 24;
+    const K: u32 = 37;
+    const ENTER: u32 = 28;
+    const ESCAPE: u32 = 1;
+    const SHIFT: u32 = 42;
+    const BACKSPACE: u32 = 14;
+    // Waits for the item's comment node: its role, its words and, for the box, focus.
+    let wait_comment = |id: &str, role: &str, text: &str| {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let brief = app.request("brief.get", json!({}));
-            if item(&brief, id)["read"] == read {
-                assert_eq!(item(&brief, "todoist:7")["read"], false);
+            let inspection = app.request("ui.inspect", json!({}));
+            let row = find(&inspection["root"], &format!("brief-item:{id}")).unwrap();
+            let node = row["children"].get(0);
+            if node.is_some_and(|node| {
+                node["role"] == role
+                    && node["label"] == text
+                    && (role != "textbox" || node["isSelected"] == true)
+            }) {
                 break;
             }
             assert!(
                 Instant::now() < deadline,
-                "a row click did not set read to {read}: {brief}"
+                "no {role} saying {text:?} under {id}: {row}"
             );
             thread::sleep(Duration::from_millis(30));
         }
     };
-    click_row("gmail:abc", true);
-    click_row("gmail:abc", false);
-    click_row("gmail:abc", true);
+    let wait_no_comment = |id: &str| {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let inspection = app.request("ui.inspect", json!({}));
+            let row = find(&inspection["root"], &format!("brief-item:{id}")).unwrap();
+            if row["children"].as_array().unwrap().is_empty() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "a comment is still under {id}: {row}"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
+    };
+
+    // Clicking the text opens the box with the focus in it, and marks nothing read.
+    click_text("gmail:abc");
+    wait_comment("gmail:abc", "textbox", "");
+    let brief = app.request("brief.get", json!({}));
+    assert_eq!(item(&brief, "gmail:abc")["read"], false);
+    tap(O);
+    tap(K);
+    wait_comment("gmail:abc", "textbox", "ok");
+    // Shift+Enter adds a line.
+    key(SHIFT, true);
+    tap(ENTER);
+    key(SHIFT, false);
+    tap(K);
+    wait_comment("gmail:abc", "textbox", "ok\nk");
+    // A post rebuilds the rows, but the box keeps its words, cursor and focus.
+    app.request(
+        "brief.post",
+        json!({"items":[{"id":"todoist:9","section":"Tasks","text":"Arrived meanwhile"}]}),
+    );
+    wait_comment("gmail:abc", "textbox", "ok\nk");
+    tap(O);
+    wait_comment("gmail:abc", "textbox", "ok\nko");
+    assert_eq!(
+        item(&app.request("brief.get", json!({})), "gmail:abc")["comment"],
+        Value::Null,
+        "nothing is saved before Enter"
+    );
+    // Enter saves it, and it shows under the item.
+    tap(ENTER);
+    wait_comment("gmail:abc", "note", "ok\nko");
+    let brief = app.request("brief.get", json!({}));
+    let saved = item(&brief, "gmail:abc");
+    assert_eq!(saved["comment"], "ok\nko");
+    let commented_at = saved["commentedAt"].as_u64().unwrap();
+    assert_eq!(saved["read"], false);
+
+    // Clicking the comment edits it; Escape closes without saving.
+    let inspection = app.request("ui.inspect", json!({}));
+    let note = find(&inspection["root"], "brief-comment:gmail:abc").unwrap()["bounds"].clone();
+    click(
+        note["x"].as_f64().unwrap() + 20.0,
+        note["y"].as_f64().unwrap() + 6.0,
+    );
+    wait_comment("gmail:abc", "textbox", "ok\nko");
+    tap(K);
+    wait_comment("gmail:abc", "textbox", "ok\nkok");
+    tap(ESCAPE);
+    wait_comment("gmail:abc", "note", "ok\nko");
+    let brief = app.request("brief.get", json!({}));
+    assert_eq!(item(&brief, "gmail:abc")["commentedAt"], commented_at);
+
+    // An assistant handles the comment while its box is open and untouched.
+    click_text("gmail:abc");
+    wait_comment("gmail:abc", "textbox", "ok\nko");
+    let cleared = app.request(
+        "brief.post",
+        json!({"clearComments":[{"id":"gmail:abc","commentedAt":commented_at}]}),
+    );
+    assert_eq!(cleared["changes"]["commentsCleared"], json!(["gmail:abc"]));
+    wait_no_comment("gmail:abc");
+
+    // Saving it empty removes a comment.
+    click_text("gmail:abc");
+    wait_comment("gmail:abc", "textbox", "");
+    tap(O);
+    tap(ENTER);
+    wait_comment("gmail:abc", "note", "o");
+    click_text("gmail:abc");
+    wait_comment("gmail:abc", "textbox", "o");
+    tap(BACKSPACE);
+    wait_comment("gmail:abc", "textbox", "");
+    tap(ENTER);
+    wait_no_comment("gmail:abc");
+    assert_eq!(
+        item(&app.request("brief.get", json!({})), "gmail:abc")["comment"],
+        Value::Null
+    );
+
+    // The row's buttons keep their own clicks: the last one hides, with no box.
+    let bounds = row_bounds("todoist:9");
+    click(
+        bounds["x"].as_f64().unwrap() + bounds["width"].as_f64().unwrap() - 16.0,
+        bounds["y"].as_f64().unwrap() + 16.0,
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while item(&app.request("brief.get", json!({})), "todoist:9")["hidden"] != true {
+        assert!(Instant::now() < deadline, "the hide button did not hide");
+        thread::sleep(Duration::from_millis(30));
+    }
+    // A hidden item takes a comment too, and shows it in Hidden.
+    app.activate_action("brief-toggle-hidden");
+    click_text("todoist:9");
+    wait_comment("todoist:9", "textbox", "");
+    tap(O);
+    tap(ENTER);
+    wait_comment("todoist:9", "note", "o");
+    let brief = app.request("brief.get", json!({}));
+    let commented_at = item(&brief, "todoist:9")["commentedAt"].as_u64().unwrap();
+    // Retired, the comment leaves the panel but not get_brief, even over a restart.
+    app.request("brief.post", json!({"retireIds":["todoist:9"]}));
+    app.stop();
+    app.start();
+    app.request("ui.show", json!({"surface":"brief"}));
+    let retired = app.request("brief.get", json!({}))["retired"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|retired| retired["id"] == "todoist:9")
+        .unwrap()
+        .clone();
+    assert_eq!(retired["comment"], "o");
+    let reposted = app.request(
+        "brief.post",
+        json!({"items":[{"id":"todoist:9","section":"Tasks","text":"Back again"}]}),
+    );
+    assert_eq!(item(&reposted, "todoist:9")["comment"], "o");
+    assert_eq!(item(&reposted, "todoist:9")["commentedAt"], commented_at);
+    app.request("brief.post", json!({"retireIds":["todoist:9"]}));
 
     app.activate_target_action("brief-done", "todoist:7");
     let brief = app.request("brief.get", json!({}));
