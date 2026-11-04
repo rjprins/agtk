@@ -62,7 +62,12 @@ fn claude_screens_classify_like_agent_manager() {
             (
                 "plain-text question",
                 "⏺ What color now, what color want?\n✻ Crunched for 9s\n────\n❯ \n────\n  ▎ ✧ /plan  enter plan mode",
-                Some(Waiting),
+                Some(Finished),
+            ),
+            (
+                "question, recap and a local command",
+                "  Can I fast-forward main with all four commits? I won't push.\n\n✻ Cooked for 12m 48s · done 1:56 PM\n\n※ recap: We're fixing the bugs. Next, I need your OK to fast-forward\n  local main. (disable recaps in /config)\n\n❯ /remote-control\n\n  /remote-control is active · Continue here, on your phone, or at\n  https://claude.ai/code/session_x\n\n────\n❯\n────\n\n  ⏵⏵ auto mode on (shift+tab to cycle)",
+                Some(Finished),
             ),
             (
                 "old question, newer turn",
@@ -72,7 +77,7 @@ fn claude_screens_classify_like_agent_manager() {
             (
                 "interrupted turn",
                 "  221\n⎿  Interrupted · What should Claude do instead?\n────\n❯ \n────\n  ⏵⏵ bypass permissions on",
-                Some(Waiting),
+                Some(Finished),
             ),
             (
                 "background agents",
@@ -162,7 +167,7 @@ fn codex_screens_classify_like_agent_manager() {
             (
                 "finished on a question",
                 "• Which file should I edit, A or B?\n\n─ Worked for 3s ─────────────────\n\n› Ask Codex to do anything\n  gpt-5.6-terra medium · /home/dev",
-                Some(Waiting),
+                Some(Finished),
             ),
             (
                 "recovered after an error",
@@ -278,9 +283,10 @@ fn quiet_screen_ends_a_turn_after_the_grace_period() {
     let rules = rules_for(SessionKind::Custom);
     let start = Instant::now();
     let mut tracker = ScreenTracker::new(start);
-    tracker.derive(rules, "$ run\n", SessionState::Idle, None, start);
+    tracker.derive(rules, "$ run\n", SessionState::Busy, None, start);
+    tracker.derive(rules, "$ run\n", SessionState::Busy, None, start);
 
-    let changed = tracker.derive(rules, "$ run\nstep 1\n", SessionState::Idle, None, start);
+    let changed = tracker.derive(rules, "$ run\nstep 1\n", SessionState::Busy, None, start);
     assert_eq!(changed, Some(SessionState::Busy));
     let pause = start + Duration::from_millis(500);
     let quiet = tracker.derive(rules, "$ run\nstep 1\n", SessionState::Busy, None, pause);
@@ -291,17 +297,46 @@ fn quiet_screen_ends_a_turn_after_the_grace_period() {
 }
 
 #[test]
-fn quiet_screen_ending_on_a_question_waits() {
+fn quiet_screen_ending_on_a_question_is_a_finished_turn() {
     let rules = rules_for(SessionKind::Custom);
     let start = Instant::now();
     let mut tracker = ScreenTracker::new(start);
-    tracker.derive(rules, "$ run\n", SessionState::Idle, None, start);
-    tracker.derive(rules, "Continue?\n", SessionState::Idle, None, start);
+    tracker.derive(rules, "$ run\n", SessionState::Busy, None, start);
+    tracker.derive(rules, "Continue?\n", SessionState::Busy, None, start);
     tracker.derive(rules, "Continue?\n", SessionState::Busy, None, start);
 
     let later = start + Duration::from_secs(2);
     let ended = tracker.derive(rules, "Continue?\n", SessionState::Busy, None, later);
-    assert_eq!(ended, Some(SessionState::Waiting));
+    assert_eq!(ended, Some(SessionState::Ready));
+}
+
+// Real captures. Neither has a turn-end marker the screen can settle on: one has a
+// notice below it, the other is scrolled up in Claude's fullscreen view.
+const COMPACTED: &str = "✻ Crunched for 5m 44s · done 12:34 PM\n  ⎿  Read REVIEW.md (204 lines)\n\n● Compacted while idle, before the prompt cache expired · turn off with\n  \"idleCompaction\": false in settings.json\n\n────\n❯\n────\n\n  ⏵⏵ auto mode on";
+const SCROLLED: &str = "  What would change my answer:\n  Homepool is more useful as a test c Jump to bottom (ctrl+End) ↓ doption.\n\n────\n❯\n────\n\n  ⏵⏵ auto mode on";
+
+fn repaint(current: SessionState) -> Option<SessionState> {
+    let rules = rules_for(SessionKind::Claude);
+    assert_eq!(rules.classify(COMPACTED), None);
+    assert_eq!(rules.classify(SCROLLED), None);
+    let start = Instant::now();
+    let mut tracker = ScreenTracker::new(start);
+    tracker.derive(rules, COMPACTED, current, None, start);
+    tracker.derive(rules, COMPACTED, current, None, start);
+    tracker.derive(rules, SCROLLED, current, None, start)
+}
+
+#[test]
+fn a_repaint_between_turns_does_not_start_a_turn() {
+    assert_eq!(repaint(SessionState::Idle), Some(SessionState::Idle));
+    assert_eq!(repaint(SessionState::Ready), Some(SessionState::Ready));
+}
+
+#[test]
+fn screen_changes_keep_a_turn_under_way_busy() {
+    assert_eq!(repaint(SessionState::Busy), Some(SessionState::Busy));
+    // Answering a dialog resumes the turn it interrupted.
+    assert_eq!(repaint(SessionState::Waiting), Some(SessionState::Busy));
 }
 
 #[test]

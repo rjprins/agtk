@@ -42,7 +42,8 @@ pub struct ToolRules {
     whole_screen_region: bool,
     turn_end: Option<Regex>,
     chrome_line: Option<Regex>,
-    blocked_line: Option<Regex>,
+    /// A last line that ends the turn without a turn-end marker.
+    interrupted_line: Option<Regex>,
     trailing_note: Option<Regex>,
     busy_line: Option<Regex>,
     limit_line: Option<Regex>,
@@ -68,7 +69,7 @@ static CLAUDE: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     chrome_line: Some(re(
         r"^\s*[─q]{4,}.*$|^[\s─q]*$|^\s*✔ Update installed · Restart to update\s*$|^\s*new task\? /clear to save .*$",
     )),
-    blocked_line: Some(re("Interrupted ·")),
+    interrupted_line: Some(re("Interrupted ·")),
     trailing_note: Some(re("^※")),
     busy_line: Some(re(
         r"^[✻✳✶✽✢·✦✧+*] (?:Waiting for \d+ background agents? to finish|.*· \d+ shells? still running)",
@@ -88,7 +89,7 @@ static CODEX: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     whole_screen_region: false,
     turn_end: Some(re(r"(?m)^(?:─+ Worked for [\dhms. ]+─+|─+)$")),
     chrome_line: Some(re(r"^\s*─*\s*$")),
-    blocked_line: None,
+    interrupted_line: None,
     trailing_note: None,
     busy_line: None,
     limit_line: Some(re(r"(?m)You've hit your usage limit")),
@@ -115,7 +116,7 @@ static GEMINI: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     chrome_line: Some(re(
         r"^\s*[╭╮╰╯│─▄▀█]*\s*$|^\s*\? for shortcuts\s*$|^\s*press tab twice for more\s*$|^\s*Press Ctrl\+O to show more lines.*$|(?i)^\s*(auto-accept edits |plan |yolo )?\S*tab\S* to (accept edits|manual|plan|auto-accept edits)\b.*$",
     )),
-    blocked_line: None,
+    interrupted_line: None,
     trailing_note: None,
     busy_line: None,
     limit_line: Some(re("Usage limit reached")),
@@ -133,7 +134,7 @@ static GENERIC: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     whole_screen_region: true,
     turn_end: None,
     chrome_line: None,
-    blocked_line: None,
+    interrupted_line: None,
     trailing_note: None,
     busy_line: None,
     limit_line: None,
@@ -191,16 +192,6 @@ impl ToolRules {
             let row = screen[found.end()..].lines().next().unwrap_or_default();
             !row.trim().is_empty()
         })
-    }
-
-    /// Resting state of a turn that stopped changing without a turn-end marker.
-    /// A question on the last content line waits on the user.
-    pub fn turn_ended_state(&self, region: &str) -> Signal {
-        let lines = region.split('\n').collect::<Vec<_>>();
-        match last_content_index(&lines, lines.len() as isize - 1, self.chrome_line.as_ref()) {
-            Some(last) if lines[last].contains('?') => Signal::Waiting,
-            _ => Signal::Finished,
-        }
     }
 
     fn match_rules(&self, scope: &str) -> Option<Signal> {
@@ -341,28 +332,23 @@ impl ToolRules {
             .is_some_and(|found| found.start() == 0 && !found.is_empty())
     }
 
-    /// Reads the newest turn: finished when only chrome sits below the last
-    /// turn-end marker, waiting when the agent ended on a question.
+    /// Reads the newest turn: finished when it was interrupted, or when only chrome
+    /// sits below the last turn-end marker.
     fn turn_state(&self, screen: &str) -> Option<Signal> {
         self.turn_end.as_ref()?;
         let region = self.activity_region(screen)?;
         let lines = region.split('\n').collect::<Vec<_>>();
-        let last = last_content_index(&lines, lines.len() as isize - 1, self.chrome_line.as_ref())?;
+        let last = last_content_line(&lines, self.chrome_line.as_ref())?;
         if self
-            .blocked_line
+            .interrupted_line
             .as_ref()
-            .is_some_and(|blocked| blocked.is_match(lines[last]))
+            .is_some_and(|interrupted| interrupted.is_match(last))
         {
-            return Some(Signal::Waiting);
+            return Some(Signal::Finished);
         }
         let last_end = self.last_turn_end_index(&lines)?;
-        if !self.settled_below(&lines[last_end + 1..], false) {
-            return None;
-        }
-        match last_content_index(&lines, last_end as isize - 1, None) {
-            Some(question) if lines[question].contains('?') => Some(Signal::Waiting),
-            _ => Some(Signal::Finished),
-        }
+        self.settled_below(&lines[last_end + 1..], false)
+            .then_some(Signal::Finished)
     }
 
     /// Whether only blanks, chrome and trailing notes follow a marker.
@@ -412,14 +398,10 @@ fn wraps_above(row: &str) -> bool {
     body.is_empty() || body.len() < row.len()
 }
 
-fn last_content_index(lines: &[&str], start: isize, chrome: Option<&Regex>) -> Option<usize> {
-    (0..=start)
-        .rev()
-        .map(|index| index as usize)
-        .find(|&index| {
-            let line = lines[index];
-            !line.trim().is_empty() && !chrome.is_some_and(|chrome| chrome.is_match(trim_row(line)))
-        })
+fn last_content_line<'a>(lines: &[&'a str], chrome: Option<&Regex>) -> Option<&'a str> {
+    lines.iter().rev().copied().find(|line| {
+        !line.trim().is_empty() && !chrome.is_some_and(|chrome| chrome.is_match(trim_row(line)))
+    })
 }
 
 fn hash_text(text: &str) -> u64 {
@@ -519,19 +501,22 @@ impl ScreenTracker {
         let stuck = classified == Some(Signal::Working);
         let previous = self.region_hash;
         self.region_hash = region_hash;
-        match (region, region_hash) {
-            (Some(region), Some(hash)) if !matched || stuck => match previous {
+        match region_hash {
+            Some(hash) if !matched || stuck => match previous {
                 Some(previous) if previous != hash => {
-                    if !matched {
+                    // Agents repaint between turns: on a resize, a focus change, a scroll
+                    // or a notice. A new turn shows as a prompt, a hook or a spinner.
+                    let between_turns = matches!(current, SessionState::Idle | SessionState::Ready);
+                    if !matched && !between_turns {
                         signal = Signal::Working;
                     }
                     self.quiet = None;
                 }
                 Some(_) if in_flight(current) => {
                     if current != SessionState::Busy {
-                        // Already resting: re-read finished versus waiting without delay.
+                        // Already resting: the turn is over, so end it without delay.
                         if !stuck {
-                            signal = rules.turn_ended_state(region);
+                            signal = Signal::Finished;
                         }
                     } else {
                         let (grace, screen_hash) = if stuck {
@@ -553,10 +538,8 @@ impl ScreenTracker {
                         };
                         self.quiet = Some(timer);
                         if now.duration_since(timer.since) >= grace {
-                            signal = rules.turn_ended_state(region);
-                            if signal != Signal::Working {
-                                self.quiet = None;
-                            }
+                            signal = Signal::Finished;
+                            self.quiet = None;
                         } else {
                             signal = Signal::Working;
                         }

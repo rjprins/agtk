@@ -176,7 +176,7 @@ The Claude preset shortcut opens a chooser for the selected Claude session. Pres
 | Glyph | State | Meaning |
 |---|---|---|
 | ◐ | busy | The agent is working on a turn |
-| ◆ | waiting | Blocked on you: a permission prompt, dialog, question, or usage limit |
+| ◆ | waiting | Stopped in the middle of a turn until you act: a permission prompt, dialog, or usage limit |
 | ● | ready | The turn finished and you have not viewed it yet |
 | ○ | idle | Nothing is running, or you viewed the finished turn |
 
