@@ -1720,8 +1720,13 @@ done
     );
     app.wait_text(review_id, "Press enter to confirm");
 
+    // A push alone does not reach the agent.
     prs[0]["lastMergeSourceCommit"]["commitId"] = json!("bbb");
     std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    thread::sleep(Duration::from_secs(3));
+    assert!(!text(author_id).contains("agtk detected activity"));
+
     std::fs::write(app.directory.path().join("azure-threads.json"), serde_json::to_vec(&json!({"value":[{
         "id":3, "status":"active", "comments":[
             {"id":1, "commentType":"text", "content":"Please fix", "publishedDate":"2026-10-01T11:00:00Z", "author":{"uniqueName":"colleague@example.com"}},
@@ -1730,10 +1735,7 @@ done
     }]})).unwrap()).unwrap();
     app.request("pr.list", json!({"projectRoot":project}));
     let assert_notified = |received: &str| {
-        assert!(
-            received.contains("Source branch head changed: aaa → bbb"),
-            "{received}"
-        );
+        assert!(!received.contains("aaa"), "{received}");
         assert!(
             received.contains("agtk detected activity on PR #42"),
             "{received}"

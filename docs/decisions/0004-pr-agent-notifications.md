@@ -10,18 +10,19 @@ Implementation steps and acceptance criteria:
 1. Normalize individual comment IDs and content update times from the existing
    thread request. Keep unavailable thread data distinct from an empty response.
    Verify with the fake Azure CLI and normalization tests.
-2. Track the head commit and comments per session. The first successful snapshot
-   is a baseline. Queue and coalesce subsequent changes, ignore comments by the
-   signed-in user to avoid reply loops, and persist cursors and pending updates.
-   Verify deduplication, independent sessions, failures and restart recovery.
+2. Track comments per session. The first successful snapshot is a baseline. Queue
+   and coalesce subsequent changes, ignore comments by the signed-in user to avoid
+   reply loops, and persist cursors and pending updates. Verify deduplication,
+   independent sessions, failures and restart recovery. Pushes and votes do not
+   notify: a push is usually the agent's own, and an agent needs to act on what
+   people write, not on PR state.
 3. Route updates through existing PR associations and agent terminal input. Only
    submit at a resting prompt, defer permission dialogs and busy agents, and keep
    focused terminals available for the user. Text in the input box does not defer
    an update, which is added after it and sent with it: most of that text is a
    suggested prompt, and on screen a suggestion reads the same as a draft.
-   Notifications identify the PR, changed head and comment threads; agents fetch
-   the current details and update their checkout themselves. Verify routing and
-   delivery in native UI tests.
+   Notifications identify the PR and comment threads; agents fetch the current
+   details themselves. Verify routing and delivery in native UI tests.
 
 Automatic reviews of newly published PRs remain a separate feature. Polling does
 not launch agents, change checkouts, or post anything to Azure DevOps.
