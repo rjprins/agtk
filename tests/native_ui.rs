@@ -1608,12 +1608,30 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn an_unselected_session_reports_its_current_screen() {
+    let app = App::new();
+    let shown = app.request("session.create", json!({"kind":"shell"}));
+    let hidden = app.request("session.create", json!({"kind":"shell"}));
+    let id = hidden["id"].as_str().unwrap();
+    app.request("session.select", json!({"sessionId":shown["id"]}));
+    app.request(
+        "session.send_input",
+        json!({"sessionId":id,"text":"seq 1000 1100","appendEnter":true}),
+    );
+    let text = app.wait_text(id, "1100");
+    assert!(text.contains("1095"), "{text}");
+    assert!(!text.contains("1010"), "{text}");
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn pr_activity_notifies_working_and_review_agents_past_drafts_but_not_dialogs() {
     let mut app = App::new();
     std::fs::write(
         app.directory.path().join("fake-agent"),
         r#"#!/bin/sh
 stty -echo
+seq 1 60
 printf '› \n'
 while IFS= read -r line; do
     printf '%s\n' "$line" >> "$AGTK_STATE_ROOT/received-$AGTK_SESSION_ID"
@@ -1664,6 +1682,8 @@ done
         "createdBy":{"uniqueName":"reviewer@example.com"}, "lastMergeSourceCommit":{"commitId":"aaa"}
     }]);
     std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    // The first session takes the page, so the agents are never shown at all.
+    let shell = app.request("session.create", json!({"kind":"shell","cwd":project}));
     let author = app.request(
         "session.create",
         json!({"kind":"codex","cwd":project,"name":"Implement feature"}),
@@ -1672,14 +1692,10 @@ done
         "session.create",
         json!({"kind":"codex","cwd":project,"name":"review: PR #42"}),
     );
-    let shell = app.request("session.create", json!({"kind":"shell","cwd":project}));
     let author_id = author["id"].as_str().unwrap();
     let review_id = review["id"].as_str().unwrap();
-    app.request("session.select", json!({"sessionId":author_id}));
     app.wait_text(author_id, "›");
-    app.request("session.select", json!({"sessionId":review_id}));
     app.wait_text(review_id, "›");
-    app.request("session.select", json!({"sessionId":shell["id"]}));
     app.request("pr.list", json!({"projectRoot":project}));
     let text = |id: &str| {
         app.request("session.get_text", json!({"sessionId":id,"lines":200}))["text"]
@@ -1742,7 +1758,6 @@ done
 
     app.stop();
     app.start();
-    app.request("session.select", json!({"sessionId":review_id}));
     app.request("session.select", json!({"sessionId":shell["id"]}));
     app.request("pr.list", json!({"projectRoot":project}));
     thread::sleep(Duration::from_secs(3));

@@ -319,11 +319,17 @@ impl Workspace {
                     Some(session) => {
                         // VTE exposes the visible screen and in-memory scrollback as plain text.
                         // Source: https://gnome.pages.gitlab.gnome.org/vte/gtk4/method.Terminal.get_text_format.html
-                        let text = session
-                            .terminal
-                            .text_format(vte::Format::Text)
-                            .unwrap_or_default();
-                        let bounded = bounded_terminal_text(text.as_str(), params.lines as usize);
+                        // It finds those rows by pixel, so a hidden page reports just one.
+                        let text = if session.terminal.is_mapped() {
+                            session
+                                .terminal
+                                .text_format(vte::Format::Text)
+                                .unwrap_or_default()
+                                .to_string()
+                        } else {
+                            status_ui::screen_text(&session.terminal)
+                        };
+                        let bounded = bounded_terminal_text(&text, params.lines as usize);
                         let snapshot = TextSnapshot {
                             session_id: params.session_id.clone(),
                             text: bounded.text,

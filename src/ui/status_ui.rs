@@ -325,13 +325,26 @@ pub(super) const fn is_agent(kind: SessionKind) -> bool {
 }
 
 /// The live screen, not the scrolled view, so scrolling back does not change the reading.
+/// The agent's screen, whether or not its page is showing.
 pub(super) fn screen_text(terminal: &vte::Terminal) -> String {
     let rows = terminal.row_count();
+    if !terminal.is_mapped() {
+        // A hidden page keeps reading its agent, but VTE stops updating the scroll
+        // adjustment. The cursor is always on screen, so the screen lies within a
+        // screenful of it, ending at the last row in use.
+        let (_, cursor_row) = terminal.cursor_position();
+        let text = text_of_rows(terminal, (cursor_row - rows + 1).max(0), cursor_row + rows);
+        let lines = text.trim_end_matches('\n').split('\n').collect::<Vec<_>>();
+        return lines[lines.len().saturating_sub(rows as usize)..].join("\n");
+    }
     let end = terminal
         .vadjustment()
         .map(|adjustment| adjustment.upper() as libc::c_long)
         .unwrap_or(rows);
-    let start = (end - rows).max(0);
+    text_of_rows(terminal, (end - rows).max(0), end)
+}
+
+fn text_of_rows(terminal: &vte::Terminal, start: libc::c_long, end: libc::c_long) -> String {
     terminal
         .text_range_format(
             vte::Format::Text,
