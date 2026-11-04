@@ -194,8 +194,6 @@ impl Workspace {
                     .unwrap_or_default();
                 let mut pr_activity = store
                     .preference_or_default::<crate::azure::PrActivityTracker>("prAgentActivity")?;
-                let mut session_input_pending =
-                    store.preference_or_default::<HashSet<String>>("sessionInputPending")?;
                 let claude_presets = store
                     .preference("claudeModelPresets")?
                     .map(crate::claude_presets::ClaudePresetPreferences::from_value_lossy)
@@ -242,7 +240,6 @@ impl Workspace {
                 session_pr_cache.retain(|id, _| records.iter().any(|record| &record.id == id));
                 pr_activity
                     .retain_sessions(&records.iter().map(|record| record.id.clone()).collect());
-                session_input_pending.retain(|id| records.iter().any(|record| &record.id == id));
                 let mut sockets = socket_files(&paths.sessions_dir());
                 if paths.name().as_str() == "default"
                     && let Some(legacy) = paths.runtime_dir().parent()
@@ -308,7 +305,6 @@ impl Workspace {
                     pr_preferences,
                     session_pr_cache,
                     pr_activity,
-                    session_input_pending,
                     claude_presets,
                     brief,
                     brief_hidden_expanded,
@@ -339,7 +335,6 @@ impl Workspace {
                     pr_preferences,
                     session_pr_cache,
                     pr_activity,
-                    session_input_pending,
                     claude_presets,
                     brief,
                     brief_hidden_expanded,
@@ -372,7 +367,6 @@ impl Workspace {
                     *workspace.pr_preferences.borrow_mut() = pr_preferences;
                     *workspace.session_pr_cache.borrow_mut() = session_pr_cache;
                     *workspace.pr_activity.borrow_mut() = pr_activity;
-                    *workspace.session_input_pending.borrow_mut() = session_input_pending;
                     workspace.update_pr_indicator();
                     workspace.load_claude_presets(claude_presets);
                     workspace.brief_hidden_expanded.set(brief_hidden_expanded);
@@ -1177,16 +1171,12 @@ impl Workspace {
             }
         });
 
-        let input_tracker = Rc::new(RefCell::new(InputTracker::with_pending_input(
-            self.session_input_pending.borrow().contains(&id),
-        )));
+        let input_tracker = Rc::new(RefCell::new(InputTracker::default()));
         let tracker = input_tracker.clone();
         let history_workspace = self.clone();
         let history_id = id.clone();
         terminal.connect_commit(move |_, text, _| {
             let submitted = tracker.borrow_mut().push(text);
-            history_workspace
-                .remember_pending_input(&history_id, tracker.borrow().has_pending_input());
             if let Some(input) = submitted {
                 history_workspace.record_typed_input(&history_id, input);
             }

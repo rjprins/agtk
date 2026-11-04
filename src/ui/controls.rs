@@ -69,7 +69,6 @@ impl Workspace {
             }
             terminal.feed_child(text.as_bytes());
         }
-        self.remember_pending_input(session_id, tracker.borrow().has_pending_input());
         Some(bytes_written)
     }
 

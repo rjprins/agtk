@@ -1574,7 +1574,8 @@ impl Workspace {
         self.deliver_pr_activity();
     }
 
-    /// A queued update becomes one agent prompt once a resting terminal is free.
+    /// A queued update becomes one agent prompt once the agent rests. A draft does
+    /// not hold it back: the update is added after the draft and sent with it.
     pub(super) fn deliver_pr_activity(&self) {
         let terminals = self
             .sessions
@@ -1589,7 +1590,6 @@ impl Workspace {
                         SessionState::Ready | SessionState::Idle
                     )
                     && now_millis().saturating_sub(session.record.state_changed_at) >= 2_000
-                    && !session.input_tracker.borrow().has_pending_input()
                     && !(self.window.is_active() && session.terminal.has_focus())
                     && {
                         let rules = crate::agent_status::rules_for(session.record.kind);
@@ -1605,23 +1605,26 @@ impl Workspace {
                     }
             })
             .map(|session| {
+                let has_text = crate::agent_status::rules_for(session.record.kind)
+                    .composer_has_text(&status_ui::screen_text(&session.terminal));
                 (
                     session.record.id.clone(),
                     session.terminal.clone(),
                     session.input_tracker.clone(),
+                    has_text,
                 )
             })
             .collect::<Vec<_>>();
         let mut changed = false;
         // Terminal input can re-enter session callbacks: all session borrows are released.
-        for (id, terminal, tracker) in terminals {
+        for (id, terminal, tracker, has_text) in terminals {
             let message = self.pr_activity.borrow_mut().take_notification(&id);
             if let Some(message) = message {
                 self.mark_agent_busy(&id);
-                terminal.paste_text(&message);
+                let separator = if has_text { "\n\n" } else { "" };
+                terminal.paste_text(&format!("{separator}{message}"));
                 terminal.feed_child(b"\r");
                 let submitted = tracker.borrow_mut().push("\r");
-                self.remember_pending_input(&id, tracker.borrow().has_pending_input());
                 if let Some(input) = submitted {
                     self.record_typed_input(&id, input);
                 }

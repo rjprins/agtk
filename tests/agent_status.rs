@@ -357,3 +357,22 @@ fn unviewed_ready_survives_an_idle_reading() {
         SessionState::Ready
     );
 }
+
+#[test]
+fn the_input_box_shows_text_only_after_its_marker() {
+    let border = "─".repeat(40);
+    let claude = rules_for(SessionKind::Claude);
+    let screen = |row: &str| format!("● Done\n\n{border}\n{row}\n{border}\n  ⏵⏵ auto mode on\n");
+    assert!(!claude.composer_has_text(&screen("❯")));
+    assert!(!claude.composer_has_text(&screen("❯\u{a0}")));
+    assert!(claude.composer_has_text(&screen("❯\u{a0}my draft words")));
+    assert!(claude.composer_has_text(&screen("❯\u{a0}Try \"fix lint errors\"")));
+    // Only the live input box counts, not a prompt further up the screen.
+    assert!(!claude.composer_has_text(&format!("❯ earlier prompt\n{}", screen("❯\u{a0}"))));
+
+    let codex = rules_for(SessionKind::Codex);
+    assert!(!codex.composer_has_text("• Done\n\n› \n"));
+    assert!(codex.composer_has_text("• Done\n\n› draft\n"));
+
+    assert!(!rules_for(SessionKind::Shell).composer_has_text("$ ls\n"));
+}

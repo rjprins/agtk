@@ -15,14 +15,16 @@ Implementation steps and acceptance criteria:
    signed-in user to avoid reply loops, and persist cursors and pending updates.
    Verify deduplication, independent sessions, failures and restart recovery.
 3. Route updates through existing PR associations and agent terminal input. Only
-   submit at a resting prompt, defer permission dialogs, busy agents and drafts,
-   and keep focused terminals available for the user. Notifications identify the
-   PR, changed head and comment threads; agents fetch the current details and
-   update their checkout themselves. Verify routing and delivery in native UI tests.
+   submit at a resting prompt, defer permission dialogs and busy agents, and keep
+   focused terminals available for the user. Text in the input box does not defer
+   an update, which is added after it and sent with it: most of that text is a
+   suggested prompt, and on screen a suggestion reads the same as a draft.
+   Notifications identify the PR, changed head and comment threads; agents fetch
+   the current details and update their checkout themselves. Verify routing and
+   delivery in native UI tests.
 
 Automatic reviews of newly published PRs remain a separate feature. Polling does
 not launch agents, change checkouts, or post anything to Azure DevOps.
 
 Comment identifiers and content update times follow the
 [Azure DevOps PR threads schema](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-threads/list?view=azure-devops-rest-7.1).
-Only the presence of a terminal draft is saved; its text stays in the agent.

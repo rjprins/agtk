@@ -1608,7 +1608,7 @@ fn azure_pr_attention_and_review_launch_use_the_project_context() {
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
-fn pr_activity_notifies_working_and_review_agents_and_defers_drafts_and_dialogs() {
+fn pr_activity_notifies_working_and_review_agents_past_drafts_but_not_dialogs() {
     let mut app = App::new();
     std::fs::write(
         app.directory.path().join("fake-agent"),
@@ -1620,6 +1620,7 @@ while IFS= read -r line; do
     printf '__INPUT_%s__\n' "$line"
     case "$line" in
         __WAIT__) printf '› 1. Yes, proceed\n  2. No\nPress enter to confirm\n' ;;
+        __DRAFT__) printf '─ Worked for 1s ─\n› draft\n' ;;
         *) printf '─ Worked for 1s ─\n› \n' ;;
     esac
 done
@@ -1687,6 +1688,12 @@ done
             .to_owned()
     };
     assert!(!text(author_id).contains("agtk detected activity"));
+    // The author rests with a draft in the input box, and the review on a dialog.
+    app.request(
+        "session.send_input",
+        json!({"sessionId":author_id,"text":"__DRAFT__","appendEnter":true}),
+    );
+    app.wait_text(author_id, "› draft");
     app.request(
         "session.send_input",
         json!({"sessionId":author_id,"text":"draft","appendEnter":false}),
@@ -1706,41 +1713,7 @@ done
         ]
     }]})).unwrap()).unwrap();
     app.request("pr.list", json!({"projectRoot":project}));
-    // Poll again after the delivery grace: both the draft and dialog must survive.
-    thread::sleep(Duration::from_secs(3));
-    app.request("pr.list", json!({"projectRoot":project}));
-    assert!(!text(author_id).contains("agtk detected activity"));
-    assert!(!text(review_id).contains("agtk detected activity"));
-    assert!(!text(shell["id"].as_str().unwrap()).contains("agtk detected activity"));
-
-    app.stop();
-    app.start();
-    for id in [author_id, review_id] {
-        app.request("session.select", json!({"sessionId":id}));
-    }
-    app.request("session.select", json!({"sessionId":shell["id"]}));
-    app.request("pr.list", json!({"projectRoot":project}));
-    thread::sleep(Duration::from_secs(3));
-    for id in [author_id, review_id] {
-        let text = app.request("session.get_text", json!({"sessionId":id,"lines":200}));
-        assert!(
-            !text["text"]
-                .as_str()
-                .unwrap()
-                .contains("agtk detected activity")
-        );
-    }
-
-    app.request(
-        "session.send_input",
-        json!({"sessionId":author_id,"text":"\u{15}__READY__","appendEnter":true}),
-    );
-    app.request(
-        "session.send_input",
-        json!({"sessionId":review_id,"text":"__READY__","appendEnter":true}),
-    );
-    for id in [author_id, review_id] {
-        let received = app.wait_text(id, "1 new or edited comment");
+    let assert_notified = |received: &str| {
         assert!(
             received.contains("Source branch head changed: aaa → bbb"),
             "{received}"
@@ -1750,8 +1723,45 @@ done
             "{received}"
         );
         assert!(received.contains("thread(s) 3"), "{received}");
-        assert!(!received.contains("draftagtk"), "{received}");
-    }
+    };
+    // The draft goes out with the update, on a line of its own.
+    assert_notified(&app.wait_text(author_id, "1 new or edited comment"));
+    let received = |id: &str| {
+        std::fs::read_to_string(app.directory.path().join(format!("received-{id}"))).unwrap()
+    };
+    assert!(
+        received(author_id).lines().any(|line| line == "draft"),
+        "{}",
+        received(author_id)
+    );
+    // Poll again after the delivery grace: the dialog must survive.
+    thread::sleep(Duration::from_secs(3));
+    app.request("pr.list", json!({"projectRoot":project}));
+    assert!(!text(review_id).contains("agtk detected activity"));
+    assert!(!text(shell["id"].as_str().unwrap()).contains("agtk detected activity"));
+
+    app.stop();
+    app.start();
+    app.request("session.select", json!({"sessionId":review_id}));
+    app.request("session.select", json!({"sessionId":shell["id"]}));
+    app.request("pr.list", json!({"projectRoot":project}));
+    thread::sleep(Duration::from_secs(3));
+    let text = app.request(
+        "session.get_text",
+        json!({"sessionId":review_id,"lines":200}),
+    );
+    assert!(
+        !text["text"]
+            .as_str()
+            .unwrap()
+            .contains("agtk detected activity")
+    );
+
+    app.request(
+        "session.send_input",
+        json!({"sessionId":review_id,"text":"__READY__","appendEnter":true}),
+    );
+    assert_notified(&app.wait_text(review_id, "1 new or edited comment"));
     app.request("pr.list", json!({"projectRoot":project}));
     thread::sleep(Duration::from_secs(3));
     for id in [author_id, review_id] {

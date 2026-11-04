@@ -211,7 +211,6 @@ struct Workspace {
     session_pr_cache: Rc<RefCell<HashMap<String, AzurePr>>>,
     pr_activity: Rc<RefCell<crate::azure::PrActivityTracker>>,
     pr_activity_snapshots: Rc<RefCell<HashMap<String, std::time::Instant>>>,
-    session_input_pending: Rc<RefCell<HashSet<String>>>,
     claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
     brief: Rc<RefCell<crate::brief::Brief>>,
     /// Whether the Brief page lists its hidden items.
@@ -748,7 +747,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         session_pr_cache: Rc::new(RefCell::new(HashMap::new())),
         pr_activity: Rc::default(),
         pr_activity_snapshots: Rc::default(),
-        session_input_pending: Rc::default(),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         brief: Rc::new(RefCell::new(crate::brief::Brief::default())),
         brief_hidden_expanded: Rc::new(Cell::new(false)),

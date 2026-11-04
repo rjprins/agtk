@@ -181,6 +181,18 @@ impl ToolRules {
             .map(|found| &screen[..found.start()])
     }
 
+    /// Whether the input box shows text. A suggested prompt counts: on screen it
+    /// reads the same as a draft.
+    pub fn composer_has_text(&self, screen: &str) -> bool {
+        let Some(cutoff) = &self.activity_cutoff else {
+            return false;
+        };
+        cutoff.find_iter(screen).last().is_some_and(|found| {
+            let row = screen[found.end()..].lines().next().unwrap_or_default();
+            !row.trim().is_empty()
+        })
+    }
+
     /// Resting state of a turn that stopped changing without a turn-end marker.
     /// A question on the last content line waits on the user.
     pub fn turn_ended_state(&self, region: &str) -> Signal {

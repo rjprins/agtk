@@ -37,23 +37,9 @@ pub fn history_needle(text: &str, max_chars: usize) -> String {
 pub struct InputTracker {
     line: String,
     bracketed_paste: bool,
-    recalled_input: bool,
 }
 
 impl InputTracker {
-    /// Reattached terminals may still contain a draft whose keystrokes we missed.
-    pub fn with_pending_input(pending: bool) -> Self {
-        Self {
-            recalled_input: pending,
-            ..Self::default()
-        }
-    }
-
-    /// Automatic prompts must wait while a user has a draft or a paste in progress.
-    pub fn has_pending_input(&self) -> bool {
-        !self.line.is_empty() || self.bracketed_paste || self.recalled_input
-    }
-
     pub fn push(&mut self, data: &str) -> Option<String> {
         let mut submitted = None;
         let mut offset = 0;
@@ -71,10 +57,11 @@ impl InputTracker {
                 continue;
             }
             if remaining.starts_with("\u{1b}[") {
-                if remaining.starts_with("\u{1b}[A") || remaining.starts_with("\u{1b}[B") {
-                    self.recalled_input = true;
-                }
                 offset += escape_sequence_len(remaining);
+                continue;
+            }
+            if let Some(len) = string_sequence_len(remaining) {
+                offset += len;
                 continue;
             }
             if remaining.starts_with('\u{1b}') {
@@ -92,7 +79,6 @@ impl InputTracker {
                 '\r' | '\n' => {
                     let normalized = self.line.split_whitespace().collect::<Vec<_>>().join(" ");
                     self.line.clear();
-                    self.recalled_input = false;
                     if !normalized.is_empty() {
                         submitted = Some(normalized);
                     }
@@ -100,11 +86,7 @@ impl InputTracker {
                 '\u{7f}' | '\u{8}' => {
                     self.line.pop();
                 }
-                '\u{15}' | '\u{3}' => {
-                    self.line.clear();
-                    self.recalled_input = false;
-                }
-                '\u{10}' | '\u{e}' | '\u{12}' => self.recalled_input = true,
+                '\u{15}' | '\u{3}' => self.line.clear(),
                 control if control < ' ' => {}
                 printable => self.line.push(printable),
             }
@@ -125,4 +107,18 @@ fn escape_sequence_len(input: &str) -> usize {
         .skip(2)
         .position(|byte| (0x40..=0x7e).contains(byte))
         .map_or(input.len(), |index| index + 3)
+}
+
+/// The terminal's answers to an agent's queries reach us like typing, such as
+/// `ESC P >|VTE(8401) ESC \` at every startup. They run up to a terminator.
+fn string_sequence_len(input: &str) -> Option<usize> {
+    let body = input
+        .strip_prefix('\u{1b}')?
+        .strip_prefix([']', 'P', 'X', '^', '_'])?;
+    let end = ["\u{1b}\\", "\u{7}"]
+        .into_iter()
+        .filter_map(|end| body.find(end).map(|index| index + end.len()))
+        .min()
+        .unwrap_or(body.len());
+    Some(input.len() - body.len() + end)
 }

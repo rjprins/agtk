@@ -9,31 +9,30 @@ fn input_tracker_emits_a_compacted_prompt_on_submit() {
 }
 
 #[test]
-fn input_tracker_exposes_unsubmitted_text_and_incomplete_pastes() {
+fn terminal_replies_at_agent_startup_are_not_typed_text() {
     let mut tracker = InputTracker::default();
-    assert!(!tracker.has_pending_input());
-    tracker.push("draft");
-    assert!(tracker.has_pending_input());
-    tracker.push("\u{15}");
-    assert!(!tracker.has_pending_input());
-    tracker.push("\u{1b}[200~");
-    assert!(tracker.has_pending_input());
-    tracker.push("\u{1b}[201~submitted\r");
-    assert!(!tracker.has_pending_input());
-    tracker.push("\u{1b}[A");
-    assert!(tracker.has_pending_input());
-    tracker.push("\u{3}");
-    assert!(!tracker.has_pending_input());
+    // What VTE reports while Claude Code starts, with nothing typed.
+    for reply in [
+        "\u{1b}[I",
+        "\u{1b}P>|VTE(8401)\u{1b}\\",
+        "\u{1b}[?61;1;21;22;28c",
+        "\u{1b}[?2026;4$y",
+        "\u{1b}]11;rgb:1e1e/1e1e/1e1e\u{7}",
+        "\u{1b}]10;rgb:ffff/ffff/ffff\u{1b}\\",
+    ] {
+        assert_eq!(tracker.push(reply), None, "{reply:?}");
+    }
+    assert_eq!(tracker.push("\r"), None);
+    assert_eq!(tracker.push("hello\r"), Some("hello".to_owned()));
 }
 
 #[test]
-fn a_restored_draft_blocks_automatic_input_until_the_user_clears_or_submits_it() {
-    for terminator in ["\r", "\u{15}", "\u{3}"] {
-        let mut tracker = InputTracker::with_pending_input(true);
-        assert!(tracker.has_pending_input());
-        tracker.push(terminator);
-        assert!(!tracker.has_pending_input());
-    }
+fn typing_continues_after_a_terminal_reply_in_the_same_input() {
+    let mut tracker = InputTracker::default();
+    assert_eq!(
+        tracker.push("he\u{1b}P>|VTE(8401)\u{1b}\\llo\r"),
+        Some("hello".to_owned())
+    );
 }
 
 #[test]
