@@ -1836,7 +1836,7 @@ fn session_pr_button_shows_a_check_once_a_reviewer_approves() {
         json!({"kind":"shell","cwd":project,"projectRoot":project,"name":"review: PR #42"}),
     );
     let id = session["id"].as_str().unwrap().to_owned();
-    let marker = |app: &App, kind: &str| -> bool {
+    let button = |app: &App| -> Value {
         let inspection = app.request("ui.inspect", json!({}));
         let sessions = &inspection["root"]["children"][0]["children"][1]["children"];
         let session = sessions
@@ -1845,12 +1845,16 @@ fn session_pr_button_shows_a_check_once_a_reviewer_approves() {
             .iter()
             .find(|node| node["id"] == format!("session-{id}"))
             .unwrap();
-        let pr = session["children"]
+        session["children"]
             .as_array()
             .unwrap()
             .iter()
             .find(|node| node["id"] == format!("session-pr-{id}"))
-            .unwrap();
+            .unwrap()
+            .clone()
+    };
+    let marker = |app: &App, kind: &str| -> bool {
+        let pr = button(app);
         assert_eq!(pr["isVisible"], true);
         pr["children"]
             .as_array()
@@ -1863,12 +1867,17 @@ fn session_pr_button_shows_a_check_once_a_reviewer_approves() {
     let approved = |app: &App| marker(app, "approved");
     app.request("pr.list", json!({"projectRoot":project}));
     assert!(!approved(&app));
+    thread::sleep(Duration::from_millis(300));
+    let unapproved_bounds = button(&app)["bounds"].clone();
 
     // One approval is enough, also next to a reviewer who disagrees.
     write_votes(&[5, -10]);
     app.request("pr.list", json!({"projectRoot":project}));
     assert!(approved(&app));
     assert!(!marker(&app, "attention"));
+    // The check does not push the button or its letters aside.
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(button(&app)["bounds"], unapproved_bounds);
 
     // It stands next to the new comments dot.
     std::fs::write(

@@ -127,6 +127,7 @@ button.brief-action.image-button.success {
   overflow: hidden;
 }
 .pr-approved {
+  margin-left: -13px;
   color: var(--success-color);
 }
 .attention-dot {

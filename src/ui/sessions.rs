@@ -1229,21 +1229,22 @@ impl Workspace {
         content.append(&mainline);
         // The caption carries the PR's author and subject; the number is in the tooltip.
         let pr_label = gtk::Label::new(Some("PR"));
-        let pr_approved_mark = gtk::Image::from_icon_name("object-select-symbolic");
-        pr_approved_mark.set_pixel_size(12);
-        pr_approved_mark.add_css_class("pr-approved");
-        pr_approved_mark.set_visible(false);
-        let pr_marks = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        pr_marks.append(&pr_label);
-        pr_marks.append(&pr_approved_mark);
         let pr_contents = gtk::Overlay::new();
-        pr_contents.set_child(Some(&pr_marks));
+        pr_contents.set_child(Some(&pr_label));
         let pr_attention_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         pr_attention_dot.add_css_class("attention-dot");
         pr_attention_dot.set_halign(gtk::Align::End);
         pr_attention_dot.set_valign(gtk::Align::Start);
         pr_attention_dot.set_visible(false);
         pr_contents.add_overlay(&pr_attention_dot);
+        // An overlay, so that the button and its letters stay put when it appears.
+        let pr_approved_mark = gtk::Image::from_icon_name("object-select-symbolic");
+        pr_approved_mark.set_pixel_size(12);
+        pr_approved_mark.add_css_class("pr-approved");
+        pr_approved_mark.set_halign(gtk::Align::Start);
+        pr_approved_mark.set_valign(gtk::Align::Center);
+        pr_approved_mark.set_visible(false);
+        pr_contents.add_overlay(&pr_approved_mark);
         let pr_button = gtk::Button::builder().child(&pr_contents).build();
         pr_button.add_css_class("flat");
         pr_button.add_css_class("accent");
