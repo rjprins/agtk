@@ -51,6 +51,12 @@ fn azure_remotes_and_active_pr_payloads_are_strictly_normalized() {
     assert_eq!(prs[0].id, 42);
     assert_eq!(prs[0].source_branch, "native-workspace");
     assert_eq!(prs[0].reviewer_votes, [10]);
+    assert_eq!(prs[0].approvals(), 1);
+    let mut mixed = prs[0].clone();
+    mixed.reviewer_votes = vec![10, 5, 0, -5, -10];
+    assert_eq!(mixed.approvals(), 2);
+    mixed.reviewer_votes = vec![0, -5, -10];
+    assert_eq!(mixed.approvals(), 0);
     assert!(prs[0].url.contains("pullrequest/42"));
 
     // Snapshots saved before PBI links were added still restore successfully.

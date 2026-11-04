@@ -132,17 +132,30 @@ impl Workspace {
                             is_enabled: session.pr_button.is_sensitive(),
                             is_selected: false,
                             bounds: widget_bounds(&session.pr_button, &self.window),
-                            children: vec![UiNode {
-                                id: format!("session-pr-attention-{id}"),
-                                role: "status".to_owned(),
-                                label: Some("New PR comments".to_owned()),
-                                is_visible: session.pr_button.is_visible()
-                                    && session.pr_attention_dot.is_visible(),
-                                is_enabled: true,
-                                is_selected: false,
-                                bounds: widget_bounds(&session.pr_attention_dot, &self.window),
-                                children: Vec::new(),
-                            }],
+                            children: vec![
+                                UiNode {
+                                    id: format!("session-pr-attention-{id}"),
+                                    role: "status".to_owned(),
+                                    label: Some("New PR comments".to_owned()),
+                                    is_visible: session.pr_button.is_visible()
+                                        && session.pr_attention_dot.is_visible(),
+                                    is_enabled: true,
+                                    is_selected: false,
+                                    bounds: widget_bounds(&session.pr_attention_dot, &self.window),
+                                    children: Vec::new(),
+                                },
+                                UiNode {
+                                    id: format!("session-pr-approved-{id}"),
+                                    role: "status".to_owned(),
+                                    label: Some("PR approved".to_owned()),
+                                    is_visible: session.pr_button.is_visible()
+                                        && session.pr_approved_mark.is_visible(),
+                                    is_enabled: true,
+                                    is_selected: false,
+                                    bounds: widget_bounds(&session.pr_approved_mark, &self.window),
+                                    children: Vec::new(),
+                                },
+                            ],
                         },
                     ],
                 })

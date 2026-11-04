@@ -1794,6 +1794,117 @@ done
 
 #[test]
 #[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn session_pr_button_shows_a_check_once_a_reviewer_approves() {
+    let mut app = App::new();
+    let project = app.directory.path().join("approved-project");
+    std::fs::create_dir(&project).unwrap();
+    for args in [
+        &["init", "-q", "-b", "feature"][..],
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://dev.azure.com/org/project/_git/repo",
+        ][..],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let pr_file = app.directory.path().join("azure-prs.json");
+    let write_votes = |votes: &[i64]| {
+        let reviewers = votes
+            .iter()
+            .map(|vote| json!({"vote":vote}))
+            .collect::<Vec<_>>();
+        let prs = json!([{
+            "pullRequestId":42, "title":"Review feature",
+            "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main",
+            "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
+            "createdBy":{"displayName":"Colleague"}, "reviewers":reviewers
+        }]);
+        std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    };
+    write_votes(&[0, -10]);
+    let session = app.request(
+        "session.create",
+        json!({"kind":"shell","cwd":project,"projectRoot":project,"name":"review: PR #42"}),
+    );
+    let id = session["id"].as_str().unwrap().to_owned();
+    let marker = |app: &App, kind: &str| -> bool {
+        let inspection = app.request("ui.inspect", json!({}));
+        let sessions = &inspection["root"]["children"][0]["children"][1]["children"];
+        let session = sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == format!("session-{id}"))
+            .unwrap();
+        let pr = session["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == format!("session-pr-{id}"))
+            .unwrap();
+        assert_eq!(pr["isVisible"], true);
+        pr["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == format!("session-pr-{kind}-{id}"))
+            .unwrap()["isVisible"]
+            == true
+    };
+    let approved = |app: &App| marker(app, "approved");
+    app.request("pr.list", json!({"projectRoot":project}));
+    assert!(!approved(&app));
+
+    // One approval is enough, also next to a reviewer who disagrees.
+    write_votes(&[5, -10]);
+    app.request("pr.list", json!({"projectRoot":project}));
+    assert!(approved(&app));
+    assert!(!marker(&app, "attention"));
+
+    // It stands next to the new comments dot.
+    std::fs::write(
+        app.directory.path().join("azure-threads.json"),
+        serde_json::to_vec(&json!({"value":[{
+            "status":"active", "comments":[{
+                "commentType":"text", "content":"Please fix this",
+                "publishedDate":"2026-10-01T10:00:00Z"
+            }]
+        }]}))
+        .unwrap(),
+    )
+    .unwrap();
+    app.request("pr.list", json!({"projectRoot":project}));
+    assert!(approved(&app));
+    assert!(marker(&app, "attention"));
+    if let Ok(target) = std::env::var("AGTK_TEST_CAPTURE_DIR") {
+        let capture = app.request("ui.capture", json!({}));
+        std::fs::copy(
+            capture["path"].as_str().unwrap(),
+            std::path::Path::new(&target).join("session-pr-approved.png"),
+        )
+        .unwrap();
+    }
+
+    app.stop();
+    app.start();
+    assert!(approved(&app));
+
+    write_votes(&[0, -10]);
+    app.request("pr.list", json!({"projectRoot":project}));
+    assert!(!approved(&app));
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
 fn session_pr_attention_follows_comments_acknowledgement_and_restart() {
     let mut app = App::new();
     let project = app.directory.path().join("azure-project");

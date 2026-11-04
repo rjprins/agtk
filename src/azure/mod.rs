@@ -60,6 +60,17 @@ pub struct AzurePr {
     pub url: String,
 }
 
+impl AzurePr {
+    /// Reviewers who approved, with or without suggestions.
+    #[must_use]
+    pub fn approvals(&self) -> usize {
+        self.reviewer_votes
+            .iter()
+            .filter(|vote| **vote >= 5)
+            .count()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrComment {

@@ -1229,8 +1229,15 @@ impl Workspace {
         content.append(&mainline);
         // The caption carries the PR's author and subject; the number is in the tooltip.
         let pr_label = gtk::Label::new(Some("PR"));
+        let pr_approved_mark = gtk::Image::from_icon_name("object-select-symbolic");
+        pr_approved_mark.set_pixel_size(12);
+        pr_approved_mark.add_css_class("pr-approved");
+        pr_approved_mark.set_visible(false);
+        let pr_marks = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        pr_marks.append(&pr_label);
+        pr_marks.append(&pr_approved_mark);
         let pr_contents = gtk::Overlay::new();
-        pr_contents.set_child(Some(&pr_label));
+        pr_contents.set_child(Some(&pr_marks));
         let pr_attention_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         pr_attention_dot.add_css_class("attention-dot");
         pr_attention_dot.set_halign(gtk::Align::End);
@@ -1331,6 +1338,7 @@ impl Workspace {
                 elapsed_label,
                 pr_button,
                 pr_attention_dot,
+                pr_approved_mark,
                 history: Vec::new(),
                 typed_history_pending: 0,
                 input_tracker,

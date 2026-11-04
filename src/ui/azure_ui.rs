@@ -640,16 +640,26 @@ impl Workspace {
                     }
                 }
                 // A PR matched from the agent's edits stays until it leaves the list.
-                None if in_project(&record, context)
-                    && cache.get(&record.id).is_some_and(|cached| {
-                        !context
-                            .pull_requests
-                            .iter()
-                            .any(|item| item.pull_request.id == cached.id)
-                    }) =>
-                {
-                    cache.remove(&record.id);
-                    changed.push(record.id);
+                None if in_project(&record, context) => {
+                    let Some(cached) = cache.get(&record.id) else {
+                        continue;
+                    };
+                    let current = context
+                        .pull_requests
+                        .iter()
+                        .find(|item| item.pull_request.id == cached.id)
+                        .map(|item| &item.pull_request);
+                    match current {
+                        Some(current) if current == cached => {}
+                        Some(current) => {
+                            cache.insert(record.id.clone(), current.clone());
+                            changed.push(record.id);
+                        }
+                        None => {
+                            cache.remove(&record.id);
+                            changed.push(record.id);
+                        }
+                    }
                 }
                 None => {}
             }
@@ -670,14 +680,17 @@ impl Workspace {
     /// Shows the row's PR button when the session has a PR, matching it from
     /// the project's PR list if it was not linked yet.
     pub(super) fn refresh_session_pr_button(&self, id: &str) {
-        let Some((record, caption, button, dot)) = self.sessions.borrow().get(id).map(|session| {
-            (
-                session.record.clone(),
-                session.worktree_label.clone(),
-                session.pr_button.clone(),
-                session.pr_attention_dot.clone(),
-            )
-        }) else {
+        let Some((record, caption, button, dot, approved)) =
+            self.sessions.borrow().get(id).map(|session| {
+                (
+                    session.record.clone(),
+                    session.worktree_label.clone(),
+                    session.pr_button.clone(),
+                    session.pr_attention_dot.clone(),
+                    session.pr_approved_mark.clone(),
+                )
+            })
+        else {
             return;
         };
         let mut pull_request = self.session_pr_cache.borrow().get(id).cloned();
@@ -711,17 +724,24 @@ impl Workspace {
                 caption.set_visible(true);
                 let mut description =
                     format!("Open PR #{}: {}", pull_request.id, pull_request.title);
+                let approvals = pull_request.approvals();
+                if approvals > 0 {
+                    let plural = if approvals == 1 { "" } else { "s" };
+                    description.push_str(&format!("\nApproved by {approvals} reviewer{plural}"));
+                }
                 if has_new_comments {
                     description.push_str("\nNew review comments; open to mark viewed");
                 }
                 button.set_tooltip_text(Some(&description));
                 button.update_property(&[gtk::accessible::Property::Label(&description)]);
                 dot.set_visible(has_new_comments);
+                approved.set_visible(approvals > 0);
                 button.set_visible(true);
             }
             None => {
                 sessions::show_worktree_caption(&caption, &record);
                 dot.set_visible(false);
+                approved.set_visible(false);
                 button.set_visible(false);
             }
         }

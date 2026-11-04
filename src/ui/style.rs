@@ -126,6 +126,9 @@ button.brief-action.image-button.success {
   border-radius: 6px;
   overflow: hidden;
 }
+.pr-approved {
+  color: var(--success-color);
+}
 .attention-dot {
   min-width: 6px;
   min-height: 6px;
