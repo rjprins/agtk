@@ -1817,18 +1817,22 @@ fn session_pr_button_shows_a_check_once_a_reviewer_approves() {
         );
     }
     let pr_file = app.directory.path().join("azure-prs.json");
+    let write_reviewers = |reviewers: Value| {
+        let prs = json!([{
+            "pullRequestId":42, "title":"Review feature",
+            "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main",
+            "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
+            "createdBy":{"displayName":"Colleague","uniqueName":"colleague@example.com"},
+            "reviewers":reviewers
+        }]);
+        std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+    };
     let write_votes = |votes: &[i64]| {
         let reviewers = votes
             .iter()
             .map(|vote| json!({"vote":vote}))
             .collect::<Vec<_>>();
-        let prs = json!([{
-            "pullRequestId":42, "title":"Review feature",
-            "sourceRefName":"refs/heads/feature", "targetRefName":"refs/heads/main",
-            "creationDate":"2026-09-15T10:00:00Z", "isDraft":false,
-            "createdBy":{"displayName":"Colleague"}, "reviewers":reviewers
-        }]);
-        std::fs::write(&pr_file, serde_json::to_vec(&prs).unwrap()).unwrap();
+        write_reviewers(json!(reviewers));
     };
     write_votes(&[0, -10]);
     let session = app.request(
@@ -1869,6 +1873,11 @@ fn session_pr_button_shows_a_check_once_a_reviewer_approves() {
     assert!(!approved(&app));
     thread::sleep(Duration::from_millis(300));
     let unapproved_bounds = button(&app)["bounds"].clone();
+
+    // The author approving their own PR does not count.
+    write_reviewers(json!([{"uniqueName":"colleague@example.com","vote":10}]));
+    app.request("pr.list", json!({"projectRoot":project}));
+    assert!(!approved(&app));
 
     // One approval is enough, also next to a reviewer who disagrees.
     write_votes(&[5, -10]);

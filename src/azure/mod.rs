@@ -45,6 +45,7 @@ pub struct AzurePr {
     pub latest_review_at: u64,
     pub head_sha: Option<String>,
     pub merge_status: String,
+    /// Votes of the reviewers other than the author.
     pub reviewer_votes: Vec<i64>,
     pub unresolved_threads: u32,
     #[serde(default)]
@@ -61,7 +62,7 @@ pub struct AzurePr {
 }
 
 impl AzurePr {
-    /// Reviewers who approved, with or without suggestions.
+    /// Other people who approved, with or without suggestions.
     #[must_use]
     pub fn approvals(&self) -> usize {
         self.reviewer_votes

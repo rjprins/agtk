@@ -51,6 +51,12 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         .flatten()
         .filter_map(Value::as_object)
         .filter(|reviewer| reviewer.get("isContainer").and_then(Value::as_bool) != Some(true))
+        .filter(|reviewer| {
+            let name = reviewer.get("uniqueName").and_then(nonempty);
+            !name
+                .zip(author_unique_name.as_deref())
+                .is_some_and(|(name, author)| name.eq_ignore_ascii_case(author))
+        })
         .filter_map(|reviewer| reviewer.get("vote").and_then(Value::as_i64))
         .filter(|vote| matches!(vote, -10 | -5 | 0 | 5 | 10))
         .collect();

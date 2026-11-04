@@ -59,6 +59,27 @@ fn azure_remotes_and_active_pr_payloads_are_strictly_normalized() {
     assert_eq!(mixed.approvals(), 0);
     assert!(prs[0].url.contains("pullrequest/42"));
 
+    // An author voting on their own PR is no approval, as Azure reports it.
+    let voted = |created_by: &str, reviewer: &str| {
+        normalize_active_prs(
+            &reference,
+            json!([{
+                "pullRequestId":43, "title":"Self", "isDraft":false,
+                "sourceRefName":"refs/heads/self", "targetRefName":"refs/heads/main",
+                "creationDate":"2026-09-15T08:00:00.000Z",
+                "createdBy":{"uniqueName":created_by},
+                "reviewers":[
+                    {"uniqueName":"vstfs:///Team","vote":10,"isContainer":true},
+                    {"uniqueName":reviewer,"vote":10,"isContainer":null}
+                ]
+            }]),
+        )[0]
+        .approvals()
+    };
+    assert_eq!(voted("ada@example.com", "ada@example.com"), 0);
+    assert_eq!(voted("ada@example.com", "Ada@Example.com"), 0);
+    assert_eq!(voted("ada@example.com", "bob@example.com"), 1);
+
     // Snapshots saved before PBI links were added still restore successfully.
     let mut legacy = serde_json::to_value(&prs[0]).unwrap();
     legacy.as_object_mut().unwrap().remove("linkedPbis");
