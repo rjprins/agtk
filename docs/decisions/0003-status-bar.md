@@ -11,6 +11,18 @@ local sign-ins. Credentials go only to the corresponding HTTPS usage endpoint;
 never print, persist, or put them in process arguments. Refresh once a minute on
 a background worker. An unavailable reading must not appear as zero usage.
 
+The account popover also graphs each provider's weekly window, from its start
+(the reset time minus seven days) to the reset. Providers report only the
+current percentage, so agtk saves the weekly percentage it reads, at most one
+row per provider every five minutes, in a `quota_samples` table in the
+instance's database. Only percentages and times are saved; never credentials.
+Readings older than two weeks are deleted. The table is added without a schema
+version bump, so older builds still open the database. Stretches with no
+readings, such as nights when agtk was closed, draw as a faint line between the
+readings around them, and hovering there says nothing was recorded. The dashed
+projection extends the average pace of the week so far to the reset, or to the
+point it reaches the limit. It is not drawn in the first six hours of a week.
+
 Read selected-session tokens from local transcripts on a background worker.
 Codex reports cumulative tokens and the most recent context window. Claude
 transcripts report per-message usage; deduplicate streaming updates. Only show
@@ -25,8 +37,9 @@ background chunks, to catch in-place edits outside those boundaries without
 rereading all historical bytes on every two-second poll.
 
 Sample `/proc/stat` and `/proc/meminfo` every two seconds; CPU is the change
-between samples, and used memory excludes MemAvailable. No database changes or
-new Rust dependencies are needed. Curl is optional for account quota.
+between samples, and used memory excludes MemAvailable. The only database change
+is the quota readings table, and no new Rust dependencies are needed. Curl is
+optional for account quota.
 
 Implementation lives in `src/usage/` and `src/ui/status_bar.rs`, following the
 existing plain Rust structs and GTK widget composition. For example:
@@ -52,7 +65,7 @@ window and a narrow layout; samples in a preview must be identified as samples.
 Always keep I/O off GTK's main thread and preserve the user's agent settings.
 Never generate a model request merely to obtain usage, refresh credentials, or
 alter a live session. Authentication changes beyond reading existing sign-ins
-and any persistence changes need a separate decision.
+and persistence beyond the weekly quota readings need a separate decision.
 
 Order of work: system counters and bar layout; session log reader; account
 quota; tests and native screenshots. Success is a working, responsive bar in

@@ -86,6 +86,15 @@ impl Store {
             )?;
             tx.commit()?;
         }
+        // Only adds a table, so no version bump: an older build can still open this database.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS quota_samples (
+                provider TEXT NOT NULL,
+                at INTEGER NOT NULL,
+                used REAL NOT NULL,
+                PRIMARY KEY (provider, at)
+             ) WITHOUT ROWID;",
+        )?;
         Ok(Self(Arc::new(Mutex::new(conn))))
     }
 
@@ -123,6 +132,40 @@ impl Store {
             .map_err(|_| "database lock poisoned")?
             .execute("DELETE FROM sessions WHERE id=?1", [id])?;
         Ok(())
+    }
+
+    /// Save one account quota reading, replacing any at the same time, and drop
+    /// readings from before `keep_since`.
+    pub fn save_quota_sample(
+        &self,
+        provider: &str,
+        at: u64,
+        used: f64,
+        keep_since: u64,
+    ) -> PersistResult<()> {
+        let conn = self.0.lock().map_err(|_| "database lock poisoned")?;
+        conn.execute(
+            "INSERT INTO quota_samples(provider, at, used) VALUES (?1, ?2, ?3)
+             ON CONFLICT(provider, at) DO UPDATE SET used=excluded.used",
+            params![provider, at as i64, used],
+        )?;
+        conn.execute(
+            "DELETE FROM quota_samples WHERE provider=?1 AND at<?2",
+            params![provider, keep_since as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Account quota readings since a time, oldest first.
+    pub fn quota_samples(&self, provider: &str, since: u64) -> PersistResult<Vec<(u64, f64)>> {
+        let conn = self.0.lock().map_err(|_| "database lock poisoned")?;
+        let mut query = conn.prepare(
+            "SELECT at, used FROM quota_samples WHERE provider=?1 AND at>=?2 ORDER BY at",
+        )?;
+        let rows = query.query_map(params![provider, since as i64], |row| {
+            Ok((row.get::<_, i64>(0)? as u64, row.get::<_, f64>(1)?))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn preference(&self, key: &str) -> PersistResult<Option<Value>> {

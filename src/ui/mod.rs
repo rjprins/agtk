@@ -70,6 +70,7 @@ mod preferences_ui;
 mod projects_ui;
 mod prompt_log_ui;
 mod provider_icons;
+mod quota_chart;
 mod rebuild_ui;
 mod resume_ui;
 pub use rebuild_ui::take_restart_executable;

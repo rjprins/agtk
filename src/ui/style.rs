@@ -46,6 +46,8 @@ const CHROME_CSS: &str = r#"
 }
 .usage-status-bar image { -gtk-icon-size: 14px; }
 .context-meter.warning { color: var(--warning-color); }
+quota-chart { color: var(--accent-color); }
+quota-chart.warning { color: var(--warning-color); }
 .navigation-sidebar row.session-ready:not(:selected) {
   background: color-mix(in srgb, var(--success-color) 12%, transparent);
 }

@@ -1,9 +1,11 @@
 //! Bottom-row presentation and background collection for usage measurements.
 
+use super::quota_chart::QuotaWeekView;
 use super::*;
 use crate::agent_hooks::{auto_compact_window, context_report_path};
 use crate::providers::{AgentProvider, DiscoveryRoots};
 use crate::usage::quota::{self, AccountQuota};
+use crate::usage::quota_history;
 use crate::usage::session::{ContextReport, SessionUsage, UsageReader};
 use crate::usage::system::{CpuSample, Memory};
 
@@ -19,6 +21,8 @@ pub(super) struct Segment {
     pub button: gtk::MenuButton,
     pub label: gtk::Label,
     content: gtk::Box,
+    /// The popover's content: the details, then anything a segment adds below them.
+    body: gtk::Box,
     details: gtk::Label,
 }
 
@@ -39,9 +43,11 @@ impl Segment {
         details.set_margin_end(16);
         details.set_margin_top(12);
         details.set_margin_bottom(12);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        body.append(&details);
         let popover = gtk::Popover::builder()
             .position(gtk::PositionType::Top)
-            .child(&details)
+            .child(&body)
             .build();
         let details_on_open = details.downgrade();
         popover.connect_map(move |_| {
@@ -65,6 +71,7 @@ impl Segment {
             button,
             label,
             content,
+            body,
             details,
         }
     }
@@ -181,6 +188,7 @@ pub(super) struct StatusBar {
     quota_in_flight: Rc<Cell<bool>>,
     quotas: Rc<RefCell<Vec<AccountQuota>>>,
     quota_checked: Rc<Cell<Option<Instant>>>,
+    quota_weeks: [(AgentProvider, QuotaWeekView); 2],
     displayed_session: Rc<RefCell<UsageSelection>>,
 }
 
@@ -196,6 +204,11 @@ impl StatusBar {
             "Account quota …",
             "avatar-default-symbolic",
         );
+        let quota_weeks = [AgentProvider::Claude, AgentProvider::Codex].map(|provider| {
+            let view = QuotaWeekView::new();
+            account.body.append(&view.root);
+            (provider, view)
+        });
         let session = Segment::new("session-usage", "No session", "utilities-terminal-symbolic");
         let context = ContextMeter::new();
         session.content.append(&context.root);
@@ -224,6 +237,7 @@ impl StatusBar {
             quota_in_flight: Rc::new(Cell::new(false)),
             quotas: Rc::new(RefCell::new(Vec::new())),
             quota_checked: Rc::new(Cell::new(None)),
+            quota_weeks,
             displayed_session: Rc::new(RefCell::new(None)),
         }
     }
@@ -442,19 +456,31 @@ impl Workspace {
             return;
         }
         let roots = DiscoveryRoots::from_environment();
+        let store = self.store.borrow().clone();
         let receiver = self.status_bar.quota_io.submit(move || {
-            [AgentProvider::Claude, AgentProvider::Codex]
+            let quotas = [AgentProvider::Claude, AgentProvider::Codex]
                 .into_iter()
                 .map(|provider| quota::fetch(provider, &roots))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let now = crate::persist::now_millis() / 1000;
+            let weeks = quota_history::record(store.as_ref(), &quotas, now);
+            (quotas, weeks, now)
         });
         let workspace = self.clone();
         glib::spawn_future_local(async move {
             let result = receiver.await;
-            workspace.status_bar.quota_in_flight.set(false);
-            workspace.status_bar.quota_checked.set(Some(Instant::now()));
-            if let Ok(quotas) = result {
-                *workspace.status_bar.quotas.borrow_mut() = quotas;
+            let status_bar = &workspace.status_bar;
+            status_bar.quota_in_flight.set(false);
+            status_bar.quota_checked.set(Some(Instant::now()));
+            if let Ok((quotas, mut weeks, now)) = result {
+                *status_bar.quotas.borrow_mut() = quotas;
+                for (provider, view) in &status_bar.quota_weeks {
+                    let week = weeks
+                        .iter()
+                        .position(|week| week.provider == *provider)
+                        .map(|index| weeks.swap_remove(index));
+                    view.set(week, now);
+                }
             }
             workspace.render_account_quota();
         });
