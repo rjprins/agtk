@@ -4320,3 +4320,229 @@ fn a_brief_session_link_selects_its_session() {
     app.request("session.close", json!({"sessionId":first}));
     app.request("session.close", json!({"sessionId":second}));
 }
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn files_auto_reload_by_default_and_respect_the_global_preference() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+    fn wait_for(app: &App, id: &str, predicate: impl Fn(&Value) -> bool) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            let inspection = app.request("ui.inspect", json!({}));
+            let node = find(&inspection["root"], id)
+                .cloned()
+                .unwrap_or(Value::Null);
+            if predicate(&node) {
+                return node;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{id} did not reach expected state: {node}"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+    use glib::variant::ToVariant;
+    let bus = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>).unwrap();
+    let destination = "org.gnome.Mutter.RemoteDesktop";
+    let remote = bus
+        .call_sync(
+            Some(destination),
+            "/org/gnome/Mutter/RemoteDesktop",
+            destination,
+            "CreateSession",
+            None,
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    let remote_path = remote.child_value(0).str().unwrap().to_owned();
+    let call = |method: &str, parameters: Option<glib::Variant>| {
+        bus.call_sync(
+            Some(destination),
+            &remote_path,
+            "org.gnome.Mutter.RemoteDesktop.Session",
+            method,
+            parameters.as_ref(),
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    };
+    call("Start", None);
+    let click = |app: &App, target: &str| {
+        for (code, pressed) in [
+            (56_u32, true),
+            (15, true),
+            (15, false),
+            (56, false),
+            (125, true),
+            (103, true),
+            (103, false),
+            (125, false),
+        ] {
+            call("NotifyKeyboardKeycode", Some((code, pressed).to_variant()));
+        }
+        thread::sleep(Duration::from_millis(300));
+        let inspection = app.request("ui.inspect", json!({}));
+        let bounds = &find(&inspection["root"], target).unwrap()["bounds"];
+        let x = bounds["x"].as_f64().unwrap() + bounds["width"].as_f64().unwrap() / 2.0;
+        let y = bounds["y"].as_f64().unwrap() + bounds["height"].as_f64().unwrap() / 2.0;
+        call(
+            "NotifyPointerMotionRelative",
+            Some((-10000.0_f64, -10000.0_f64).to_variant()),
+        );
+        thread::sleep(Duration::from_millis(100));
+        call("NotifyPointerMotionRelative", Some((x, y).to_variant()));
+        thread::sleep(Duration::from_millis(100));
+        call("NotifyPointerButton", Some((272_i32, true).to_variant()));
+        call("NotifyPointerButton", Some((272_i32, false).to_variant()));
+    };
+    let mut app = App::new();
+    let project = app.directory.path().join("auto-reload-project");
+    std::fs::create_dir_all(&project).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .arg(&project)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let path = project.join("sample.txt");
+    std::fs::write(&path, "one").unwrap();
+    for args in [
+        vec!["add", "."],
+        vec![
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let session = app.request(
+        "session.create",
+        json!({
+            "kind":"custom", "command":"/bin/sh", "args":["-c","exec sleep 120"],
+            "cwd":project, "projectRoot":project, "worktreePath":project
+        }),
+    );
+    let id = session["id"].as_str().unwrap();
+    app.request("ui.open_file", json!({"sessionId":id,"path":"sample.txt"}));
+    wait_for(&app, "diff-viewer", |node| {
+        node["label"]
+            .as_str()
+            .is_some_and(|s| s.contains("rendered: 1 lines"))
+    });
+    wait_for(&app, "auto-reload", |node| {
+        node["isVisible"] == true && node["isSelected"] == true
+    });
+    click(&app, "diff-viewer");
+    thread::sleep(Duration::from_millis(200));
+    click(&app, "diff-viewer");
+    app.activate_existing();
+    std::fs::write(&path, "one\ntwo").unwrap();
+    wait_for(&app, "diff-viewer", |node| {
+        node["label"]
+            .as_str()
+            .is_some_and(|s| s.contains("rendered: 2 lines"))
+    });
+
+    click(&app, "auto-reload");
+    wait_for(&app, "auto-reload", |node| node["isSelected"] == false);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Store::open(&app.paths.database())
+        .unwrap()
+        .preference("autoReload")
+        .unwrap()
+        != Some(json!(false))
+    {
+        assert!(
+            Instant::now() < deadline,
+            "checkbox preference was not saved"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+    app.stop();
+    app.start();
+    app.request("ui.open_file", json!({"sessionId":id,"path":"sample.txt"}));
+    wait_for(&app, "diff-viewer", |node| {
+        node["label"]
+            .as_str()
+            .is_some_and(|s| s.contains("rendered: 2 lines"))
+    });
+    wait_for(&app, "auto-reload", |node| {
+        node["isVisible"] == true && node["isSelected"] == false
+    });
+    click(&app, "diff-viewer");
+    thread::sleep(Duration::from_millis(200));
+    click(&app, "diff-viewer");
+    std::fs::write(&path, "one\ntwo\nthree").unwrap();
+    wait_for(&app, "diff-stale", |node| {
+        node["isVisible"] == true && node["isEnabled"] == true
+    });
+    let inspection = app.request("ui.inspect", json!({}));
+    assert!(
+        find(&inspection["root"], "diff-viewer").unwrap()["label"]
+            .as_str()
+            .unwrap()
+            .contains("rendered: 2 lines")
+    );
+    if let Ok(target) = std::env::var("AGTK_TEST_CAPTURE_DIR") {
+        std::fs::create_dir_all(&target).unwrap();
+        let capture = app.request("ui.capture", json!({}));
+        std::fs::copy(
+            capture["path"].as_str().unwrap(),
+            std::path::Path::new(&target).join("auto-reload.png"),
+        )
+        .unwrap();
+    }
+    click(&app, "auto-reload");
+    wait_for(&app, "diff-viewer", |node| {
+        node["label"]
+            .as_str()
+            .is_some_and(|s| s.contains("rendered: 3 lines"))
+    });
+    // The same global setting applies when switching from a file to a live diff.
+    app.request(
+        "ui.open_diff",
+        json!({"sessionId":id,"path":"sample.txt","scope":"unstaged"}),
+    );
+    wait_for(&app, "diff-viewer", |node| {
+        node["label"]
+            .as_str()
+            .is_some_and(|s| s.contains("line changes"))
+    });
+    std::fs::write(&path, "one").unwrap();
+    wait_for(&app, "diff-viewer", |node| {
+        node["label"]
+            .as_str()
+            .is_some_and(|s| s.contains("no longer present"))
+    });
+    call("Stop", None);
+    app.request("session.close", json!({"sessionId":id}));
+}

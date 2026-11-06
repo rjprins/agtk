@@ -227,6 +227,10 @@ impl Workspace {
                     .preference(explorer_ui::RECENT_FIRST_PREFERENCE)?
                     .and_then(|value| value.as_bool())
                     .unwrap_or(false);
+                let auto_reload = store
+                    .preference(file_tabs_ui::AUTO_RELOAD_PREFERENCE)?
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true);
                 let markdown_preview = store
                     .preference(file_tabs_ui::MARKDOWN_PREVIEW_PREFERENCE)?
                     .and_then(|value| serde_json::from_value(value).ok())
@@ -316,6 +320,7 @@ impl Workspace {
                     files_recent_first,
                     changes_commits_ago,
                     markdown_preview,
+                    auto_reload,
                     recovered,
                     lost,
                 ))
@@ -346,6 +351,7 @@ impl Workspace {
                     files_recent_first,
                     changes_commits_ago,
                     markdown_preview,
+                    auto_reload,
                     recovered,
                     lost,
                 )) => {
@@ -384,6 +390,7 @@ impl Workspace {
                         .set_value(changes_commits_ago as f64);
                     workspace.changes.updating_base.set(false);
                     workspace.markdown_preview.set(markdown_preview);
+                    workspace.auto_reload.set_active(auto_reload);
                     workspace
                         .changes
                         .explorer

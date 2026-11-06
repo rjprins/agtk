@@ -120,6 +120,7 @@ struct Workspace {
     diff_stale_banner: gtk::Box,
     diff_stale_label: gtk::Label,
     diff_reload_button: gtk::Button,
+    auto_reload: gtk::CheckButton,
     code_viewer: Rc<RefCell<Option<Rc<code_viewer::CodeViewer>>>>,
     code_navigation: code_navigation_ui::CodeNavigation,
     diff_tab_data:
@@ -379,6 +380,12 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let diff_reload_button = gtk::Button::with_label("Reload diff");
     diff_stale_banner.append(&diff_stale_label);
     diff_stale_banner.append(&diff_reload_button);
+    let auto_reload = gtk::CheckButton::with_label("Auto reload");
+    auto_reload.set_active(true);
+    auto_reload.set_tooltip_text(Some(
+        "Automatically reload changed files and diffs in all worktrees",
+    ));
+    diff_stale_banner.append(&auto_reload);
     diff_stale_banner.set_visible(false);
     diff_page.append(&diff_stale_banner);
     let diff_placeholder = gtk::Label::new(Some("Select a changed file to inspect its diff."));
@@ -667,6 +674,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         diff_stale_banner: diff_stale_banner.clone(),
         diff_stale_label: diff_stale_label.clone(),
         diff_reload_button: diff_reload_button.clone(),
+        auto_reload: auto_reload.clone(),
         code_viewer: Rc::new(RefCell::new(None)),
         code_navigation: code_navigation_ui::CodeNavigation::default(),
         diff_tab_data: Rc::new(RefCell::new(HashMap::new())),
@@ -854,6 +862,14 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .connect_clicked(move |_| changes_workspace.refresh_changes());
     let reload_workspace = workspace.clone();
     diff_reload_button.connect_clicked(move |_| reload_workspace.reload_active_document());
+    let reload_workspace = workspace.clone();
+    auto_reload.connect_toggled(move |checkbox| {
+        reload_workspace.save_preference(
+            file_tabs_ui::AUTO_RELOAD_PREFERENCE,
+            serde_json::json!(checkbox.is_active()),
+        );
+        reload_workspace.auto_reload_stale_document();
+    });
     let emacs_workspace = workspace.clone();
     open_in_emacs_button.connect_clicked(move |_| emacs_workspace.open_visible_document_in_emacs());
     workspace.connect_explorer();

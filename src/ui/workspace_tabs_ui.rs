@@ -730,6 +730,7 @@ impl Workspace {
         let Some(file) = file_from_snapshot(snapshot, key) else {
             self.stale_diff_tabs.borrow_mut().insert(key.clone());
             self.update_diff_stale_banner(key);
+            self.auto_reload_stale_document();
             return;
         };
         let context = snapshot.context.clone();
@@ -759,6 +760,7 @@ impl Workspace {
                 workspace.stale_diff_tabs.borrow_mut().remove(&key);
             }
             workspace.update_diff_stale_banner(&key);
+            workspace.auto_reload_stale_document();
         });
     }
 
@@ -766,18 +768,44 @@ impl Workspace {
         let active = self.workspace_tabs.borrow().visible_tab().cloned();
         let stale = self.stale_diff_tabs.borrow().contains(key);
         let visible = self.stack.visible_child_name().as_deref() == Some("changes-diff")
-            && active == Some(WorkspaceTabId::Diff(key.clone()))
-            && stale;
+            && active == Some(WorkspaceTabId::Diff(key.clone()));
         self.diff_stale_label
             .set_text("The worktree or comparison base changed. Reload to update this diff.");
         self.diff_reload_button.set_label("Reload diff");
+        self.diff_stale_label.set_visible(stale);
         self.diff_reload_button.set_sensitive(stale);
         self.diff_stale_banner.set_visible(visible);
     }
 
+    /// Applies the global preference only to the document currently on screen.
+    pub(super) fn auto_reload_stale_document(&self) {
+        if !self.auto_reload.is_active()
+            || self.stack.visible_child_name().as_deref() != Some("changes-diff")
+        {
+            return;
+        }
+        let active = self.workspace_tabs.borrow().visible_tab().cloned();
+        let stale = match active {
+            Some(WorkspaceTabId::File(key)) => self
+                .file_tabs
+                .borrow()
+                .get(&key)
+                .is_some_and(|state| state.stale),
+            Some(WorkspaceTabId::Diff(key)) => self.stale_diff_tabs.borrow().contains(&key),
+            _ => false,
+        };
+        if stale {
+            self.reload_active_document();
+        }
+    }
+
     /// Reloads whichever diff or file the viewer shows.
     pub(super) fn reload_active_document(&self) {
-        match self.workspace_tabs.borrow().visible_tab().cloned() {
+        if let Some(viewer) = self.code_viewer.borrow().as_ref() {
+            viewer.save_view_state();
+        }
+        let active = self.workspace_tabs.borrow().visible_tab().cloned();
+        match active {
             Some(WorkspaceTabId::Diff(_)) => self.reload_active_diff(),
             Some(WorkspaceTabId::File(key)) => self.reload_active_file(&key),
             _ => {}

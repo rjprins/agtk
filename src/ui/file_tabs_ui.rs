@@ -5,6 +5,8 @@ use crate::changes::FileDocumentResult;
 use crate::file_links::MarkdownLink;
 use crate::workspace_tabs::{FileTabKey, WorkspaceTabId, WorkspaceTabs};
 
+pub(super) const AUTO_RELOAD_PREFERENCE: &str = "autoReload";
+
 pub(super) const MARKDOWN_PREVIEW_PREFERENCE: &str = "markdownPreview";
 
 /// Whether Markdown shows rendered, remembered apart for file tabs and diff tabs.
@@ -368,7 +370,7 @@ impl Workspace {
         viewer.focus();
     }
 
-    /// Re-reads the shown file on each refresh and offers a reload when it changed.
+    /// Re-reads the shown file on each refresh and reloads or marks it stale.
     pub(super) fn check_file_for_staleness(&self, key: &FileTabKey) {
         let Some(expected) = self
             .file_tabs
@@ -405,6 +407,7 @@ impl Workspace {
                 state.stale = stale;
             }
             workspace.update_file_stale_banner(&key);
+            workspace.auto_reload_stale_document();
         });
     }
 
@@ -416,11 +419,11 @@ impl Workspace {
             .get(key)
             .is_some_and(|state| state.stale);
         let visible = self.stack.visible_child_name().as_deref() == Some("changes-diff")
-            && active == Some(WorkspaceTabId::File(key.clone()))
-            && stale;
+            && active == Some(WorkspaceTabId::File(key.clone()));
         self.diff_stale_label
             .set_text("This file changed on disk. Reload to see the latest content.");
         self.diff_reload_button.set_label("Reload file");
+        self.diff_stale_label.set_visible(stale);
         self.diff_reload_button.set_sensitive(stale);
         self.diff_stale_banner.set_visible(visible);
     }
