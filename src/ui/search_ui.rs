@@ -4,7 +4,14 @@ impl Workspace {
     pub(super) fn open_search(&self) {
         let is_diff = self.stack.visible_child_name().as_deref() == Some("changes-diff");
         self.search_entry.set_placeholder_text(Some(if is_diff {
-            "Find in diff"
+            if matches!(
+                self.workspace_tabs.borrow().visible_tab(),
+                Some(crate::workspace_tabs::WorkspaceTabId::File(_))
+            ) {
+                "Find in file"
+            } else {
+                "Find in diff"
+            }
         } else {
             "Find in terminal"
         }));
@@ -12,7 +19,7 @@ impl Workspace {
         self.search_entry.grab_focus();
     }
 
-    /// Escape leaves the search and hands the keyboard back to the terminal.
+    /// Escape leaves the search and hands the keyboard back to the content.
     pub(super) fn close_search(&self) {
         self.search_bar.set_search_mode(false);
         if self.stack.visible_child_name().as_deref() == Some("changes-diff") {

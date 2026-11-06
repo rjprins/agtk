@@ -165,6 +165,7 @@ These work while the terminal has focus. Change them under Keyboard Shortcuts in
 | Switch Claude model preset | `Ctrl+Shift+M` |
 | Copy or paste | `Ctrl+Shift+C` or `Ctrl+Shift+V` |
 | Search terminal | `Ctrl+Shift+F` |
+| Search open file or diff | `Ctrl+F` |
 | Increase or decrease font size | `Ctrl++` or `Ctrl+-` |
 
 Session navigation shortcuts skip sessions in collapsed projects.

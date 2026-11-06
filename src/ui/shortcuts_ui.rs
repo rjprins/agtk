@@ -113,6 +113,23 @@ impl Workspace {
             }
         });
 
+        // Capture before WebKit handles Ctrl+F. Keep the terminal's Ctrl+F
+        // available to the shell or agent running in it.
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let workspace = self.clone();
+        keys.connect_key_pressed(move |_, key, _, state| {
+            if key == gtk::gdk::Key::f
+                && state & SHORTCUT_MODIFIERS == gtk::gdk::ModifierType::CONTROL_MASK
+                && workspace.stack.visible_child_name().as_deref() == Some("changes-diff")
+            {
+                workspace.open_search();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        self.window.add_controller(keys);
+
         self.apply_shortcuts();
         let workspace = self.clone();
         self.preferences

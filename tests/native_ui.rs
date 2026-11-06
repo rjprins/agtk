@@ -4546,3 +4546,156 @@ fn files_auto_reload_by_default_and_respect_the_global_preference() {
     call("Stop", None);
     app.request("session.close", json!({"sessionId":id}));
 }
+
+#[test]
+#[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
+fn ctrl_f_searches_the_open_file_without_intercepting_terminal_input() {
+    use glib::variant::ToVariant;
+
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        if node["id"] == id {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, id))
+    }
+
+    assert_eq!(
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap(),
+        std::env::var("AGTK_TEST_BUS").unwrap()
+    );
+    let app = App::new();
+    let path = app.directory.path().join("search.txt");
+    std::fs::write(&path, "first needle\nsecond needle\n").unwrap();
+    let input_path = app.directory.path().join("search-input");
+    let session = app.request("session.create", json!({"kind":"custom", "command":"/bin/sh", "args":["-c", "stty raw -echo; printf '__SEARCH_READY__'; cat > \"$1\"", "search", input_path], "cwd":app.directory.path()}));
+    let id = session["id"].as_str().unwrap();
+    app.wait_text(id, "__SEARCH_READY__");
+
+    let bus = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>).unwrap();
+    let destination = "org.gnome.Mutter.RemoteDesktop";
+    let remote = bus
+        .call_sync(
+            Some(destination),
+            "/org/gnome/Mutter/RemoteDesktop",
+            destination,
+            "CreateSession",
+            None,
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    let remote_path = remote.child_value(0).str().unwrap().to_owned();
+    let call = |method: &str, parameters: Option<glib::Variant>| {
+        bus.call_sync(
+            Some(destination),
+            &remote_path,
+            "org.gnome.Mutter.RemoteDesktop.Session",
+            method,
+            parameters.as_ref(),
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    };
+    call("Start", None);
+    let key =
+        |code: u32, down: bool| call("NotifyKeyboardKeycode", Some((code, down).to_variant()));
+    let tap = |code: u32| {
+        key(code, true);
+        key(code, false);
+    };
+    thread::sleep(Duration::from_millis(300));
+    key(125, true);
+    tap(103);
+    key(125, false);
+    thread::sleep(Duration::from_millis(300));
+    // Activate and focus the terminal in the private compositor.
+    call(
+        "NotifyPointerMotionRelative",
+        Some((-10000.0_f64, -10000.0_f64).to_variant()),
+    );
+    call(
+        "NotifyPointerMotionRelative",
+        Some((700.0_f64, 350.0_f64).to_variant()),
+    );
+    call("NotifyPointerButton", Some((272_i32, true).to_variant()));
+    call("NotifyPointerButton", Some((272_i32, false).to_variant()));
+    thread::sleep(Duration::from_millis(300));
+    call("NotifyPointerButton", Some((272_i32, true).to_variant()));
+    call("NotifyPointerButton", Some((272_i32, false).to_variant()));
+    thread::sleep(Duration::from_millis(100));
+    key(29, true);
+    tap(33);
+    key(29, false);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !std::fs::read(&input_path).unwrap_or_default().contains(&6) {
+        assert!(
+            Instant::now() < deadline,
+            "Ctrl+F did not reach the terminal: input={:?}, state={}",
+            std::fs::read(&input_path),
+            app.request("ui.inspect", json!({}))
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+    assert_eq!(
+        find(&app.request("ui.inspect", json!({}))["root"], "search").unwrap()["isSelected"],
+        false
+    );
+
+    app.request("ui.open_file", json!({"sessionId":id, "path":path}));
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !app
+        .request("ui.inspect", json!({}))
+        .to_string()
+        .contains("rendered: 3 lines")
+    {
+        assert!(
+            Instant::now() < deadline,
+            "file did not render: {}",
+            app.request("ui.inspect", json!({}))
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+    key(29, true);
+    tap(33);
+    key(29, false);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let inspection = app.request("ui.inspect", json!({}));
+        if find(&inspection["root"], "search").unwrap()["isSelected"] == true {
+            break;
+        }
+        assert!(Instant::now() < deadline, "Ctrl+F did not open file search");
+        thread::sleep(Duration::from_millis(30));
+    }
+    // Search for "needle", then Escape returns focus to the viewer.
+    for code in [49, 18, 18, 32, 38, 18, 28] {
+        tap(code);
+    }
+    thread::sleep(Duration::from_millis(200));
+    // Search focuses the matched source text, so Ctrl+F must also reopen the bar.
+    key(29, true);
+    tap(33);
+    key(29, false);
+    tap(1);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let inspection = app.request("ui.inspect", json!({}));
+        if find(&inspection["root"], "search").unwrap()["isSelected"] == false {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Escape did not close file search"
+        );
+        thread::sleep(Duration::from_millis(30));
+    }
+    call("Stop", None);
+}
