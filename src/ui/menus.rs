@@ -230,6 +230,9 @@ impl Workspace {
                 .any(|project| project.root == root && project.is_pinned);
             workspace.set_project_preferences(root.to_owned(), Some(!pinned), None, None);
         });
+        self.add_target_action("project-remote-control", |workspace, root| {
+            workspace.toggle_project_remote_control(root)
+        });
     }
 
     pub(super) fn add_target_action(&self, name: &str, activate: impl Fn(&Self, &str) + 'static) {

@@ -550,6 +550,7 @@ impl Workspace {
         let paths = self.paths.clone();
         let host_binary = self.host_binary.clone();
         let agtkctl = sibling_binary("agtkctl");
+        let projects = self.projects.borrow().clone();
         self.run_io(
             move || {
                 let plan = SessionLaunchPlan::new(params)?;
@@ -589,6 +590,15 @@ impl Workspace {
                 } else {
                     Vec::new()
                 };
+                // Not in the record, so the project's current choice applies on every relaunch.
+                if record.kind == SessionKind::Claude
+                    && record.project_root.as_ref().is_some_and(|root| {
+                        projects.get(&root.to_string_lossy()).remote_control
+                    })
+                    && !record.args.iter().any(|arg| arg.starts_with("--remote-control"))
+                {
+                    hook_args.push("--remote-control".into());
+                }
                 // The prompt goes last, and not in the record, so a relaunch does not repeat it.
                 hook_args.extend(plan.prompt_args.iter().map(OsString::from));
                 let host_plan = SessionHostLaunchPlan::detected(

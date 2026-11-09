@@ -79,6 +79,11 @@ pub struct ProjectSettings {
     pub is_pinned: bool,
     #[serde(default)]
     pub is_collapsed: bool,
+    /// Claude sessions in this project start with Remote Control on. Claude
+    /// ignores `remoteControlAtStartup` in project settings, so agtk passes
+    /// `--remote-control` instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote_control: bool,
 }
 
 /// Every project a session ran in, with its settings. A project stays listed
@@ -103,6 +108,13 @@ impl ProjectPreferences {
         if let Some(is_collapsed) = is_collapsed {
             settings.is_collapsed = is_collapsed;
         }
+    }
+
+    pub fn set_remote_control(&mut self, root: &str, remote_control: bool) {
+        self.projects
+            .entry(root.to_owned())
+            .or_default()
+            .remote_control = remote_control;
     }
 
     /// Lists a project a session runs in. True when it was not listed yet.

@@ -31,6 +31,17 @@ impl Workspace {
         self.save_projects(pending);
     }
 
+    pub(super) fn toggle_project_remote_control(&self, root: &str) {
+        if self.store.borrow().is_none() {
+            self.report_projects_loading(None);
+            return;
+        }
+        let enabled = !self.projects.borrow().get(root).remote_control;
+        self.projects.borrow_mut().set_remote_control(root, enabled);
+        self.rebuild_sidebar();
+        self.save_projects(None);
+    }
+
     /// Lists the project a session runs in, so it stays listed once its sessions close.
     pub(super) fn remember_project(&self, root: Option<&Path>) {
         let Some(root) = root else {
@@ -273,6 +284,7 @@ impl Workspace {
                 let settings = ProjectSettings {
                     is_pinned: project.is_pinned,
                     is_collapsed: project.is_collapsed,
+                    remote_control: self.projects.borrow().get(&project.root).remote_control,
                 };
                 keys.push(SidebarKey::project_key(
                     &project.root,
@@ -583,6 +595,15 @@ impl Workspace {
             "win.project-pin",
             root,
         ));
+        pin.append_item(&menus::targeted_item(
+            if settings.remote_control {
+                "Stop Starting Claude with Remote Control"
+            } else {
+                "Start Claude with Remote Control"
+            },
+            "win.project-remote-control",
+            root,
+        ));
         menu.append_section(None, &pin);
         let more = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
@@ -886,7 +907,7 @@ const KEY_SEPARATOR: char = '\u{1f}';
 impl<'a> SidebarKey<'a> {
     const OTHER: &'static str = "other";
 
-    /// Pin, collapse and PR state are part of the key, so changing them rebuilds the header.
+    /// Pin, collapse, Remote Control and PR state are part of the key, so changing them rebuilds the header.
     fn project_key(
         root: &str,
         name: &str,
@@ -894,9 +915,10 @@ impl<'a> SidebarKey<'a> {
         pr_attention: Option<usize>,
     ) -> String {
         format!(
-            "project{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{root}{KEY_SEPARATOR}{name}",
+            "project{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{root}{KEY_SEPARATOR}{name}",
             u8::from(settings.is_pinned),
             u8::from(settings.is_collapsed),
+            u8::from(settings.remote_control),
             pr_attention.map_or_else(|| "-".to_owned(), |count| count.to_string()),
         )
     }
@@ -921,7 +943,7 @@ impl<'a> SidebarKey<'a> {
         if key == Self::OTHER {
             return Some(Self::Other);
         }
-        let mut parts = key.splitn(6, KEY_SEPARATOR);
+        let mut parts = key.splitn(7, KEY_SEPARATOR);
         match parts.next()? {
             "session" => Some(Self::Session(parts.next()?)),
             "inactive" => {
@@ -935,6 +957,7 @@ impl<'a> SidebarKey<'a> {
             "project" => {
                 let is_pinned = parts.next()? == "1";
                 let is_collapsed = parts.next()? == "1";
+                let remote_control = parts.next()? == "1";
                 let pr_attention = parts.next()?.parse().ok();
                 Some(Self::Project {
                     root: parts.next()?,
@@ -942,6 +965,7 @@ impl<'a> SidebarKey<'a> {
                     settings: ProjectSettings {
                         is_pinned,
                         is_collapsed,
+                        remote_control,
                     },
                     pr_attention,
                 })
@@ -1008,6 +1032,7 @@ mod sidebar_tests {
             ProjectSettings {
                 is_pinned: true,
                 is_collapsed: false,
+                remote_control: true,
             },
             Some(2),
         );
@@ -1021,7 +1046,7 @@ mod sidebar_tests {
             panic!("project key did not parse");
         };
         assert_eq!((root, name), ("/work/agtk", "agtk"));
-        assert!(settings.is_pinned && !settings.is_collapsed);
+        assert!(settings.is_pinned && !settings.is_collapsed && settings.remote_control);
         assert_eq!(pr_attention, Some(2));
     }
 
