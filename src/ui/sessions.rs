@@ -1276,6 +1276,9 @@ impl Workspace {
         elapsed_label.add_css_class("caption");
         elapsed_label.add_css_class("dim-label");
         elapsed_label.add_css_class("numeric");
+        // A fixed width, so the PR button stays put and lines up across rows.
+        elapsed_label.set_width_chars(3);
+        elapsed_label.set_xalign(1.0);
         elapsed_label.set_valign(gtk::Align::Center);
         content.append(&elapsed_label);
         let state_label = gtk::Label::new(None);
