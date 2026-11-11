@@ -806,6 +806,16 @@ impl Workspace {
         self.context_pr.set_visible(true);
     }
 
+    /// Wrapped comments ask for little width, so the popover takes its size
+    /// from the window: wide enough to read, and most of its height.
+    pub(super) fn size_pr_comments(&self) {
+        let width = (self.window.width() - 96).clamp(320, 760);
+        let height = (self.window.height() - 160).max(240);
+        self.context_pr_comments_scroll.set_size_request(width, -1);
+        self.context_pr_comments_scroll
+            .set_max_content_height(height);
+    }
+
     /// Fetches the selected PR's comment threads when the user opens them.
     pub(super) fn load_selected_pr_comments(&self) {
         let Some(context) = self.selected_pr.borrow().clone() else {
@@ -953,7 +963,6 @@ impl Workspace {
                 content.set_xalign(0.0);
                 content.set_wrap(true);
                 content.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-                content.set_max_width_chars(70);
                 content.set_selectable(true);
                 item.append(&content);
                 section.append(&item);

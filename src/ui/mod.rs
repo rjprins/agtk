@@ -168,6 +168,7 @@ struct Workspace {
     context_pr_threads: gtk::Label,
     context_pr_comments_button: gtk::MenuButton,
     context_pr_comments: gtk::Box,
+    context_pr_comments_scroll: gtk::ScrolledWindow,
     sidebar_panel: gtk::Box,
     sidebar_split: gtk::Paned,
     sidebar_header: gtk::Box,
@@ -485,8 +486,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let comments_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .propagate_natural_height(true)
-        .max_content_height(600)
-        .min_content_width(520)
         .child(&context_pr_comments)
         .build();
     let comments_popover = gtk::Popover::builder().child(&comments_scroll).build();
@@ -743,6 +742,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         context_pr_threads,
         context_pr_comments_button,
         context_pr_comments,
+        context_pr_comments_scroll: comments_scroll,
         sidebar_panel: sidebar_panel.clone(),
         sidebar_split: split.clone(),
         sidebar_header: sidebar_header.clone(),
@@ -868,7 +868,10 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .context_pr_comments_button
         .popover()
         .expect("the comments button has a popover")
-        .connect_show(move |_| comments_workspace.load_selected_pr_comments());
+        .connect_show(move |_| {
+            comments_workspace.size_pr_comments();
+            comments_workspace.load_selected_pr_comments();
+        });
     let pr_context_workspace = workspace.clone();
     workspace.context_pr_number.connect_clicked(move |_| {
         pr_context_workspace.open_selected_pr_context();
