@@ -168,3 +168,48 @@ fn changing_pr_or_repository_discards_old_pending_activity() {
     );
     assert!(tracker.take_notification("agent").is_none());
 }
+
+#[test]
+fn a_muted_session_drops_comments_and_resumes_only_with_later_ones() {
+    let mut tracker = PrActivityTracker::default();
+    tracker.observe("agent", &pr(Some(vec![])), Some("me@example.com"));
+    tracker.observe(
+        "agent",
+        &pr(Some(vec![comment(1, 1, 10, "other")])),
+        Some("me@example.com"),
+    );
+    assert!(tracker.has_pending("agent"));
+    tracker.set_listening("agent", false);
+    assert!(!tracker.is_listening("agent"));
+    assert!(!tracker.has_pending("agent"));
+
+    let while_muted = pr(Some(vec![
+        comment(1, 1, 10, "other"),
+        comment(1, 2, 20, "other"),
+    ]));
+    tracker.observe("agent", &while_muted, Some("me@example.com"));
+    // Disconnecting forgets the cursor but not the choice.
+    tracker.forget("agent");
+    let mut restored: PrActivityTracker =
+        serde_json::from_value(serde_json::to_value(&tracker).unwrap()).unwrap();
+    assert!(!restored.is_listening("agent"));
+    restored.observe("agent", &while_muted, Some("me@example.com"));
+    assert!(restored.take_notification("agent").is_none());
+
+    restored.set_listening("agent", true);
+    restored.observe("agent", &while_muted, Some("me@example.com"));
+    assert!(restored.take_notification("agent").is_none());
+    let later = pr(Some(vec![
+        comment(1, 1, 10, "other"),
+        comment(1, 2, 20, "other"),
+        comment(2, 1, 30, "other"),
+    ]));
+    restored.observe("agent", &later, Some("me@example.com"));
+    let notification = restored.take_notification("agent").unwrap();
+    assert!(notification.contains("1 new or edited comment"));
+    assert!(notification.contains("thread(s) 2"));
+
+    restored.set_listening("agent", false);
+    restored.retain_sessions(&Default::default());
+    assert!(restored.is_listening("agent"));
+}

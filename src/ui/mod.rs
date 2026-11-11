@@ -166,6 +166,7 @@ struct Workspace {
     context_pr_title: gtk::Label,
     context_pr_author: gtk::Label,
     context_pr_threads: gtk::Label,
+    context_pr_listen: gtk::ToggleButton,
     sidebar_panel: gtk::Box,
     sidebar_split: gtk::Paned,
     sidebar_header: gtk::Box,
@@ -475,6 +476,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     context_pr.append(&context_pr_title);
     context_pr.append(&context_pr_author);
     context_pr.append(&context_pr_threads);
+    let context_pr_listen = gtk::ToggleButton::new();
+    context_pr_listen.add_css_class("flat");
+    context_pr_listen.set_active(true);
+    context_pr_listen.set_visible(false);
+    context_pr.append(&context_pr_listen);
 
     let main_pane = adw::ToolbarView::new();
     main_pane.add_top_bar(&tabs_bar);
@@ -718,6 +724,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         context_pr_pbis,
         context_pr_title,
         context_pr_author,
+        context_pr_listen,
         context_pr_threads,
         sidebar_panel: sidebar_panel.clone(),
         sidebar_split: split.clone(),
@@ -843,6 +850,11 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     let pr_context_workspace = workspace.clone();
     workspace.context_pr_number.connect_clicked(move |_| {
         pr_context_workspace.open_selected_pr_context();
+    });
+
+    let listen_workspace = workspace.clone();
+    workspace.context_pr_listen.connect_toggled(move |button| {
+        listen_workspace.set_selected_pr_listening(button.is_active());
     });
 
     let selected_workspace = workspace.clone();

@@ -23,6 +23,10 @@ Implementation steps and acceptance criteria:
    suggested prompt, and on screen a suggestion reads the same as a draft.
    Notifications identify the PR and comment threads; agents fetch the current
    details themselves. Verify routing and delivery in native UI tests.
+4. Let the user turn this off per session with the bell in the PR bar above the
+   agent. A muted session drops its queued update and keeps its baseline current,
+   so turning it back on only sends comments made after that. The choice is saved
+   and outlives the agent disconnecting.
 
 Automatic reviews of newly published PRs remain a separate feature. Polling does
 not launch agents, change checkouts, or post anything to Azure DevOps.

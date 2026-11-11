@@ -803,8 +803,58 @@ impl Workspace {
             .set_text(&format!("by {}", pull_request.author));
         self.context_pr_threads
             .set_text(&format!("● {} unresolved", pull_request.unresolved_threads));
+        let is_agent = self
+            .sessions
+            .borrow()
+            .get(&context.session_id)
+            .is_some_and(|session| status_ui::is_agent(session.record.kind));
+        let listening = self.pr_activity.borrow().is_listening(&context.session_id);
+        // Set before `selected_pr`, so the toggle handler cannot write this
+        // session's state into the previously selected one.
+        self.selected_pr.borrow_mut().take();
+        self.context_pr_listen.set_active(listening);
+        self.render_pr_listen_toggle(listening);
+        self.context_pr_listen.set_visible(is_agent);
         *self.selected_pr.borrow_mut() = Some(context);
         self.context_pr.set_visible(true);
+    }
+
+    fn render_pr_listen_toggle(&self, listening: bool) {
+        let (icon, description) = if listening {
+            (
+                "preferences-system-notifications-symbolic",
+                "New PR comments are sent to this agent; click to stop",
+            )
+        } else {
+            (
+                "notifications-disabled-symbolic",
+                "New PR comments are not sent to this agent; click to send them",
+            )
+        };
+        self.context_pr_listen.set_icon_name(icon);
+        self.context_pr_listen.set_tooltip_text(Some(description));
+        self.context_pr_listen
+            .update_property(&[gtk::accessible::Property::Label(description)]);
+    }
+
+    /// Starts or stops sending the selected session's new PR comments to its agent.
+    pub(super) fn set_selected_pr_listening(&self, listening: bool) {
+        self.render_pr_listen_toggle(listening);
+        let Some(session_id) = self
+            .selected_pr
+            .borrow()
+            .as_ref()
+            .map(|context| context.session_id.clone())
+        else {
+            return;
+        };
+        if self.pr_activity.borrow().is_listening(&session_id) == listening {
+            return;
+        }
+        self.pr_activity
+            .borrow_mut()
+            .set_listening(&session_id, listening);
+        self.save_pr_activity();
     }
 
     pub(super) fn open_selected_pr_context(&self) {

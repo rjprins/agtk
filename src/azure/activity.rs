@@ -10,6 +10,10 @@ use super::AzurePr;
 #[serde(rename_all = "camelCase")]
 pub struct PrActivityTracker {
     sessions: BTreeMap<String, WatchedPr>,
+    /// Sessions the user stopped from receiving PR comments. Kept apart from
+    /// `sessions`, which is forgotten whenever the agent disconnects.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    muted: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,6 +32,23 @@ impl PrActivityTracker {
             .is_some_and(|watched| !watched.pending_comments.is_empty())
     }
 
+    pub fn is_listening(&self, session: &str) -> bool {
+        !self.muted.contains(session)
+    }
+
+    /// A muted session keeps its baseline current, so listening again only
+    /// reports comments made after that.
+    pub fn set_listening(&mut self, session: &str, listening: bool) {
+        if listening {
+            self.muted.remove(session);
+        } else {
+            self.muted.insert(session.to_owned());
+            if let Some(watched) = self.sessions.get_mut(session) {
+                watched.pending_comments.clear();
+            }
+        }
+    }
+
     /// Baseline a newly linked PR, then accumulate only subsequent comments.
     /// Missing thread data never resets a successful baseline.
     pub fn observe(&mut self, session: &str, pr: &AzurePr, current_user: Option<&str>) {
@@ -39,6 +60,7 @@ impl PrActivityTracker {
                 ..Default::default()
             };
         }
+        let listening = !self.muted.contains(session);
         // Without our identity we cannot distinguish the agent's own replies.
         if let (Some(comments), Some(user)) = (&pr.comments, current_user) {
             let next = comments
@@ -50,7 +72,7 @@ impl PrActivityTracker {
                     )
                 })
                 .collect::<BTreeMap<_, _>>();
-            if let Some(previous) = &watched.comments {
+            if let Some(previous) = watched.comments.as_ref().filter(|_| listening) {
                 for comment in comments {
                     if comment
                         .author_unique_name
@@ -107,5 +129,6 @@ impl PrActivityTracker {
 
     pub fn retain_sessions(&mut self, sessions: &BTreeSet<String>) {
         self.sessions.retain(|id, _| sessions.contains(id));
+        self.muted.retain(|id| sessions.contains(id));
     }
 }
