@@ -3,7 +3,7 @@
 use serde_json::{Map, Value};
 
 use super::remote::percent_encode;
-use super::{AzurePr, AzureRepoRef, LinkedPbi, PrComment};
+use super::{AzurePr, AzureRepoRef, LinkedPbi, PrThread, PrThreadComment};
 
 pub fn normalize_active_prs(reference: &AzureRepoRef, value: Value) -> Vec<AzurePr> {
     let Some(candidates) = value.as_array() else {
@@ -78,7 +78,6 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         unresolved_threads: 0,
         resolved_threads: 0,
         total_threads: None,
-        comments: None,
         linked_pbis: Vec::new(),
         url: format!(
             "{}/{}/_git/{}/pullrequest/{id}?_a=files",
@@ -126,79 +125,102 @@ pub(super) fn normalize_linked_pbis(reference: &AzureRepoRef, value: &Value) -> 
     pbis
 }
 
-pub(super) fn normalize_thread_summary(value: &Value) -> ThreadSummary {
+/// Threads with at least one comment a person wrote, in the order Azure
+/// DevOps sent them. Deleted threads and comments and system events are left out.
+pub fn normalize_threads(value: &Value) -> Vec<PrThread> {
     let threads = value
         .get("value")
         .and_then(Value::as_array)
         .or_else(|| value.as_array());
-    let mut summary = ThreadSummary::default();
-    for thread in threads.into_iter().flatten().filter_map(Value::as_object) {
-        if thread.get("isDeleted").and_then(Value::as_bool) == Some(true) {
-            continue;
-        }
-        let status = thread
-            .get("status")
-            .and_then(nonempty)
-            .unwrap_or("unknown")
-            .to_ascii_lowercase();
-        let unresolved = matches!(status.as_str(), "active" | "pending");
-        let comments = thread
-            .get("comments")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_object)
-            .filter(|comment| comment.get("isDeleted").and_then(Value::as_bool) != Some(true))
-            .filter(|comment| {
-                comment
-                    .get("commentType")
-                    .and_then(nonempty)
-                    .is_some_and(|kind| kind.eq_ignore_ascii_case("text"))
-            })
-            .filter(|comment| comment.get("content").and_then(nonempty).is_some())
-            .collect::<Vec<_>>();
-        if !comments.is_empty() {
-            summary.total_threads += 1;
-            if unresolved {
-                summary.unresolved_threads += 1;
-            } else if matches!(status.as_str(), "fixed" | "closed" | "wontfix" | "bydesign") {
-                summary.resolved_threads += 1;
-            }
-        }
-        for comment in comments {
-            let mut updated_at = 0;
-            for key in ["lastContentUpdatedDate", "lastUpdatedDate", "publishedDate"] {
-                if let Some(timestamp) = comment
-                    .get(key)
-                    .and_then(nonempty)
-                    .and_then(parse_timestamp)
-                {
-                    summary.latest_review_at = summary.latest_review_at.max(timestamp);
-                    updated_at = timestamp;
-                    break;
-                }
-            }
-            if let (Some(thread_id), Some(id)) = (
-                thread
-                    .get("id")
-                    .and_then(Value::as_u64)
-                    .filter(|id| *id > 0),
-                comment
-                    .get("id")
-                    .and_then(Value::as_u64)
-                    .filter(|id| *id > 0),
-            ) {
-                summary.comments.push(PrComment {
-                    thread_id,
-                    id,
-                    updated_at,
-                    author_unique_name: comment
-                        .get("author")
-                        .and_then(|author| author.get("uniqueName"))
+    threads
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter(|thread| thread.get("isDeleted").and_then(Value::as_bool) != Some(true))
+        .filter_map(|thread| {
+            let comments = thread
+                .get("comments")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_object)
+                .filter(|comment| comment.get("isDeleted").and_then(Value::as_bool) != Some(true))
+                .filter(|comment| {
+                    comment
+                        .get("commentType")
                         .and_then(nonempty)
-                        .map(str::to_owned),
-                });
+                        .is_some_and(|kind| kind.eq_ignore_ascii_case("text"))
+                })
+                .filter_map(|comment| {
+                    let content = comment.get("content").and_then(nonempty)?.to_owned();
+                    let updated_at = ["lastContentUpdatedDate", "lastUpdatedDate", "publishedDate"]
+                        .into_iter()
+                        .find_map(|key| {
+                            comment
+                                .get(key)
+                                .and_then(nonempty)
+                                .and_then(parse_timestamp)
+                        })
+                        .unwrap_or(0);
+                    let author = comment.get("author").and_then(Value::as_object);
+                    let author = ["displayName", "uniqueName"]
+                        .into_iter()
+                        .find_map(|key| {
+                            author.and_then(|author| author.get(key)).and_then(nonempty)
+                        })
+                        .unwrap_or("Unknown")
+                        .to_owned();
+                    Some(PrThreadComment {
+                        id: comment.get("id").and_then(Value::as_u64).unwrap_or(0),
+                        author,
+                        content,
+                        updated_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            if comments.is_empty() {
+                return None;
             }
+            let context = thread.get("threadContext").and_then(Value::as_object);
+            let file_path = context
+                .and_then(|context| context.get("filePath"))
+                .and_then(nonempty)
+                .map(str::to_owned);
+            let line = ["rightFileStart", "leftFileStart"]
+                .into_iter()
+                .find_map(|key| {
+                    context?
+                        .get(key)?
+                        .get("line")?
+                        .as_u64()
+                        .filter(|line| *line > 0)
+                });
+            Some(PrThread {
+                id: thread.get("id").and_then(Value::as_u64).unwrap_or(0),
+                status: thread
+                    .get("status")
+                    .and_then(nonempty)
+                    .unwrap_or("unknown")
+                    .to_ascii_lowercase(),
+                file_path,
+                line,
+                comments,
+            })
+        })
+        .collect()
+}
+
+pub(super) fn normalize_thread_summary(value: &Value) -> ThreadSummary {
+    let mut summary = ThreadSummary::default();
+    for thread in normalize_threads(value) {
+        summary.total_threads += 1;
+        if thread.is_unresolved() {
+            summary.unresolved_threads += 1;
+        } else if thread.is_resolved() {
+            summary.resolved_threads += 1;
+        }
+        for comment in &thread.comments {
+            summary.latest_review_at = summary.latest_review_at.max(comment.updated_at);
         }
     }
     summary
@@ -210,7 +232,6 @@ pub(super) struct ThreadSummary {
     pub(super) resolved_threads: u32,
     pub(super) total_threads: u32,
     pub(super) latest_review_at: u64,
-    pub(super) comments: Vec<PrComment>,
 }
 
 fn nonempty(value: &Value) -> Option<&str> {

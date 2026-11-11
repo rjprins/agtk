@@ -166,7 +166,8 @@ struct Workspace {
     context_pr_title: gtk::Label,
     context_pr_author: gtk::Label,
     context_pr_threads: gtk::Label,
-    context_pr_listen: gtk::ToggleButton,
+    context_pr_comments_button: gtk::MenuButton,
+    context_pr_comments: gtk::Box,
     sidebar_panel: gtk::Box,
     sidebar_split: gtk::Paned,
     sidebar_header: gtk::Box,
@@ -212,8 +213,8 @@ struct Workspace {
     /// Review PRs, by project root, already looked up after they left the active list.
     settled_reviews: Rc<RefCell<HashSet<(String, u64)>>>,
     session_pr_cache: Rc<RefCell<HashMap<String, AzurePr>>>,
-    pr_activity: Rc<RefCell<crate::azure::PrActivityTracker>>,
-    pr_activity_snapshots: Rc<RefCell<HashMap<String, std::time::Instant>>>,
+    /// Prompts waiting for their agent to rest, by session.
+    queued_prompts: Rc<RefCell<HashMap<String, std::collections::VecDeque<String>>>>,
     claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
     brief: Rc<RefCell<crate::brief::Brief>>,
     /// Whether the Brief page lists its hidden items.
@@ -475,12 +476,27 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     context_pr.append(&context_pr_pbis);
     context_pr.append(&context_pr_title);
     context_pr.append(&context_pr_author);
-    context_pr.append(&context_pr_threads);
-    let context_pr_listen = gtk::ToggleButton::new();
-    context_pr_listen.add_css_class("flat");
-    context_pr_listen.set_active(true);
-    context_pr_listen.set_visible(false);
-    context_pr.append(&context_pr_listen);
+    // The thread count opens the PR's comments, each with a button to send it to the agent.
+    let context_pr_comments = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    context_pr_comments.set_margin_top(6);
+    context_pr_comments.set_margin_bottom(6);
+    context_pr_comments.set_margin_start(6);
+    context_pr_comments.set_margin_end(6);
+    let comments_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .max_content_height(600)
+        .min_content_width(520)
+        .child(&context_pr_comments)
+        .build();
+    let comments_popover = gtk::Popover::builder().child(&comments_scroll).build();
+    let context_pr_comments_button = gtk::MenuButton::builder()
+        .child(&context_pr_threads)
+        .popover(&comments_popover)
+        .tooltip_text("Show the PR's comments")
+        .build();
+    context_pr_comments_button.add_css_class("flat");
+    context_pr.append(&context_pr_comments_button);
 
     let main_pane = adw::ToolbarView::new();
     main_pane.add_top_bar(&tabs_bar);
@@ -724,8 +740,9 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         context_pr_pbis,
         context_pr_title,
         context_pr_author,
-        context_pr_listen,
         context_pr_threads,
+        context_pr_comments_button,
+        context_pr_comments,
         sidebar_panel: sidebar_panel.clone(),
         sidebar_split: split.clone(),
         sidebar_header: sidebar_header.clone(),
@@ -762,8 +779,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         pr_context_cache: Rc::new(RefCell::new(HashMap::new())),
         settled_reviews: Rc::default(),
         session_pr_cache: Rc::new(RefCell::new(HashMap::new())),
-        pr_activity: Rc::default(),
-        pr_activity_snapshots: Rc::default(),
+        queued_prompts: Rc::default(),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         brief: Rc::new(RefCell::new(crate::brief::Brief::default())),
         brief_hidden_expanded: Rc::new(Cell::new(false)),
@@ -847,14 +863,15 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
                 serde_json::json!(split.max_sidebar_width() as i32),
             );
         });
+    let comments_workspace = workspace.clone();
+    workspace
+        .context_pr_comments_button
+        .popover()
+        .expect("the comments button has a popover")
+        .connect_show(move |_| comments_workspace.load_selected_pr_comments());
     let pr_context_workspace = workspace.clone();
     workspace.context_pr_number.connect_clicked(move |_| {
         pr_context_workspace.open_selected_pr_context();
-    });
-
-    let listen_workspace = workspace.clone();
-    workspace.context_pr_listen.connect_toggled(move |button| {
-        listen_workspace.set_selected_pr_listening(button.is_active());
     });
 
     let selected_workspace = workspace.clone();

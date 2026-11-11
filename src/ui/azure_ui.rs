@@ -19,7 +19,6 @@ struct LoadedPrContext {
     state: PrProjectState,
     context: PrContext,
     changed: Vec<u64>,
-    requested_at: std::time::Instant,
 }
 
 struct PreloadedPrContext {
@@ -803,58 +802,164 @@ impl Workspace {
             .set_text(&format!("by {}", pull_request.author));
         self.context_pr_threads
             .set_text(&format!("● {} unresolved", pull_request.unresolved_threads));
+        *self.selected_pr.borrow_mut() = Some(context);
+        self.context_pr.set_visible(true);
+    }
+
+    /// Fetches the selected PR's comment threads when the user opens them.
+    pub(super) fn load_selected_pr_comments(&self) {
+        let Some(context) = self.selected_pr.borrow().clone() else {
+            return;
+        };
+        let Some(root) = self
+            .sessions
+            .borrow()
+            .get(&context.session_id)
+            .and_then(|session| {
+                session
+                    .record
+                    .project_root
+                    .clone()
+                    .or(session.record.worktree_path.clone())
+                    .or(session.record.cwd.clone())
+            })
+        else {
+            return;
+        };
+        self.show_pr_comments_message("Loading comments…");
+        let id = context.pull_request.id;
+        self.run_slow(
+            move || AzureClient::from_environment().threads(&root, id),
+            move |workspace, result| {
+                let current = workspace.selected_pr.borrow().clone();
+                let Some(current) = current.filter(|current| {
+                    current.session_id == context.session_id && current.pull_request.id == id
+                }) else {
+                    return;
+                };
+                match result {
+                    Ok(threads) => workspace.render_pr_comments(&current, threads),
+                    Err(error) => workspace
+                        .show_pr_comments_message(&format!("Could not load comments: {error}")),
+                }
+            },
+        );
+    }
+
+    fn show_pr_comments_message(&self, text: &str) {
+        while let Some(child) = self.context_pr_comments.first_child() {
+            self.context_pr_comments.remove(&child);
+        }
+        let label = gtk::Label::new(Some(text));
+        label.add_css_class("dim-label");
+        label.set_wrap(true);
+        label.set_margin_top(12);
+        label.set_margin_bottom(12);
+        self.context_pr_comments.append(&label);
+    }
+
+    fn render_pr_comments(
+        &self,
+        context: &SelectedPrContext,
+        mut threads: Vec<crate::azure::PrThread>,
+    ) {
+        if threads.is_empty() {
+            self.show_pr_comments_message("No comments yet");
+            return;
+        }
+        while let Some(child) = self.context_pr_comments.first_child() {
+            self.context_pr_comments.remove(&child);
+        }
         let is_agent = self
             .sessions
             .borrow()
             .get(&context.session_id)
             .is_some_and(|session| status_ui::is_agent(session.record.kind));
-        let listening = self.pr_activity.borrow().is_listening(&context.session_id);
-        // Set before `selected_pr`, so the toggle handler cannot write this
-        // session's state into the previously selected one.
-        self.selected_pr.borrow_mut().take();
-        self.context_pr_listen.set_active(listening);
-        self.render_pr_listen_toggle(listening);
-        self.context_pr_listen.set_visible(is_agent);
-        *self.selected_pr.borrow_mut() = Some(context);
-        self.context_pr.set_visible(true);
-    }
-
-    fn render_pr_listen_toggle(&self, listening: bool) {
-        let (icon, description) = if listening {
-            (
-                "preferences-system-notifications-symbolic",
-                "New PR comments are sent to this agent; click to stop",
-            )
-        } else {
-            (
-                "notifications-disabled-symbolic",
-                "New PR comments are not sent to this agent; click to send them",
-            )
-        };
-        self.context_pr_listen.set_icon_name(icon);
-        self.context_pr_listen.set_tooltip_text(Some(description));
-        self.context_pr_listen
-            .update_property(&[gtk::accessible::Property::Label(description)]);
-    }
-
-    /// Starts or stops sending the selected session's new PR comments to its agent.
-    pub(super) fn set_selected_pr_listening(&self, listening: bool) {
-        self.render_pr_listen_toggle(listening);
-        let Some(session_id) = self
-            .selected_pr
-            .borrow()
-            .as_ref()
-            .map(|context| context.session_id.clone())
-        else {
-            return;
-        };
-        if self.pr_activity.borrow().is_listening(&session_id) == listening {
-            return;
+        // Open threads first; within each group, the order Azure DevOps uses.
+        threads.sort_by_key(|thread| !thread.is_unresolved());
+        for (index, thread) in threads.into_iter().enumerate() {
+            if index > 0 {
+                self.context_pr_comments
+                    .append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+            }
+            let section = gtk::Box::new(gtk::Orientation::Vertical, 8);
+            let location = match (&thread.file_path, thread.line) {
+                (Some(path), Some(line)) => format!("{}:{line}", path.trim_start_matches('/')),
+                (Some(path), None) => path.trim_start_matches('/').to_owned(),
+                (None, _) => "General".to_owned(),
+            };
+            let mut status = thread.status.clone();
+            if let Some(first) = status.get_mut(..1) {
+                first.make_ascii_uppercase();
+            }
+            let header = gtk::Label::new(Some(&format!("{location} · {status}")));
+            header.add_css_class("caption");
+            header.add_css_class(if thread.is_unresolved() {
+                "warning"
+            } else {
+                "dim-label"
+            });
+            header.set_xalign(0.0);
+            header.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            header.set_tooltip_text(Some(&location));
+            section.append(&header);
+            for comment in &thread.comments {
+                let item = gtk::Box::new(gtk::Orientation::Vertical, 2);
+                let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                let author = gtk::Label::new(Some(&comment.author));
+                author.add_css_class("heading");
+                author.set_xalign(0.0);
+                author.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                top.append(&author);
+                if comment.updated_at > 0 {
+                    let elapsed = status_ui::elapsed_since(comment.updated_at);
+                    let age = gtk::Label::new(Some(&if elapsed == "now" {
+                        elapsed
+                    } else {
+                        format!("{elapsed} ago")
+                    }));
+                    age.add_css_class("caption");
+                    age.add_css_class("dim-label");
+                    top.append(&age);
+                }
+                let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                spacer.set_hexpand(true);
+                top.append(&spacer);
+                if is_agent {
+                    let send = gtk::Button::from_icon_name("mail-send-symbolic");
+                    send.add_css_class("flat");
+                    let description = "Ask the agent to look into this comment";
+                    send.set_tooltip_text(Some(description));
+                    send.update_property(&[gtk::accessible::Property::Label(description)]);
+                    let prompt =
+                        crate::azure::comment_prompt(&context.pull_request, &thread, comment);
+                    let session_id = context.session_id.clone();
+                    let workspace = self.clone();
+                    send.connect_clicked(move |button| {
+                        let sent = workspace.queue_agent_prompt(&session_id, prompt.clone());
+                        button.set_icon_name("object-select-symbolic");
+                        let message = if sent {
+                            "Sent the comment to the agent"
+                        } else {
+                            "The comment goes to the agent once it is ready"
+                        };
+                        button.set_tooltip_text(Some(message));
+                        workspace.overlay.add_toast(adw::Toast::new(message));
+                    });
+                    top.append(&send);
+                }
+                item.append(&top);
+                let content = gtk::Label::new(Some(&comment.content));
+                content.set_xalign(0.0);
+                content.set_wrap(true);
+                content.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+                content.set_max_width_chars(70);
+                content.set_selectable(true);
+                item.append(&content);
+                section.append(&item);
+            }
+            self.context_pr_comments.append(&section);
         }
-        self.pr_activity
-            .borrow_mut()
-            .set_listening(&session_id, listening);
-        self.save_pr_activity();
     }
 
     pub(super) fn open_selected_pr_context(&self) {
@@ -935,7 +1040,6 @@ impl Workspace {
 
     /// A poll runs in the background: it stays silent and leaves the dialog's spinner alone.
     fn list_prs(&self, params: PrListParams, pending: Option<PendingRequest>, poll: bool) {
-        let requested_at = std::time::Instant::now();
         let Some(store) = self.store.borrow().clone() else {
             self.report_failure(
                 pending,
@@ -961,7 +1065,6 @@ impl Workspace {
                 workspace.cache_pr_context(&loaded.context);
                 workspace.match_sessions_to_prs(&loaded.context);
                 workspace.remove_merged_reviews(&loaded.context);
-                workspace.observe_pr_activity(&loaded.context, loaded.requested_at);
                 if pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                     == pr_cache_key(&loaded.context.project_root)
                 {
@@ -1067,7 +1170,6 @@ impl Workspace {
                     .collect();
                 Ok(LoadedPrContext {
                     root_key,
-                    requested_at,
                     context: PrContext {
                         project_root,
                         repository: list.repository,
@@ -1554,7 +1656,7 @@ impl Workspace {
         roots.iter().any(|root| !projects.contains_key(root))
     }
 
-    /// Linked live agents keep polling even when no agtk window has focus.
+    /// Polls while an agtk window has focus, so the PR state is current when seen.
     fn poll_pull_requests_if_due(&self) {
         let focused = self
             .application
@@ -1565,102 +1667,44 @@ impl Workspace {
             .pr_polled_at
             .get()
             .is_none_or(|polled_at| polled_at.elapsed() >= PR_POLL_INTERVAL);
-        let has_pr_agent = self.sessions.borrow().values().any(|session| {
-            status_ui::is_agent(session.record.kind)
-                && session.control.is_some()
-                && session.record.state != SessionState::Exited
-                && self
-                    .session_pr_cache
-                    .borrow()
-                    .contains_key(&session.record.id)
-        });
-        if (focused || has_pr_agent) && due {
+        if focused && due {
             self.poll_pull_requests();
         }
     }
 
-    fn save_pr_activity(&self) {
-        if let Ok(value) = serde_json::to_value(&*self.pr_activity.borrow()) {
-            self.save_preference("prAgentActivity", value);
-        }
+    /// Queues a prompt for an agent and sends it once the agent rests. A draft
+    /// does not hold it back: the prompt is added after the draft and sent with it.
+    pub(super) fn queue_agent_prompt(&self, session_id: &str, prompt: String) -> bool {
+        self.queued_prompts
+            .borrow_mut()
+            .entry(session_id.to_owned())
+            .or_default()
+            .push_back(prompt);
+        self.deliver_queued_prompts();
+        !self.queued_prompts.borrow().contains_key(session_id)
     }
 
-    fn observe_pr_activity(&self, context: &PrContext, requested_at: std::time::Instant) {
-        // Manual refreshes and background polls use different workers. An older
-        // request that finishes late must not turn the head commit back into news.
-        let key = pr_cache_key(&context.project_root);
-        {
-            let mut snapshots = self.pr_activity_snapshots.borrow_mut();
-            if snapshots
-                .get(&key)
-                .is_some_and(|previous| *previous > requested_at)
-            {
-                return;
-            }
-            snapshots.insert(key, requested_at);
+    pub(super) fn deliver_queued_prompts(&self) {
+        if self.queued_prompts.borrow().is_empty() {
+            return;
         }
-        let records = self
-            .sessions
-            .borrow()
-            .values()
-            .map(|session| (session.record.clone(), session.control.is_some()))
-            .collect::<Vec<_>>();
-        let previous = self.pr_activity.borrow().clone();
-        {
-            let mut activity = self.pr_activity.borrow_mut();
-            activity.retain_sessions(
-                &records
-                    .iter()
-                    .map(|(record, _)| record.id.clone())
-                    .collect(),
-            );
-            for (record, connected) in records {
-                if !in_project(&record, context) {
-                    continue;
-                }
-                let linked = self.session_pr_cache.borrow().get(&record.id).cloned();
-                let pr = linked.and_then(|linked| {
-                    context
-                        .pull_requests
-                        .iter()
-                        .find(|item| item.pull_request.id == linked.id)
-                        .map(|item| &item.pull_request)
-                });
-                match pr {
-                    Some(pr)
-                        if status_ui::is_agent(record.kind)
-                            && connected
-                            && record.state != SessionState::Exited =>
-                    {
-                        activity.observe(&record.id, pr, context.current_user.as_deref());
-                    }
-                    _ => activity.forget(&record.id),
-                }
-            }
-        }
-        if *self.pr_activity.borrow() != previous {
-            self.save_pr_activity();
-        }
-        self.deliver_pr_activity();
-    }
-
-    /// A queued update becomes one agent prompt once the agent rests. A draft does
-    /// not hold it back: the update is added after the draft and sent with it.
-    pub(super) fn deliver_pr_activity(&self) {
+        self.queued_prompts
+            .borrow_mut()
+            .retain(|id, _| self.sessions.borrow().contains_key(id));
         let terminals = self
             .sessions
             .borrow()
             .values()
             .filter(|session| {
-                self.pr_activity.borrow().has_pending(&session.record.id)
-                    && status_ui::is_agent(session.record.kind)
+                self.queued_prompts
+                    .borrow()
+                    .contains_key(&session.record.id)
                     && session.control.is_some()
                     && matches!(
                         session.record.state,
                         SessionState::Ready | SessionState::Idle
                     )
                     && now_millis().saturating_sub(session.record.state_changed_at) >= 2_000
-                    && !(self.window.is_active() && session.terminal.has_focus())
                     && {
                         let rules = crate::agent_status::rules_for(session.record.kind);
                         let screen = status_ui::screen_text(&session.terminal);
@@ -1685,24 +1729,20 @@ impl Workspace {
                 )
             })
             .collect::<Vec<_>>();
-        let mut changed = false;
         // Terminal input can re-enter session callbacks: all session borrows are released.
         for (id, terminal, tracker, has_text) in terminals {
-            let message = self.pr_activity.borrow_mut().take_notification(&id);
-            if let Some(message) = message {
-                self.mark_agent_busy(&id);
-                let separator = if has_text { "\n\n" } else { "" };
-                terminal.paste_text(&format!("{separator}{message}"));
-                terminal.feed_child(b"\r");
-                let submitted = tracker.borrow_mut().push("\r");
-                if let Some(input) = submitted {
-                    self.record_typed_input(&id, input);
-                }
-                changed = true;
+            let Some(prompts) = self.queued_prompts.borrow_mut().remove(&id) else {
+                continue;
+            };
+            let message = prompts.into_iter().collect::<Vec<_>>().join("\n\n");
+            self.mark_agent_busy(&id);
+            let separator = if has_text { "\n\n" } else { "" };
+            terminal.paste_text(&format!("{separator}{message}"));
+            terminal.feed_child(b"\r");
+            let submitted = tracker.borrow_mut().push("\r");
+            if let Some(input) = submitted {
+                self.record_typed_input(&id, input);
             }
-        }
-        if changed {
-            self.save_pr_activity();
         }
     }
 

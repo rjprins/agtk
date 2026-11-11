@@ -218,15 +218,14 @@ esac
     assert_eq!(encoded["resolvedThreads"], 1);
     assert_eq!(encoded["totalThreads"], 2);
     assert_eq!(result.pull_requests[0].latest_review_at, 1_789_462_800_000);
-    let comments = result.pull_requests[0].comments.as_ref().unwrap();
-    assert_eq!(comments.len(), 1);
-    assert_eq!(comments[0].thread_id, 3);
-    assert_eq!(comments[0].id, 1);
-    assert_eq!(comments[0].updated_at, 1_789_462_800_000);
-    assert_eq!(
-        comments[0].author_unique_name.as_deref(),
-        Some("other@example.com")
-    );
+    let threads = AzureClient::new(&az).threads(&repository, 7).unwrap();
+    assert_eq!(threads.len(), 2);
+    assert_eq!(threads[0].id, 3);
+    assert!(threads[0].is_unresolved());
+    assert_eq!(threads[0].comments[0].content, "Please fix this");
+    assert_eq!(threads[0].comments[0].author, "other@example.com");
+    assert_eq!(threads[0].comments[0].updated_at, 1_789_462_800_000);
+    assert_eq!(threads[1].comments.len(), 2);
     let pbis = &result.pull_requests[0].linked_pbis;
     assert_eq!(pbis.len(), 2);
     assert_eq!(pbis[0].id, 123);
@@ -262,7 +261,7 @@ esac
         .unwrap();
     assert_eq!(result.pull_requests[0].linked_pbis.len(), 2);
     assert_eq!(result.pull_requests[0].total_threads, None);
-    assert!(result.pull_requests[0].comments.is_none());
+    assert!(AzureClient::new(&az).threads(&repository, 7).is_err());
 
     fs::remove_file(directory.path().join("fake-az.fail-threads")).unwrap();
     fs::write(directory.path().join("fake-az.malformed-threads"), "").unwrap();
@@ -270,7 +269,8 @@ esac
         .list_active(&repository)
         .unwrap()
         .unwrap();
-    assert!(result.pull_requests[0].comments.is_none());
+    assert_eq!(result.pull_requests[0].total_threads, None);
+    assert!(AzureClient::new(&az).threads(&repository, 7).is_err());
 }
 
 fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> AzurePr {
@@ -292,7 +292,6 @@ fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> Azur
         unresolved_threads,
         resolved_threads: 0,
         total_threads: Some(unresolved_threads),
-        comments: Some(Vec::new()),
         linked_pbis: Vec::new(),
         url: format!("https://example.test/{id}"),
     }

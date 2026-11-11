@@ -10,9 +10,10 @@ use serde_json::Value;
 
 use super::normalize::{
     ThreadSummary, normalize_active_prs, normalize_linked_pbis, normalize_thread_summary,
+    normalize_threads,
 };
 use super::remote::parse_azure_remote;
-use super::{AzurePr, AzurePrList, AzureRepoRef, AzureResult, LinkedPbi};
+use super::{AzurePr, AzurePrList, AzureRepoRef, AzureResult, LinkedPbi, PrThread};
 use crate::command_runner::run_bounded;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
@@ -165,7 +166,6 @@ impl AzureClient {
                     pull_request.resolved_threads = summary.resolved_threads;
                     pull_request.total_threads = Some(summary.total_threads);
                     pull_request.latest_review_at = summary.latest_review_at;
-                    pull_request.comments = Some(summary.comments);
                     pull_request.updated_at = pull_request.updated_at.max(summary.latest_review_at);
                 }
                 if let Some(linked_pbis) = linked_pbis {
@@ -195,7 +195,19 @@ impl AzureClient {
         Ok(normalize_linked_pbis(reference, &raw))
     }
 
+    /// The PR's comment threads with their text, for the user to read.
+    pub fn threads(&self, project_root: &Path, id: u64) -> AzureResult<Vec<PrThread>> {
+        let Some(reference) = self.repository(project_root)? else {
+            return Err("project origin is not an Azure DevOps repository".into());
+        };
+        Ok(normalize_threads(&self.raw_threads(&reference, id)?))
+    }
+
     fn thread_summary(&self, reference: &AzureRepoRef, id: u64) -> AzureResult<ThreadSummary> {
+        Ok(normalize_thread_summary(&self.raw_threads(reference, id)?))
+    }
+
+    fn raw_threads(&self, reference: &AzureRepoRef, id: u64) -> AzureResult<Value> {
         let project = format!("project={}", reference.project);
         let repository = format!("repositoryId={}", reference.repository);
         let pull_request = format!("pullRequestId={id}");
@@ -221,7 +233,7 @@ impl AzureClient {
         if !raw.is_array() && !raw.get("value").is_some_and(Value::is_array) {
             return Err("Azure PR thread response is not an array".into());
         }
-        Ok(normalize_thread_summary(&raw))
+        Ok(raw)
     }
 
     fn az_json<'a>(&self, args: impl IntoIterator<Item = &'a str>) -> AzureResult<Value> {

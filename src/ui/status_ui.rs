@@ -26,7 +26,7 @@ impl Workspace {
         let workspace = self.clone();
         glib::timeout_add_local(Duration::from_secs(1), move || {
             workspace.refresh_agent_states();
-            workspace.deliver_pr_activity();
+            workspace.deliver_queued_prompts();
             workspace.follow_prompt_logs();
             workspace.refresh_state_labels();
             glib::ControlFlow::Continue
