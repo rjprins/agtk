@@ -817,26 +817,29 @@ impl Workspace {
     }
 
     /// Fetches the selected PR's comment threads when the user opens them.
-    pub(super) fn load_selected_pr_comments(&self) {
+    /// Where the session works, for az to find the repository's Azure origin.
+    fn session_checkout(&self, session_id: &str) -> Option<PathBuf> {
+        self.sessions.borrow().get(session_id).and_then(|session| {
+            session
+                .record
+                .project_root
+                .clone()
+                .or(session.record.worktree_path.clone())
+                .or(session.record.cwd.clone())
+        })
+    }
+
+    /// A reload keeps the current list on screen until the new one arrives.
+    pub(super) fn load_selected_pr_comments(&self, reload: bool) {
         let Some(context) = self.selected_pr.borrow().clone() else {
             return;
         };
-        let Some(root) = self
-            .sessions
-            .borrow()
-            .get(&context.session_id)
-            .and_then(|session| {
-                session
-                    .record
-                    .project_root
-                    .clone()
-                    .or(session.record.worktree_path.clone())
-                    .or(session.record.cwd.clone())
-            })
-        else {
+        let Some(root) = self.session_checkout(&context.session_id) else {
             return;
         };
-        self.show_pr_comments_message("Loading comments…");
+        if !reload {
+            self.show_pr_comments_message("Loading comments…");
+        }
         let id = context.pull_request.id;
         self.run_slow(
             move || AzureClient::from_environment().threads(&root, id),
@@ -965,10 +968,159 @@ impl Workspace {
                 content.set_wrap_mode(gtk::pango::WrapMode::WordChar);
                 content.set_selectable(true);
                 item.append(&content);
+                if thread.id > 0 && comment.id > 0 {
+                    let reply = gtk::Button::from_icon_name("mail-reply-sender-symbolic");
+                    reply.add_css_class("flat");
+                    let description = "Reply in Azure DevOps";
+                    reply.set_tooltip_text(Some(description));
+                    reply.update_property(&[gtk::accessible::Property::Label(description)]);
+                    let (composer, text) = self.reply_composer(context, thread.id, comment.id);
+                    let shown = composer.clone();
+                    reply.connect_clicked(move |_| {
+                        shown.set_visible(true);
+                        text.grab_focus();
+                    });
+                    top.insert_child_after(&reply, Some(&spacer));
+                    item.append(&composer);
+                }
                 section.append(&item);
             }
             self.context_pr_comments.append(&section);
         }
+    }
+
+    /// A hidden box to write a reply in. Ctrl+Enter posts it and Escape closes it.
+    fn reply_composer(
+        &self,
+        context: &SelectedPrContext,
+        thread_id: u64,
+        comment_id: u64,
+    ) -> (gtk::Box, gtk::TextView) {
+        let composer = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        composer.set_margin_top(4);
+        composer.set_visible(false);
+        let text = gtk::TextView::new();
+        text.set_wrap_mode(gtk::WrapMode::WordChar);
+        text.set_accepts_tab(false);
+        text.set_top_margin(6);
+        text.set_bottom_margin(6);
+        text.set_left_margin(6);
+        text.set_right_margin(6);
+        text.set_size_request(-1, 72);
+        text.update_property(&[gtk::accessible::Property::Label("Reply")]);
+        let frame = gtk::Frame::new(None);
+        frame.set_child(Some(&text));
+        composer.append(&frame);
+        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let status = gtk::Label::new(None);
+        status.add_css_class("caption");
+        status.add_css_class("error");
+        status.set_xalign(0.0);
+        status.set_hexpand(true);
+        status.set_wrap(true);
+        buttons.append(&status);
+        let cancel = gtk::Button::with_label("Cancel");
+        let post = gtk::Button::with_label("Reply");
+        post.add_css_class("suggested-action");
+        post.set_tooltip_text(Some("Post this reply in Azure DevOps (Ctrl+Enter)"));
+        post.set_sensitive(false);
+        buttons.append(&cancel);
+        buttons.append(&post);
+        composer.append(&buttons);
+
+        let buffer = text.buffer();
+        let empty_post = post.clone();
+        buffer.connect_changed(move |buffer| {
+            let (start, end) = buffer.bounds();
+            empty_post.set_sensitive(!buffer.text(&start, &end, false).trim().is_empty());
+        });
+        let close = {
+            let composer = composer.clone();
+            let buffer = buffer.clone();
+            let status = status.clone();
+            move || {
+                buffer.set_text("");
+                status.set_text("");
+                composer.set_visible(false);
+            }
+        };
+        let cancel_close = close.clone();
+        cancel.connect_clicked(move |_| cancel_close());
+
+        let workspace = self.clone();
+        let session_id = context.session_id.clone();
+        let pr_id = context.pull_request.id;
+        let submit = {
+            let post = post.clone();
+            let cancel = cancel.clone();
+            let text = text.clone();
+            let status = status.clone();
+            move || {
+                let (start, end) = buffer.bounds();
+                let content = buffer.text(&start, &end, false).trim().to_owned();
+                if content.is_empty() || !post.is_sensitive() {
+                    return;
+                }
+                let Some(root) = workspace.session_checkout(&session_id) else {
+                    return;
+                };
+                for widget in [
+                    post.upcast_ref::<gtk::Widget>(),
+                    cancel.upcast_ref(),
+                    text.upcast_ref(),
+                ] {
+                    widget.set_sensitive(false);
+                }
+                status.set_text("");
+                post.set_label("Posting…");
+                let (post, cancel, text, status) =
+                    (post.clone(), cancel.clone(), text.clone(), status.clone());
+                workspace.run_slow(
+                    move || {
+                        AzureClient::from_environment()
+                            .reply(&root, pr_id, thread_id, comment_id, &content)
+                    },
+                    move |workspace, result| {
+                        post.set_label("Reply");
+                        for widget in [
+                            post.upcast_ref::<gtk::Widget>(),
+                            cancel.upcast_ref(),
+                            text.upcast_ref(),
+                        ] {
+                            widget.set_sensitive(true);
+                        }
+                        match result {
+                            Ok(()) => {
+                                workspace.overlay.add_toast(adw::Toast::new("Reply posted"));
+                                workspace.load_selected_pr_comments(true);
+                            }
+                            // Keep the text, so a failed post loses nothing.
+                            Err(error) => status.set_text(&format!("Could not post: {error}")),
+                        }
+                    },
+                );
+            }
+        };
+        let post_submit = submit.clone();
+        post.connect_clicked(move |_| post_submit());
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed(move |_, key, _, state| {
+            if matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter)
+                && state.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
+                submit();
+                return glib::Propagation::Stop;
+            }
+            // Escape closes the reply, not the whole popover.
+            if key == gtk::gdk::Key::Escape {
+                close();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        text.add_controller(keys);
+        (composer, text)
     }
 
     pub(super) fn open_selected_pr_context(&self) {

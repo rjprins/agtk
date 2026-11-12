@@ -23,6 +23,13 @@ back; the request is added after it and sent with it. Unlike the old automatic
 delivery, it does not wait for the user to leave a focused terminal, because the
 user asked for it.
 
+Every comment also has a reply button. It opens a text box under the comment;
+Reply, or Ctrl+Enter, posts the text to that comment's thread in Azure DevOps as
+the signed-in az account, with the comment as its parent. az takes a request body
+only from a file, so the reply goes through a private temporary file that is
+removed after the call. A failed post keeps the text in the box. After a post the
+threads are fetched again, so the reply shows up in the list.
+
 ## Why not automatic delivery
 
 Not every comment is for the agent in a session. Sending per comment lets the user
@@ -33,4 +40,6 @@ Because nothing is delivered in the background any more, PR polling runs only
 while an agtk window has focus, as it did before automatic delivery.
 
 Comment fields follow the
-[Azure DevOps PR threads schema](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-threads/list?view=azure-devops-rest-7.1).
+[Azure DevOps PR threads schema](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-threads/list?view=azure-devops-rest-7.1),
+and replies the
+[PR thread comments create API](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-thread-comments/create?view=azure-devops-rest-7.1).

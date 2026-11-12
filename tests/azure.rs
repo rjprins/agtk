@@ -273,6 +273,74 @@ esac
     assert!(AzureClient::new(&az).threads(&repository, 7).is_err());
 }
 
+#[test]
+fn replies_post_to_the_thread_with_the_parent_comment_and_remove_the_body_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = directory.path().join("repository");
+    fs::create_dir(&repository).unwrap();
+    run_git(&repository, &["init", "-q"]);
+    run_git(
+        &repository,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://dev.azure.com/demo/Project%20One/_git/app",
+        ],
+    );
+    let az = directory.path().join("fake-az");
+    fs::write(
+        &az,
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$0.args"
+while [ "$#" -gt 0 ]; do
+    [ "$1" = "--in-file" ] && { cp "$2" "$0.body"; stat -c %a "$2" > "$0.mode"; printf '%s' "$2" > "$0.path"; }
+    shift
+done
+[ -e "$0.fail" ] && { echo 'TF401181: thread not found' >&2; exit 1; }
+printf '{"id":3}\n'
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&az, fs::Permissions::from_mode(0o700)).unwrap();
+    let read = |suffix: &str| fs::read_to_string(format!("{}.{suffix}", az.display())).unwrap();
+
+    AzureClient::new(&az)
+        .reply(&repository, 42, 7, 2, "  Fixed in the next push.\n")
+        .unwrap();
+    let args = read("args");
+    let args = args.lines().collect::<Vec<_>>();
+    for expected in [
+        "pullRequestThreadComments",
+        "project=Project One",
+        "repositoryId=app",
+        "pullRequestId=42",
+        "threadId=7",
+        "POST",
+    ] {
+        assert!(args.contains(&expected), "{args:?}");
+    }
+    let body: serde_json::Value = serde_json::from_str(&read("body")).unwrap();
+    assert_eq!(
+        body,
+        json!({"content":"Fixed in the next push.", "parentCommentId":2, "commentType":1})
+    );
+    assert_eq!(read("mode").trim(), "600");
+    assert!(!std::path::Path::new(&read("path")).exists());
+
+    assert!(
+        AzureClient::new(&az)
+            .reply(&repository, 42, 7, 2, " \n")
+            .is_err()
+    );
+    fs::write(format!("{}.fail", az.display()), "").unwrap();
+    let error = AzureClient::new(&az)
+        .reply(&repository, 42, 7, 2, "Again")
+        .unwrap_err();
+    assert!(error.to_string().contains("thread not found"), "{error}");
+    assert!(!std::path::Path::new(&read("path")).exists());
+}
+
 fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> AzurePr {
     AzurePr {
         id,

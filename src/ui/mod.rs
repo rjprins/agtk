@@ -870,7 +870,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         .expect("the comments button has a popover")
         .connect_show(move |_| {
             comments_workspace.size_pr_comments();
-            comments_workspace.load_selected_pr_comments();
+            comments_workspace.load_selected_pr_comments(false);
         });
     let pr_context_workspace = workspace.clone();
     workspace.context_pr_number.connect_clicked(move |_| {

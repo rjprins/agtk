@@ -203,6 +203,78 @@ impl AzureClient {
         Ok(normalize_threads(&self.raw_threads(&reference, id)?))
     }
 
+    /// Posts the user's reply to a comment in a PR thread, as the signed-in az account.
+    pub fn reply(
+        &self,
+        project_root: &Path,
+        id: u64,
+        thread_id: u64,
+        parent_comment_id: u64,
+        content: &str,
+    ) -> AzureResult<()> {
+        let content = content.trim();
+        if content.is_empty() {
+            return Err("a reply needs text".into());
+        }
+        let Some(reference) = self.repository(project_root)? else {
+            return Err("project origin is not an Azure DevOps repository".into());
+        };
+        // az reads a request body only from a file. Keep it private: it is the
+        // user's unposted text.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "content": content,
+            "parentCommentId": parent_comment_id,
+            "commentType": 1,
+        }))?;
+        let path = std::env::temp_dir().join(format!(
+            "agtk-pr-reply-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_nanos())
+        ));
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)?;
+            file.write_all(&body)?;
+        }
+        let project = format!("project={}", reference.project);
+        let repository = format!("repositoryId={}", reference.repository);
+        let pull_request = format!("pullRequestId={id}");
+        let thread = format!("threadId={thread_id}");
+        let result = self.az_text([
+            "devops",
+            "invoke",
+            "--org",
+            &reference.org_url,
+            "--area",
+            "git",
+            "--resource",
+            "pullRequestThreadComments",
+            "--route-parameters",
+            &project,
+            &repository,
+            &pull_request,
+            &thread,
+            "--http-method",
+            "POST",
+            "--in-file",
+            &path.to_string_lossy(),
+            "--api-version",
+            "7.1",
+            "--only-show-errors",
+            "-o",
+            "json",
+        ]);
+        let _ = std::fs::remove_file(&path);
+        result.map(drop)
+    }
+
     fn thread_summary(&self, reference: &AzureRepoRef, id: u64) -> AzureResult<ThreadSummary> {
         Ok(normalize_thread_summary(&self.raw_threads(reference, id)?))
     }
