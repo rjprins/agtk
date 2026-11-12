@@ -51,6 +51,10 @@ pub struct AzurePr {
     /// None when thread details have not been fetched successfully.
     #[serde(default)]
     pub total_threads: Option<u32>,
+    /// The threads with their text, from the last successful fetch. Kept in
+    /// memory only, so the comments popover opens at once.
+    #[serde(skip)]
+    pub threads: Option<Vec<PrThread>>,
     #[serde(default)]
     pub linked_pbis: Vec<LinkedPbi>,
     pub url: String,

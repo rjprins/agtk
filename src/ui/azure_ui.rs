@@ -829,7 +829,8 @@ impl Workspace {
         })
     }
 
-    /// A reload keeps the current list on screen until the new one arrives.
+    /// Shows the threads the last PR poll fetched at once, then refreshes them in
+    /// the background. A reload, after posting a reply, always shows the result.
     pub(super) fn load_selected_pr_comments(&self, reload: bool) {
         let Some(context) = self.selected_pr.borrow().clone() else {
             return;
@@ -837,26 +838,72 @@ impl Workspace {
         let Some(root) = self.session_checkout(&context.session_id) else {
             return;
         };
-        if !reload {
-            self.show_pr_comments_message("Loading comments…");
+        let shown = if reload {
+            None
+        } else {
+            context.pull_request.threads.clone()
+        };
+        match &shown {
+            Some(threads) => self.render_pr_comments(&context, threads.clone()),
+            None if !reload => self.show_pr_comments_message("Loading comments…"),
+            None => {}
         }
         let id = context.pull_request.id;
         self.run_slow(
             move || AzureClient::from_environment().threads(&root, id),
             move |workspace, result| {
                 let current = workspace.selected_pr.borrow().clone();
-                let Some(current) = current.filter(|current| {
+                let Some(mut current) = current.filter(|current| {
                     current.session_id == context.session_id && current.pull_request.id == id
                 }) else {
                     return;
                 };
-                match result {
-                    Ok(threads) => workspace.render_pr_comments(&current, threads),
-                    Err(error) => workspace
-                        .show_pr_comments_message(&format!("Could not load comments: {error}")),
+                let threads = match result {
+                    Ok(threads) => threads,
+                    // Stale comments beat an error over them.
+                    Err(_) if shown.is_some() => return,
+                    Err(error) => {
+                        workspace
+                            .show_pr_comments_message(&format!("Could not load comments: {error}"));
+                        return;
+                    }
+                };
+                current.pull_request.threads = Some(threads.clone());
+                if let Some(cached) = workspace
+                    .session_pr_cache
+                    .borrow_mut()
+                    .get_mut(&current.session_id)
+                    .filter(|cached| cached.id == id)
+                {
+                    cached.threads = Some(threads.clone());
                 }
+                if let Some(selected) = workspace.selected_pr.borrow_mut().as_mut() {
+                    selected.pull_request.threads = Some(threads.clone());
+                }
+                // Rebuilding the list would throw away a reply being written.
+                if !reload && (shown.as_ref() == Some(&threads) || workspace.writing_pr_reply()) {
+                    return;
+                }
+                workspace.render_pr_comments(&current, threads);
             },
         );
+    }
+
+    fn writing_pr_reply(&self) -> bool {
+        fn visible_composer(widget: &gtk::Widget) -> bool {
+            if widget.widget_name() == "pr-reply-composer" {
+                return widget.is_visible();
+            }
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                if visible_composer(&current) {
+                    return true;
+                }
+                child = current.next_sibling();
+            }
+            false
+        }
+        visible_composer(self.context_pr_comments.upcast_ref())
     }
 
     fn show_pr_comments_message(&self, text: &str) {
@@ -998,6 +1045,7 @@ impl Workspace {
     ) -> (gtk::Box, gtk::TextView) {
         let composer = gtk::Box::new(gtk::Orientation::Vertical, 6);
         composer.set_margin_top(4);
+        composer.set_widget_name("pr-reply-composer");
         composer.set_visible(false);
         let text = gtk::TextView::new();
         text.set_wrap_mode(gtk::WrapMode::WordChar);
@@ -1051,6 +1099,7 @@ impl Workspace {
         let session_id = context.session_id.clone();
         let pr_id = context.pull_request.id;
         let submit = {
+            let composer = composer.clone();
             let post = post.clone();
             let cancel = cancel.clone();
             let text = text.clone();
@@ -1073,8 +1122,14 @@ impl Workspace {
                 }
                 status.set_text("");
                 post.set_label("Posting…");
-                let (post, cancel, text, status) =
-                    (post.clone(), cancel.clone(), text.clone(), status.clone());
+                let (composer, buffer, post, cancel, text, status) = (
+                    composer.clone(),
+                    buffer.clone(),
+                    post.clone(),
+                    cancel.clone(),
+                    text.clone(),
+                    status.clone(),
+                );
                 workspace.run_slow(
                     move || {
                         AzureClient::from_environment()
@@ -1091,6 +1146,8 @@ impl Workspace {
                         }
                         match result {
                             Ok(()) => {
+                                buffer.set_text("");
+                                composer.set_visible(false);
                                 workspace.overlay.add_toast(adw::Toast::new("Reply posted"));
                                 workspace.load_selected_pr_comments(true);
                             }

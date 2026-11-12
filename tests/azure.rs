@@ -218,6 +218,11 @@ esac
     assert_eq!(encoded["resolvedThreads"], 1);
     assert_eq!(encoded["totalThreads"], 2);
     assert_eq!(result.pull_requests[0].latest_review_at, 1_789_462_800_000);
+    // The poll keeps the text for the comments popover, but never saves it.
+    let polled = result.pull_requests[0].threads.as_ref().unwrap();
+    assert_eq!(polled.len(), 2);
+    assert_eq!(polled[0].comments[0].content, "Please fix this");
+    assert!(encoded.get("threads").is_none(), "{encoded}");
     let threads = AzureClient::new(&az).threads(&repository, 7).unwrap();
     assert_eq!(threads.len(), 2);
     assert_eq!(threads[0].id, 3);
@@ -261,6 +266,7 @@ esac
         .unwrap();
     assert_eq!(result.pull_requests[0].linked_pbis.len(), 2);
     assert_eq!(result.pull_requests[0].total_threads, None);
+    assert!(result.pull_requests[0].threads.is_none());
     assert!(AzureClient::new(&az).threads(&repository, 7).is_err());
 
     fs::remove_file(directory.path().join("fake-az.fail-threads")).unwrap();
@@ -360,6 +366,7 @@ fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> Azur
         unresolved_threads,
         resolved_threads: 0,
         total_threads: Some(unresolved_threads),
+        threads: None,
         linked_pbis: Vec::new(),
         url: format!("https://example.test/{id}"),
     }

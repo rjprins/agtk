@@ -8,8 +8,11 @@ own. It now shows the comments and lets the user send one at a time.
 ## Decision
 
 The unresolved thread count in the PR bar above a session opens a popover with
-the PR's comment threads. agtk fetches them from Azure DevOps when the popover
-opens and does not store their text. Open threads come first; each shows its file
+the PR's comment threads. The PR poll already fetches every thread to count them,
+so agtk keeps that text in memory with the PR and the popover opens at once. It
+then fetches the threads again in the background, and shows the new list unless
+it is unchanged or a reply is being written. The text is never saved to disk, so
+right after a restart the popover waits for its first fetch. Open threads come first; each shows its file
 and line and its comments with author and age.
 
 In an agent session each comment has a send button. It asks the agent to look into

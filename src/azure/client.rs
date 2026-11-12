@@ -9,8 +9,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::normalize::{
-    ThreadSummary, normalize_active_prs, normalize_linked_pbis, normalize_thread_summary,
-    normalize_threads,
+    normalize_active_prs, normalize_linked_pbis, normalize_threads, summarize_threads,
 };
 use super::remote::parse_azure_remote;
 use super::{AzurePr, AzurePrList, AzureRepoRef, AzureResult, LinkedPbi, PrThread};
@@ -147,7 +146,7 @@ impl AzureClient {
                         let id = pull_request.id;
                         scope.spawn(move || {
                             (
-                                client.thread_summary(&reference, id).ok(),
+                                client.thread_details(&reference, id).ok(),
                                 client.linked_pbis(&reference, id).ok(),
                             )
                         })
@@ -161,7 +160,9 @@ impl AzureClient {
                 let Some((summary, linked_pbis)) = details else {
                     continue;
                 };
-                if let Some(summary) = summary {
+                if let Some(threads) = summary {
+                    let summary = summarize_threads(&threads);
+                    pull_request.threads = Some(threads);
                     pull_request.unresolved_threads = summary.unresolved_threads;
                     pull_request.resolved_threads = summary.resolved_threads;
                     pull_request.total_threads = Some(summary.total_threads);
@@ -200,7 +201,7 @@ impl AzureClient {
         let Some(reference) = self.repository(project_root)? else {
             return Err("project origin is not an Azure DevOps repository".into());
         };
-        Ok(normalize_threads(&self.raw_threads(&reference, id)?))
+        self.thread_details(&reference, id)
     }
 
     /// Posts the user's reply to a comment in a PR thread, as the signed-in az account.
@@ -275,8 +276,8 @@ impl AzureClient {
         result.map(drop)
     }
 
-    fn thread_summary(&self, reference: &AzureRepoRef, id: u64) -> AzureResult<ThreadSummary> {
-        Ok(normalize_thread_summary(&self.raw_threads(reference, id)?))
+    fn thread_details(&self, reference: &AzureRepoRef, id: u64) -> AzureResult<Vec<PrThread>> {
+        Ok(normalize_threads(&self.raw_threads(reference, id)?))
     }
 
     fn raw_threads(&self, reference: &AzureRepoRef, id: u64) -> AzureResult<Value> {

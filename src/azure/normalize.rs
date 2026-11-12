@@ -78,6 +78,7 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         unresolved_threads: 0,
         resolved_threads: 0,
         total_threads: None,
+        threads: None,
         linked_pbis: Vec::new(),
         url: format!(
             "{}/{}/_git/{}/pullrequest/{id}?_a=files",
@@ -210,9 +211,14 @@ pub fn normalize_threads(value: &Value) -> Vec<PrThread> {
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn normalize_thread_summary(value: &Value) -> ThreadSummary {
+    summarize_threads(&normalize_threads(value))
+}
+
+pub(super) fn summarize_threads(threads: &[PrThread]) -> ThreadSummary {
     let mut summary = ThreadSummary::default();
-    for thread in normalize_threads(value) {
+    for thread in threads {
         summary.total_threads += 1;
         if thread.is_unresolved() {
             summary.unresolved_threads += 1;
