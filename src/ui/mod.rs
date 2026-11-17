@@ -216,6 +216,9 @@ struct Workspace {
     session_pr_cache: Rc<RefCell<HashMap<String, AzurePr>>>,
     /// Prompts waiting for their agent to rest, by session.
     queued_prompts: Rc<RefCell<HashMap<String, std::collections::VecDeque<String>>>>,
+    /// When each agent was last restarted for a CLI update, so the poll asks once
+    /// and only tries again if that restart was skipped.
+    update_restarts: Rc<RefCell<HashMap<String, u64>>>,
     claude_presets: Rc<RefCell<ClaudePresetPreferences>>,
     brief: Rc<RefCell<crate::brief::Brief>>,
     /// Whether the Brief page lists its hidden items.
@@ -780,6 +783,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         settled_reviews: Rc::default(),
         session_pr_cache: Rc::new(RefCell::new(HashMap::new())),
         queued_prompts: Rc::default(),
+        update_restarts: Rc::default(),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         brief: Rc::new(RefCell::new(crate::brief::Brief::default())),
         brief_hidden_expanded: Rc::new(Cell::new(false)),

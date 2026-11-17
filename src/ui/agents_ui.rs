@@ -10,6 +10,11 @@ use crate::providers::{
 };
 
 const LIST_WIDTH: i32 = 440;
+/// How long an agent rests before an update restarts it, so a reply that just
+/// came in is not redrawn under the reader.
+const UPDATE_RESTART_REST_MS: u64 = 60_000;
+/// How long before an update restart that did not happen is tried again.
+const UPDATE_RESTART_RETRY_MS: u64 = 5 * 60_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AgentSessionItem {
@@ -1062,6 +1067,58 @@ impl Workspace {
         if !idle.is_empty() {
             self.restart_agents(idle, true, None);
         }
+    }
+
+    /// Restarts agents whose CLI says a newer version is installed, once they rest
+    /// out of sight with nothing typed. A restart resumes the conversation, so only
+    /// a draft or a turn could be lost, and neither is touched.
+    pub(super) fn restart_updated_agents(&self) {
+        let in_front = self
+            .window
+            .is_active()
+            .then(|| self.selected_session_id())
+            .flatten();
+        let ids = {
+            let sessions = self.sessions.borrow();
+            let queued = self.queued_prompts.borrow();
+            let mut restarting = self.update_restarts.borrow_mut();
+            let now = now_millis();
+            restarting.retain(|id, at| {
+                sessions.contains_key(id) && now.saturating_sub(*at) < UPDATE_RESTART_RETRY_MS
+            });
+            sessions
+                .values()
+                .filter(|s| {
+                    let id = &s.record.id;
+                    AgentProvider::from_kind(s.record.kind).is_some()
+                        && s.record.state == SessionState::Idle
+                        && now_millis().saturating_sub(s.record.state_changed_at)
+                            >= UPDATE_RESTART_REST_MS
+                        && in_front.as_ref() != Some(id)
+                        && !restarting.contains_key(id)
+                        && !queued.contains_key(id)
+                        && {
+                            let rules = crate::agent_status::rules_for(s.record.kind);
+                            let screen = status_ui::screen_text(&s.terminal);
+                            rules.update_pending(&screen) && !rules.composer_has_text(&screen)
+                        }
+                })
+                .map(|s| s.record.id.clone())
+                .collect::<Vec<_>>()
+        };
+        if ids.is_empty() {
+            return;
+        }
+        let now = now_millis();
+        self.update_restarts
+            .borrow_mut()
+            .extend(ids.iter().map(|id| (id.clone(), now)));
+        let message = match ids.len() {
+            1 => "Restarting 1 agent on the updated CLI".to_owned(),
+            count => format!("Restarting {count} agents on the updated CLI"),
+        };
+        self.overlay.add_toast(super::plain_toast(&message));
+        self.restart_agents(ids, true, None);
     }
 
     /// Restarts agents in their rows. Codex rows first claim their log, since

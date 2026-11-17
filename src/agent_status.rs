@@ -48,8 +48,18 @@ pub struct ToolRules {
     busy_line: Option<Regex>,
     limit_line: Option<Regex>,
     dialog_footer: Option<Regex>,
+    /// The footer that says a newer CLI is installed and this one is out of date.
+    update_notice: Option<Regex>,
     rules: Vec<Rule>,
 }
+
+/// Claude's footer once an update is installed. Older versions said "Restart to
+/// update", newer ones "/restart to apply".
+const CLAUDE_UPDATE_NOTICE: &str = r"✔ Update installed · (?:Restart to update|/restart to apply)";
+
+/// How far above the screen's bottom the update footer may sit: it is drawn just
+/// above the input box, which takes a few rows with the status line below it.
+const UPDATE_NOTICE_ROWS: usize = 12;
 
 fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("built-in status pattern is valid")
@@ -66,9 +76,9 @@ static CLAUDE: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     activity_cutoff: Some(re(r"(?m)^❯")),
     whole_screen_region: false,
     turn_end: Some(re(r"^[✻✳✶✽✢·✦✧+*] \S+ for \d.*$")),
-    chrome_line: Some(re(
-        r"^\s*[─q]{4,}.*$|^[\s─q]*$|^\s*✔ Update installed · Restart to update\s*$|^\s*new task\? /clear to save .*$",
-    )),
+    chrome_line: Some(re(&format!(
+        r"^\s*[─q]{{4,}}.*$|^[\s─q]*$|^\s*(?:{CLAUDE_UPDATE_NOTICE})\s*$|^\s*new task\? /clear to save .*$",
+    ))),
     interrupted_line: Some(re("Interrupted ·")),
     trailing_note: Some(re("^※")),
     busy_line: Some(re(
@@ -76,6 +86,7 @@ static CLAUDE: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     )),
     limit_line: Some(re(r"(?m)You've hit your .+limit")),
     dialog_footer: Some(re(r"(?m)^\s*Enter to select\b")),
+    update_notice: Some(re(CLAUDE_UPDATE_NOTICE)),
     rules: vec![
         rule(Signal::Waiting, "Enter to confirm"),
         rule(Signal::Waiting, r"(?m)^[ \x{A0}]*❯[ \x{A0}]+\d+\."),
@@ -94,6 +105,7 @@ static CODEX: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     busy_line: None,
     limit_line: Some(re(r"(?m)You've hit your usage limit")),
     dialog_footer: None,
+    update_notice: None,
     rules: vec![
         rule(Signal::Waiting, r"(?m)^\s*›\s+\d+\."),
         rule(Signal::Waiting, r"(?m)Press enter to (confirm|continue)\b"),
@@ -121,6 +133,7 @@ static GEMINI: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     busy_line: None,
     limit_line: Some(re("Usage limit reached")),
     dialog_footer: None,
+    update_notice: None,
     rules: vec![
         rule(Signal::Waiting, r"(?m)^[\s│]*●\s*\d+\."),
         rule(Signal::Waiting, "Waiting for user confirmation"),
@@ -139,6 +152,7 @@ static GENERIC: LazyLock<ToolRules> = LazyLock::new(|| ToolRules {
     busy_line: None,
     limit_line: None,
     dialog_footer: None,
+    update_notice: None,
     rules: Vec::new(),
 });
 
@@ -180,6 +194,17 @@ impl ToolRules {
             .find_iter(screen)
             .last()
             .map(|found| &screen[..found.start()])
+    }
+
+    /// Whether the agent says a newer version is installed than the one running.
+    pub fn update_pending(&self, screen: &str) -> bool {
+        let Some(notice) = &self.update_notice else {
+            return false;
+        };
+        let lines = screen.trim_end().lines().collect::<Vec<_>>();
+        lines[lines.len().saturating_sub(UPDATE_NOTICE_ROWS)..]
+            .iter()
+            .any(|line| notice.is_match(line))
     }
 
     /// Whether the input box shows text. A suggested prompt counts: on screen it

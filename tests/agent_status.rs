@@ -411,3 +411,29 @@ fn the_input_box_shows_text_only_after_its_marker() {
 
     assert!(!rules_for(SessionKind::Shell).composer_has_text("$ ls\n"));
 }
+
+#[test]
+fn an_installed_update_shows_in_the_footer_above_the_input_box() {
+    let border = "─".repeat(40);
+    let claude = rules_for(SessionKind::Claude);
+    let screen = |notice: &str| {
+        format!(
+            "● Done\n\n{notice}\n{border}\n❯\u{a0}\n{border}\n\n  ⏵⏵ auto mode on (shift+tab to cycle)\n"
+        )
+    };
+    let new_footer = "                     ✔ Update installed · /restart to apply";
+    let old_footer = "                     ✔ Update installed · Restart to update";
+    assert!(claude.update_pending(&screen(new_footer)));
+    assert!(claude.update_pending(&screen(old_footer)));
+    assert!(!claude.update_pending(&screen("")));
+    // A mention far up in the conversation is not the footer.
+    let earlier = format!("{old_footer}\n{}{}", "text\n".repeat(20), screen(""));
+    assert!(!claude.update_pending(&earlier));
+    // The footer is chrome: it does not change how the turn reads.
+    assert_eq!(
+        claude.classify(&screen(new_footer)),
+        claude.classify(&screen(""))
+    );
+
+    assert!(!rules_for(SessionKind::Codex).update_pending(&screen(new_footer)));
+}
