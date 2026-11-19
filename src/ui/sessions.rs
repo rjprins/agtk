@@ -844,7 +844,7 @@ impl Workspace {
         let url_tag = add_pattern(URL_PATTERN);
         let file_tag = add_pattern(crate::file_links::TERMINAL_PATTERN);
 
-        // Ctrl+click opens right away and keeps the click from the terminal.
+        // Ctrl+click opens right away, files in Emacs, and keeps the click from the terminal.
         let click = gtk::GestureClick::new();
         click.set_button(gtk::gdk::BUTTON_PRIMARY);
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -861,7 +861,7 @@ impl Workspace {
             };
             if let Some((text, tag)) = link_at(&terminal, x, y, url_tag, file_tag) {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                workspace.open_link(&terminal, &text, tag == file_tag);
+                workspace.open_link(&terminal, &text, tag == file_tag, true);
             }
         });
         terminal.add_controller(click);
@@ -925,7 +925,7 @@ impl Workspace {
             let source =
                 glib::timeout_add_local_once(Duration::from_millis(u64::from(delay)), move || {
                     open_pending.borrow_mut().take();
-                    open_workspace.open_link(&terminal, &text, tag == file_tag);
+                    open_workspace.open_link(&terminal, &text, tag == file_tag, false);
                 });
             pending.borrow_mut().replace(source);
             glib::Propagation::Proceed
@@ -933,16 +933,20 @@ impl Workspace {
         terminal.add_controller(events);
     }
 
-    fn open_link(&self, terminal: &vte::Terminal, text: &str, is_file_path: bool) {
+    /// Opens a link from terminal output; files go to Emacs when `in_emacs` is set,
+    /// otherwise to the file viewer.
+    fn open_link(&self, terminal: &vte::Terminal, text: &str, is_file_path: bool, in_emacs: bool) {
         if is_file_path {
-            self.open_terminal_file(terminal, text);
+            self.open_terminal_file(terminal, text, in_emacs);
         } else if let Some(path) = text
             .starts_with("file://")
             .then(|| gio::File::for_uri(text).path())
             .flatten()
         {
             let session_id = self.session_id_for_terminal(terminal);
-            if path.is_file() {
+            if path.is_file() && in_emacs {
+                self.open_file_in_emacs(path, None, None);
+            } else if path.is_file() {
                 self.open_file_from_session(session_id, path, None, None);
             } else {
                 self.show_error(&format!("{} is not a file", path.display()));
@@ -973,9 +977,9 @@ impl Workspace {
             .map(|session| session.record.id.clone())
     }
 
-    /// Opens a path printed in the terminal in the file viewer, resolved against
-    /// the session's associated worktree before its terminal directories.
-    fn open_terminal_file(&self, terminal: &vte::Terminal, text: &str) {
+    /// Opens a path printed in the terminal in the file viewer or Emacs, resolved
+    /// against the session's associated worktree before its terminal directories.
+    fn open_terminal_file(&self, terminal: &vte::Terminal, text: &str, in_emacs: bool) {
         let Some(link) = crate::file_links::parse_link(text) else {
             return;
         };
@@ -1011,6 +1015,9 @@ impl Workspace {
                 Ok((path, link.line, link.column))
             },
             move |workspace, result| match result {
+                Ok((path, line, column)) if in_emacs => {
+                    workspace.open_file_in_emacs(path, line, column);
+                }
                 Ok((path, line, column)) => {
                     workspace.open_file_from_session(session_id, path, line, column);
                 }
