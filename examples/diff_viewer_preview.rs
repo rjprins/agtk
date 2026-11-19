@@ -44,7 +44,9 @@ fn main() -> glib::ExitCode {
             ViewerEvent::LookUp { lookup, line, column, .. } => {
                 println!("Lookup of {lookup:?} at {line}:{column}")
             }
-            ViewerEvent::Jump { .. } | ViewerEvent::History { .. } => {}
+            ViewerEvent::Jump { .. }
+            | ViewerEvent::History { .. }
+            | ViewerEvent::CommentFocus { .. } => {}
             ViewerEvent::Comment {
                 session_id,
                 comment,

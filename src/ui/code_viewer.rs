@@ -106,6 +106,10 @@ pub(super) enum ViewerEvent {
         #[serde(default)]
         text: Option<String>,
     },
+    /// The comment box gained or lost focus. agtk then leaves Ctrl+F to it.
+    CommentFocus {
+        focused: bool,
+    },
     Error {
         #[serde(default)]
         request_id: Option<String>,
@@ -132,6 +136,8 @@ struct ViewerState {
     /// When the web process last stopped, and whether the page stays down.
     stopped_at: Option<Instant>,
     stopped: bool,
+    /// Whether the comment box has the keyboard.
+    comment_focused: bool,
 }
 
 impl ViewerState {
@@ -241,6 +247,7 @@ impl CodeViewer {
             presentation: None,
             stopped_at: None,
             stopped: false,
+            comment_focused: false,
         }));
         let message_state = state.clone();
         let message_view = web_view.clone();
@@ -263,6 +270,10 @@ impl CodeViewer {
             };
             if !valid_event(&event) {
                 eprintln!("Code viewer sent an out-of-bounds event");
+                return;
+            }
+            if let ViewerEvent::CommentFocus { focused } = event {
+                message_state.borrow_mut().comment_focused = focused;
                 return;
             }
             if matches!(event, ViewerEvent::Ready { .. }) {
@@ -304,6 +315,7 @@ impl CodeViewer {
                     .is_some_and(|at| at.elapsed() < CRASH_LOOP_WINDOW);
                 state.stopped_at = Some(Instant::now());
                 state.ready = false;
+                state.comment_focused = false;
                 state.queued.clear();
                 state.stopped = again;
                 !again
@@ -316,6 +328,11 @@ impl CodeViewer {
         web_view.load_uri(INDEX);
 
         Self { web_view, state }
+    }
+
+    /// Whether the comment box has the keyboard, so keys such as Ctrl+F are its own.
+    pub(super) fn comment_has_focus(&self) -> bool {
+        self.state.borrow().comment_focused
     }
 
     pub(super) fn widget(&self) -> gtk::Widget {
@@ -513,6 +530,7 @@ fn reload(web_view: &WebView, state: &RefCell<ViewerState>) {
         let state = &mut *state.borrow_mut();
         state.ready = false;
         state.stopped = false;
+        state.comment_focused = false;
         state.queued = [
             &state.appearance,
             &state.comment_sessions,
@@ -750,6 +768,7 @@ fn valid_event(event: &ViewerEvent) -> bool {
                 .is_none_or(|request_id| request_id.len() <= 128)
                 && message.len() <= 2048
         }
+        ViewerEvent::CommentFocus { .. } => true,
         // Only agtk reports this, never the page.
         ViewerEvent::Stopped { .. } => false,
     }

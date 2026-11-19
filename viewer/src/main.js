@@ -732,6 +732,8 @@ const commentBox = createCommentBox({
     hideCommentBox();
     host?.focus({ preventScroll: true });
   },
+  // agtk leaves Ctrl+F to the comment's Emacs keys while it has focus.
+  onFocus: (focused) => sendEvent({ type: 'commentFocus', focused }),
 });
 
 const commentWidget = {

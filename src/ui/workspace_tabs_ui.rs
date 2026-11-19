@@ -1065,6 +1065,7 @@ impl Workspace {
                 glib::idle_add_local_once(move || workspace.show_viewer_stopped());
             }
             code_viewer::ViewerEvent::Ready { .. }
+            | code_viewer::ViewerEvent::CommentFocus { .. }
             | code_viewer::ViewerEvent::Stopped { reloading: true }
             | code_viewer::ViewerEvent::Error {
                 request_id: None, ..

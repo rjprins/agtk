@@ -114,7 +114,8 @@ impl Workspace {
         });
 
         // Capture before WebKit handles Ctrl+F. Keep the terminal's Ctrl+F
-        // available to the shell or agent running in it.
+        // available to the shell or agent running in it, and the comment
+        // box's, where it moves forward a character.
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let workspace = self.clone();
@@ -122,6 +123,11 @@ impl Workspace {
             if key == gtk::gdk::Key::f
                 && state & SHORTCUT_MODIFIERS == gtk::gdk::ModifierType::CONTROL_MASK
                 && workspace.stack.visible_child_name().as_deref() == Some("changes-diff")
+                && !workspace
+                    .code_viewer
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|viewer| viewer.comment_has_focus())
             {
                 workspace.open_search();
                 return glib::Propagation::Stop;
