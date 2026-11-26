@@ -40,7 +40,7 @@ impl Workspace {
             }
         });
         self.add_action("close-session", true, |workspace| {
-            if let Some(id) = workspace.selected_session_id() {
+            if let Some(id) = workspace.focused_session_id() {
                 workspace.close_session(&id);
             }
         });
@@ -81,6 +81,10 @@ impl Workspace {
         });
 
         self.add_action("copy", true, |workspace| {
+            if let Some(terminal) = workspace.pinned_terminal_in_focus() {
+                terminal.copy_clipboard_format(vte::Format::Text);
+                return;
+            }
             if workspace.stack.visible_child_name().as_deref() == Some("changes-diff") {
                 if let Some(viewer) = workspace.code_viewer.borrow().as_ref() {
                     viewer.copy();
@@ -92,10 +96,13 @@ impl Workspace {
             }
         });
         self.add_action("paste", true, |workspace| {
-            if workspace.stack.visible_child_name().as_deref() == Some("changes-diff") {
+            let in_panel = workspace.pinned_terminal_in_focus();
+            if in_panel.is_none()
+                && workspace.stack.visible_child_name().as_deref() == Some("changes-diff")
+            {
                 return;
             }
-            if let Some(terminal) = workspace.selected_terminal() {
+            if let Some(terminal) = in_panel.or_else(|| workspace.selected_terminal()) {
                 if clipboard_has_image(&terminal) {
                     // VTE's clipboard action only requests text. Let agent TUIs
                     // handle image paste through their native clipboard reader.
@@ -372,6 +379,19 @@ impl Workspace {
             })
     }
 
+    /// The pinned session's terminal while the user is typing in it, so copy
+    /// and paste follow the keyboard rather than the main area's selection.
+    fn pinned_terminal_in_focus(&self) -> Option<vte::Terminal> {
+        if !self.pinned_has_focus() {
+            return None;
+        }
+        let id = self.pinned_session_id()?;
+        self.sessions
+            .borrow()
+            .get(&id)
+            .map(|session| session.terminal.clone())
+    }
+
     fn selected_terminal(&self) -> Option<vte::Terminal> {
         if self.stack.visible_child_name().as_deref() == Some("changes-diff") {
             return None;
@@ -442,14 +462,15 @@ impl Workspace {
             self.show_error("No visible agent session is ready");
             return;
         }
-        let selected = self.selected_session_id();
+        // From the pinned session's panel, go on to the one after it.
+        let current = self.focused_session_id();
         let index = ready
             .iter()
-            .position(|session| selected.as_deref() == Some(session.record.id.as_str()))
+            .position(|session| current.as_deref() == Some(session.record.id.as_str()))
             .map_or(0, |index| (index + 1) % ready.len());
-        let row = ready[index].row.clone();
+        let id = ready[index].record.id.clone();
         drop(sessions);
-        self.list.select_row(Some(&row));
+        self.show_session(&id);
     }
 }
 

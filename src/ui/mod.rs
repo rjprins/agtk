@@ -67,6 +67,7 @@ mod menus;
 mod merged_reviews_ui;
 mod modal;
 mod model_picker;
+mod pinned_ui;
 mod preferences_ui;
 mod projects_ui;
 mod prompt_log_ui;
@@ -185,6 +186,8 @@ struct Workspace {
     /// The offer to remove a worktree with its last session, while it is open.
     close_prompt: Rc<RefCell<Option<close_session_ui::ClosePrompt>>>,
     selected_session: Rc<RefCell<Option<String>>>,
+    /// The session shown in the right sidebar's panel instead of the main area.
+    pinned_session: Rc<RefCell<Option<String>>>,
     suppress_session_activation: Rc<Cell<bool>>,
     sequence: Rc<Cell<u64>>,
     control_server: Rc<RefCell<Option<ControlServer>>>,
@@ -258,6 +261,10 @@ struct SessionView {
     page: gtk::Widget,
     row: gtk::ListBoxRow,
     label: gtk::Label,
+    /// Shown while the session is pinned to the right sidebar's panel.
+    pin_mark: gtk::Image,
+    /// The row menu's section that pins the session or unpins it.
+    pin_menu: gio::Menu,
     /// The worktree caption under the title; hidden when the session has no directory.
     worktree_label: gtk::Label,
     state_label: gtk::Label,
@@ -761,6 +768,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         resume_prompt: Rc::new(RefCell::new(None)),
         close_prompt: Rc::new(RefCell::new(None)),
         selected_session: Rc::new(RefCell::new(None)),
+        pinned_session: Rc::default(),
         suppress_session_activation: Rc::new(Cell::new(false)),
         sequence: Rc::new(Cell::new(0)),
         control_server: Rc::new(RefCell::new(None)),
@@ -1041,6 +1049,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     workspace.bind_sidebar_model();
     workspace.install_menu_actions();
     workspace.install_brief_actions();
+    workspace.install_pinned_panel();
     workspace.install_pr_updates();
     workspace.install_shortcut_actions();
     workspace.install_font_scroll();
@@ -1052,20 +1061,36 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
 impl Workspace {
     fn remove_session_view(&self, id: &str) {
         let was_selected = self.selected_session_id().as_deref() == Some(id);
-        let context_key = self
-            .workspace_tabs
-            .borrow()
-            .session_context(id)
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("session:{id}"));
+        let was_pinned = self.is_pinned(id);
         let Some(session) = self.sessions.borrow_mut().remove(id) else {
             return;
         };
         if self.session_pr_cache.borrow_mut().remove(id).is_some() {
             self.save_session_pr_cache();
         }
+        let fallback = self.detach_workspace_session(id);
+        if was_pinned {
+            self.forget_pinned_session();
+        } else {
+            self.stack.remove(&session.page);
+        }
+        self.rebuild_sidebar();
+        if was_selected {
+            self.select_another_session(fallback);
+        }
+        self.render_workspace_tabs();
+    }
+
+    /// Takes a session out of the main area's tabs, and drops the diffs and
+    /// files of a worktree that this leaves without sessions.
+    fn detach_workspace_session(&self, id: &str) -> Option<String> {
+        let context_key = self
+            .workspace_tabs
+            .borrow()
+            .session_context(id)
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("session:{id}"));
         let fallback = self.workspace_tabs.borrow_mut().remove_session(id);
-        self.stack.remove(&session.page);
         if self
             .workspace_tabs
             .borrow()
@@ -1074,47 +1099,51 @@ impl Workspace {
         {
             self.discard_diff_context(&context_key);
         }
-        self.rebuild_sidebar();
-        if was_selected {
+        fallback
+    }
+
+    /// The selected session left the main area: selects the first one still
+    /// there, or shows the empty page.
+    fn select_another_session(&self, fallback: Option<String>) {
+        let row = self
+            .sessions
+            .borrow()
+            .values()
+            // The pinned session's row leads to its panel, not to the main area.
+            .filter(|session| session.row.is_selectable())
+            .min_by_key(|session| session.record.position)
+            .map(|session| session.row.clone());
+        if let Some(row) = row {
+            self.list.select_row(Some(&row));
+        } else if let Some(fallback_id) = fallback {
+            // Release the borrow first: selecting a row re-enters the sessions map.
             let row = self
                 .sessions
                 .borrow()
-                .values()
-                .min_by_key(|session| session.record.position)
+                .get(&fallback_id)
                 .map(|session| session.row.clone());
             if let Some(row) = row {
                 self.list.select_row(Some(&row));
-            } else if let Some(fallback_id) = fallback {
-                // Release the borrow first: selecting a row re-enters the sessions map.
-                let row = self
-                    .sessions
-                    .borrow()
-                    .get(&fallback_id)
-                    .map(|session| session.row.clone());
-                if let Some(row) = row {
-                    self.list.select_row(Some(&row));
-                }
-            } else {
-                if let Some(viewer) = self.code_viewer.borrow().as_ref() {
-                    viewer.clear();
-                }
-                self.stack.set_visible_child_name(EMPTY_PAGE);
-                self.session_context_bar.set_visible(false);
-                self.selected_session.borrow_mut().take();
-                self.refresh_content_title();
-                self.render_history(None);
-                self.clear_selected_pr_context();
-                self.search_button.set_sensitive(false);
-                self.search_bar.set_search_mode(false);
-                self.changes
-                    .set_error("Select an agent to inspect its worktree");
-                self.invalidate_changes("empty", "Select an agent to inspect its worktree");
-                self.update_emacs_actions();
-                self.update_claude_actions();
-                self.save_preference("selectedSessionId", serde_json::Value::Null);
             }
+        } else {
+            if let Some(viewer) = self.code_viewer.borrow().as_ref() {
+                viewer.clear();
+            }
+            self.stack.set_visible_child_name(EMPTY_PAGE);
+            self.session_context_bar.set_visible(false);
+            self.selected_session.borrow_mut().take();
+            self.refresh_content_title();
+            self.render_history(None);
+            self.clear_selected_pr_context();
+            self.search_button.set_sensitive(false);
+            self.search_bar.set_search_mode(false);
+            self.changes
+                .set_error("Select an agent to inspect its worktree");
+            self.invalidate_changes("empty", "Select an agent to inspect its worktree");
+            self.update_emacs_actions();
+            self.update_claude_actions();
+            self.save_preference("selectedSessionId", serde_json::Value::Null);
         }
-        self.render_workspace_tabs();
     }
 
     fn discard_diff_context(&self, context: &str) {

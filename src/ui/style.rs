@@ -148,6 +148,12 @@ button.brief-action.image-button.success {
   border-radius: 50%;
   background: var(--accent-bg-color);
 }
+/* The strip above the pinned session's terminal in the right sidebar. */
+.pinned-header {
+  padding: 2px 6px 2px 12px;
+  border-top: 1px solid var(--borders);
+}
+.pinned-header button { min-height: 24px; min-width: 24px; padding: 0; }
 .attention-dot {
   min-width: 6px;
   min-height: 6px;

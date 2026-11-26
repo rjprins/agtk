@@ -137,6 +137,13 @@ impl Workspace {
         }
         if matches!(
             &pending.request.command,
+            ControlCommand::SessionPin(_) | ControlCommand::SessionUnpin
+        ) {
+            self.handle_pin_control(pending);
+            return;
+        }
+        if matches!(
+            &pending.request.command,
             ControlCommand::PrList(_)
                 | ControlCommand::PrAcknowledge(_)
                 | ControlCommand::PrSetAutoReview(_)
@@ -359,13 +366,17 @@ impl Workspace {
                 }
             }
             ControlCommand::SessionSelect(params) => {
-                let row = self
-                    .sessions
-                    .borrow()
-                    .get(&params.session_id)
-                    .map(|session| session.row.clone());
-                if let Some(row) = row {
-                    self.list.select_row(Some(&row));
+                if self.is_pinned(&params.session_id) {
+                    // It is in view already; the main area keeps its selection.
+                    self.focus_pinned_session();
+                    ControlResponse::success(
+                        id,
+                        serde_json::json!({
+                            "selectedSessionId": self.selected_session_id(),
+                            "pinnedSessionId": params.session_id,
+                        }),
+                    )
+                } else if self.show_session(&params.session_id) {
                     ControlResponse::success(
                         id,
                         serde_json::json!({ "selectedSessionId": params.session_id }),
@@ -414,6 +425,8 @@ impl Workspace {
             ),
             ControlCommand::BriefGet => ControlResponse::success(id, self.brief.borrow().summary()),
             ControlCommand::SessionCreate(_)
+            | ControlCommand::SessionPin(_)
+            | ControlCommand::SessionUnpin
             | ControlCommand::UiOpenDiff(_)
             | ControlCommand::UiOpenFile(_)
             | ControlCommand::AppearanceSet(_)

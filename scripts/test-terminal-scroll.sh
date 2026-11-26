@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Exercise VTE scrolling and brief row clicks with real pointer input on a private Mutter display.
+# Exercise VTE scrolling, brief row clicks and the pinned panel's keyboard focus
+# with real pointer and key input on a private Mutter display.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -35,6 +36,7 @@ cd "$repo"
 cargo test --locked --test native_ui ctrl_scroll -- --ignored --test-threads=1
 cargo test --locked --test native_ui clicking_a_brief_row -- --ignored --test-threads=1
 cargo test --locked --test native_ui a_comment_box_keeps -- --ignored --test-threads=1
+cargo test --locked --test native_ui keys_typed_in_the_pinned_panel -- --ignored --test-threads=1
 cargo test --locked --lib real_touchpad_input -- --ignored --test-threads=1
 cargo test --locked --lib fullscreen_wheel_input -- --ignored --test-threads=1
 cargo test --locked --test history_scroll -- --ignored --test-threads=1

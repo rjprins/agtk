@@ -210,6 +210,14 @@ impl Workspace {
                 let changes_sidebar_open = store
                     .preference("changesSidebarOpen")?
                     .and_then(|value| value.as_bool());
+                let pinned_session = store
+                    .preference(pinned_ui::PINNED_SESSION_PREFERENCE)?
+                    .and_then(|value| value.as_str().map(str::to_owned));
+                let pinned_share = pinned_ui::pinned_share(
+                    store
+                        .preference(pinned_ui::PINNED_SHARE_PREFERENCE)?
+                        .as_ref(),
+                );
                 let changes_sidebar_page = store
                     .preference(explorer_ui::SIDEBAR_PAGE_PREFERENCE)?
                     .and_then(|value| value.as_str().map(str::to_owned));
@@ -309,6 +317,8 @@ impl Workspace {
                     brief_hidden_expanded,
                     brief_collapsed_sections,
                     changes_sidebar_open,
+                    pinned_session,
+                    pinned_share,
                     changes_sidebar_page,
                     changes_base_refs,
                     changes_sidebar_pages,
@@ -339,6 +349,8 @@ impl Workspace {
                     brief_hidden_expanded,
                     brief_collapsed_sections,
                     changes_sidebar_open,
+                    pinned_session,
+                    pinned_share,
                     changes_sidebar_page,
                     changes_base_refs,
                     changes_sidebar_pages,
@@ -405,6 +417,7 @@ impl Workspace {
                         workspace.changes.split.set_show_sidebar(open);
                         workspace.changes.toggle.set_active(open);
                     }
+                    workspace.changes.pinned.set_share(pinned_share);
                     let mut last = None;
                     for (record, connected) in recovered {
                         let (control, attachment) =
@@ -419,11 +432,25 @@ impl Workspace {
                                 .show_error(&format!("Could not restore terminal: {error}")),
                         }
                     }
+                    // Before the selection, so the main area starts on another session.
+                    // The sidebar stays as it was left: open or closed.
+                    if let Some(id) = pinned_session {
+                        workspace.pin_session(&id, false);
+                    }
                     let row = {
                         let sessions = workspace.sessions.borrow();
-                        selected
-                            .and_then(|id| sessions.get(&id))
-                            .or_else(|| last.and_then(|id| sessions.get(&id)))
+                        let in_main_area = |id: Option<String>| {
+                            id.and_then(|id| sessions.get(&id))
+                                .filter(|s| s.row.is_selectable())
+                        };
+                        in_main_area(selected)
+                            .or_else(|| in_main_area(last))
+                            .or_else(|| {
+                                sessions
+                                    .values()
+                                    .filter(|s| s.row.is_selectable())
+                                    .min_by_key(|s| s.record.position)
+                            })
                             .map(|s| s.row.clone())
                     };
                     if let Some(row) = row {
@@ -540,8 +567,11 @@ impl Workspace {
                 .unwrap_or(-1)
                 + 1
         });
+        // A relaunched pinned session goes back to its panel, not to the main area.
+        let pin = placement.is_some_and(|p| p.pin);
         // A background launch still fills an empty view, so the first row shows.
-        let select = placement.is_none_or(|p| p.select) || self.selected_session_id().is_none();
+        let select =
+            !pin && (placement.is_none_or(|p| p.select) || self.selected_session_id().is_none());
         let socket = self.paths.sessions_dir().join(format!("{id}.sock"));
         let paths = self.paths.clone();
         let host_binary = self.host_binary.clone();
@@ -686,6 +716,9 @@ impl Workspace {
                     let id = record.id.clone();
                     match workspace.attach(record, Some(control), Some(attachment), select) {
                         Ok(()) => {
+                            if pin {
+                                workspace.pin_session(&id, false);
+                            }
                             let terminal = workspace
                                 .sessions
                                 .borrow()
@@ -1239,6 +1272,13 @@ impl Workspace {
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.add_css_class("session-title");
         primary.append(&label);
+        let pin_mark = gtk::Image::from_icon_name("view-pin-symbolic");
+        pin_mark.set_pixel_size(12);
+        pin_mark.set_margin_start(6);
+        pin_mark.add_css_class("dim-label");
+        pin_mark.set_tooltip_text(Some("Pinned to the side panel"));
+        pin_mark.set_visible(false);
+        primary.append(&pin_mark);
         mainline.append(&primary);
         let worktree_label = gtk::Label::new(None);
         worktree_label.set_xalign(0.0);
@@ -1330,6 +1370,9 @@ impl Workspace {
             ));
         }
         menu.append_section(None, &edit_section);
+        let pin_menu = gio::Menu::new();
+        pin_menu.append_item(&pinned_ui::pin_menu_item(&id, false));
+        menu.append_section(None, &pin_menu);
         let close_section = gio::Menu::new();
         close_section.append_item(&menus::targeted_item(
             "Close Session",
@@ -1357,6 +1400,8 @@ impl Workspace {
                 page,
                 row: row.clone(),
                 label,
+                pin_mark,
+                pin_menu,
                 worktree_label,
                 state_label,
                 elapsed_label,
@@ -1632,6 +1677,8 @@ pub(super) struct Placement {
     /// `None` appends the row after the last one.
     pub(super) position: Option<i64>,
     pub(super) select: bool,
+    /// Takes over the right sidebar's panel from the pinned session it replaces.
+    pub(super) pin: bool,
 }
 
 impl Placement {
@@ -1640,6 +1687,7 @@ impl Placement {
         Self {
             position: None,
             select: false,
+            pin: false,
         }
     }
 }

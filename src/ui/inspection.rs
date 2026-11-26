@@ -4,6 +4,7 @@ use crate::changes::ChangeStatus;
 impl Workspace {
     pub(super) fn app_state(&self) -> AppState {
         let selected_session_id = self.selected_session_id();
+        let pinned_session_id = self.pinned_session_id();
         let mut sessions = self
             .sessions
             .borrow()
@@ -14,6 +15,7 @@ impl Workspace {
                 kind: session.record.kind,
                 state: session.record.state,
                 is_selected: selected_session_id.as_deref() == Some(id.as_str()),
+                is_pinned: pinned_session_id.as_deref() == Some(id.as_str()),
                 history_count: session.history.len(),
                 cwd: session.record.cwd.clone(),
                 project_root: session.record.project_root.clone(),
@@ -30,6 +32,7 @@ impl Workspace {
             instance: self.paths.name().as_str().to_owned(),
             protocol_version: PROTOCOL_VERSION,
             selected_session_id,
+            pinned_session_id,
             appearance: self.appearance_summary(),
             shortcuts: self.shortcut_summaries(),
             window: WindowState {
@@ -68,6 +71,7 @@ impl Workspace {
             kind: session.record.kind,
             state: session.record.state,
             is_selected: selected_session_id.as_deref() == Some(id),
+            is_pinned: self.is_pinned(id),
             history_count: session.history.len(),
             cwd: session.record.cwd.clone(),
             project_root: session.record.project_root.clone(),
@@ -435,6 +439,18 @@ impl Workspace {
         changes_children.extend(changes_content_nodes(self));
         changes_children.push(files_page_node(self));
         changes_children.push(brief_page_node(self));
+        changes_children.push(UiNode {
+            id: "pinned-panel".to_owned(),
+            role: "group".to_owned(),
+            label: self
+                .pinned_session_id()
+                .map(|_| self.changes.pinned.title.text().to_string()),
+            is_visible: self.changes.pinned.root.is_visible() && self.changes.split.shows_sidebar(),
+            is_enabled: self.changes.pinned.root.is_sensitive(),
+            is_selected: self.pinned_has_focus(),
+            bounds: widget_bounds(&self.changes.pinned.root, &self.window),
+            children: Vec::new(),
+        });
         let changes_sidebar_node = UiNode {
             id: "changes-sidebar".to_owned(),
             role: "complementary".to_owned(),

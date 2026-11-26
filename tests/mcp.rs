@@ -65,6 +65,8 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "launch_agent",
             "fork_session",
             "select_session",
+            "pin_session",
+            "unpin_session",
             "open_diff",
             "open_file",
             "kill_session",
@@ -245,6 +247,33 @@ fn forking_a_session_maps_to_the_typed_local_control_protocol() {
         [ControlCommand::SessionFork(SessionIdParams {
             session_id: "claude-1".to_owned(),
         })]
+    );
+}
+
+#[test]
+fn pinning_and_unpinning_map_to_the_typed_local_control_protocol() {
+    let mut server = McpServer::new(MockBackend::default());
+    for (id, name, arguments) in [
+        (8, "pin_session", json!({"sessionId":"claude-1"})),
+        (9, "unpin_session", json!({})),
+    ] {
+        let response = server
+            .handle(request(
+                id,
+                "tools/call",
+                json!({"name":name,"arguments":arguments}),
+            ))
+            .unwrap();
+        assert_eq!(response["result"]["isError"], false);
+    }
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        [
+            ControlCommand::SessionPin(SessionIdParams {
+                session_id: "claude-1".to_owned(),
+            }),
+            ControlCommand::SessionUnpin,
+        ]
     );
 }
 

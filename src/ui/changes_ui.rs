@@ -6,6 +6,7 @@ use adw::prelude::*;
 
 use super::brief_ui::{BRIEF_PAGE, BriefPage};
 use super::explorer_ui::{CHANGES_PAGE, FILES_PAGE, FileExplorer};
+use super::pinned_ui::PinnedPanel;
 use super::sidebar::{DEFAULT_CHANGES_WIDTH, MAX_CHANGES_WIDTH, MIN_CHANGES_WIDTH};
 use super::updates_ui::{UPDATES_PAGE, UpdatesPage};
 use crate::changes::{
@@ -17,7 +18,8 @@ const INITIAL_FILE_LIMIT: usize = 200;
 const COMMITS_AGO_OPTION: &str = "Commits ago…";
 
 /// The right sidebar: a Changes page and a Files page for the selected worktree,
-/// and a Brief page for the daily brief.
+/// a Brief page for the daily brief and an Updates page for PRs. Under the
+/// pages sits the panel of the pinned session, when there is one.
 #[derive(Clone)]
 pub(super) struct ChangesSidebar {
     pub split: adw::OverlaySplitView,
@@ -35,6 +37,7 @@ pub(super) struct ChangesSidebar {
     pub explorer: FileExplorer,
     pub brief: BriefPage,
     pub updates: UpdatesPage,
+    pub pinned: PinnedPanel,
     pub(crate) state: Rc<RefCell<ChangesSidebarState>>,
     pub updating_base: Rc<std::cell::Cell<bool>>,
     /// Set while switching to a worktree's remembered page, so the switch is not remembered.
@@ -172,7 +175,8 @@ impl ChangesSidebar {
         pages.add_titled(&brief.root, Some(BRIEF_PAGE), "Brief");
         let updates = UpdatesPage::new();
         pages.add_titled(&updates.root, Some(UPDATES_PAGE), "Updates");
-        root.append(&pages);
+        let pinned = PinnedPanel::new(&pages);
+        root.append(&pinned.panes);
 
         let sidebar = gtk::Overlay::new();
         sidebar.set_child(Some(&root));
@@ -184,7 +188,7 @@ impl ChangesSidebar {
             .build();
         toggle.add_css_class("flat");
         toggle.set_tooltip_text(Some(
-            "Show the changes and files of the selected agent's worktree, the daily brief and PR updates",
+            "Show the changes and files of the selected agent's worktree, the daily brief, PR updates and the pinned session",
         ));
         let sync_toggle = toggle.clone();
         split.connect_show_sidebar_notify(move |split| {
@@ -211,6 +215,7 @@ impl ChangesSidebar {
             explorer,
             brief,
             updates,
+            pinned,
             state: Rc::new(RefCell::new(ChangesSidebarState::default())),
             updating_base: Rc::new(std::cell::Cell::new(false)),
             restoring_page: Rc::new(std::cell::Cell::new(false)),

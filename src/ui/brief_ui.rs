@@ -462,10 +462,7 @@ impl Workspace {
         };
         match target {
             SessionTarget::Select(id) => {
-                let row = self.sessions.borrow().get(&id).map(|live| live.row.clone());
-                if let Some(row) = row {
-                    self.list.select_row(Some(&row));
-                }
+                self.show_session(&id);
             }
             SessionTarget::Restore {
                 provider,

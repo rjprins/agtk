@@ -215,6 +215,7 @@ impl Workspace {
         let placement = sessions::Placement {
             position: Some(record.position),
             select: self.selected_session_id().as_deref() == Some(id),
+            pin: self.is_pinned(id),
         };
         self.stop_session_then(id, None, move |workspace, pending| {
             workspace.launch_session(params, None, Some(placement), pending);

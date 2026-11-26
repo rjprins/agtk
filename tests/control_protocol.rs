@@ -202,6 +202,8 @@ fn every_core_method_decodes_to_a_typed_command() {
             r#"{"sessionId":"shell-1"}"#,
             "SessionSelect",
         ),
+        ("session.pin", r#"{"sessionId":"claude-1"}"#, "SessionPin"),
+        ("session.unpin", "{}", "SessionUnpin"),
         (
             "session.send_input",
             r#"{"sessionId":"shell-1","text":"status","appendEnter":false}"#,

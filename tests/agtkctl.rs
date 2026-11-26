@@ -312,6 +312,13 @@ fn session_mutation_commands_have_typed_protocol_mappings() {
         }),
     );
     assert_fixture_command(
+        &["session", "pin", "claude-7"],
+        ControlCommand::SessionPin(SessionIdParams {
+            session_id: "claude-7".to_owned(),
+        }),
+    );
+    assert_fixture_command(&["session", "unpin"], ControlCommand::SessionUnpin);
+    assert_fixture_command(
         &[
             "session",
             "input",

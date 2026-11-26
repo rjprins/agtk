@@ -4530,3 +4530,383 @@ fn ctrl_f_searches_the_open_file_without_intercepting_terminal_input() {
     }
     call("Stop", None);
 }
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn a_pinned_session_stays_in_the_side_panel_while_the_main_area_changes() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        (node["id"] == id).then_some(node).or_else(|| {
+            node["children"]
+                .as_array()?
+                .iter()
+                .find_map(|child| find(child, id))
+        })
+    }
+    let mut app = App::new();
+    let shell = |name: &str| {
+        app.request(
+            "session.create",
+            json!({
+                "kind":"custom","command":"/bin/sh","args":["-c","exec sleep 30"],
+                "cwd":app.directory.path(),"name":name
+            }),
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let first = shell("first");
+    let second = shell("second");
+    let assistant = app.request(
+        "session.create",
+        json!({
+            "kind":"codex","command":"/bin/sh",
+            "args":["-c","printf '__READY__\\n'; while read line; do printf '__GOT_%s__\\n' \"$line\"; done"],
+            "cwd":app.directory.path(),"name":"assistant"
+        }),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    app.wait_text(&assistant, "__READY__");
+    let panel = |app: &App| {
+        let inspection = app.request("ui.inspect", json!({}));
+        find(&inspection["root"], "pinned-panel").unwrap().clone()
+    };
+    assert_eq!(panel(&app)["isVisible"], false);
+
+    // Pinning opens the right sidebar and leaves the selection alone.
+    let pinned = app.request("session.pin", json!({"sessionId":assistant}));
+    assert_eq!(pinned["pinnedSessionId"], assistant);
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], assistant);
+    assert_eq!(state["selectedSessionId"], first);
+    let pinned_flags = state["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|session| session["isPinned"].as_bool().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(pinned_flags, [false, false, true]);
+    assert_eq!(panel(&app)["isVisible"], true);
+    assert_eq!(panel(&app)["label"], "assistant");
+
+    // Its terminal keeps working in the panel.
+    app.request(
+        "session.send_input",
+        json!({"sessionId":assistant,"text":"ping","appendEnter":true}),
+    );
+    app.wait_text(&assistant, "__GOT_ping__");
+
+    // Selecting it goes to the panel; next and previous pass over its row.
+    let selected = app.request("session.select", json!({"sessionId":assistant}));
+    assert_eq!(selected["selectedSessionId"], first);
+    assert_eq!(selected["pinnedSessionId"], assistant);
+    for expected in [&second, &first, &second] {
+        app.activate_action("next-session");
+        assert_eq!(
+            app.request("app.get_state", json!({}))["selectedSessionId"],
+            expected.as_str()
+        );
+    }
+
+    // The pin and the open sidebar survive a restart of agtk.
+    app.stop();
+    app.start();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], assistant);
+    assert_eq!(state["selectedSessionId"], second);
+    assert_eq!(panel(&app)["isVisible"], true);
+
+    // A restarted agent gets a new session, which takes over the panel.
+    app.request(
+        "session.set_state",
+        json!({"sessionId":assistant,"state":"idle","conversationId":"codex-conv-1"}),
+    );
+    let restarted = app.request("session.restart", json!({"sessionId":assistant}));
+    let restarted = restarted["id"].as_str().unwrap().to_owned();
+    assert_ne!(restarted, assistant);
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], restarted);
+    assert_eq!(state["selectedSessionId"], second);
+
+    // Pinning the selected session swaps the two: the old one returns to the main area.
+    app.request("session.pin", json!({"sessionId":second}));
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], second);
+    assert_eq!(state["selectedSessionId"], first);
+    assert_eq!(panel(&app)["label"], "second");
+    let selected = app.request("session.select", json!({"sessionId":restarted}));
+    assert_eq!(selected["selectedSessionId"], restarted);
+
+    // Closing the pinned session empties the panel; unpinning nothing is fine.
+    app.request("session.close", json!({"sessionId":second}));
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], Value::Null);
+    assert_eq!(panel(&app)["isVisible"], false);
+    let unpinned = app.request("session.unpin", json!({}));
+    assert_eq!(unpinned["pinnedSessionId"], Value::Null);
+
+    // An unpinned session is back among the rows that can be selected.
+    app.request("session.pin", json!({"sessionId":first}));
+    app.request("session.unpin", json!({}));
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], Value::Null);
+    assert_eq!(state["selectedSessionId"], restarted);
+    let selected = app.request("session.select", json!({"sessionId":first}));
+    assert_eq!(selected["selectedSessionId"], first);
+    assert_eq!(
+        app.request("app.get_state", json!({}))["selectedSessionId"],
+        first
+    );
+
+    match app.request_body("session.pin", json!({"sessionId":"shell-gone"})) {
+        ResponseBody::Failure(error) => assert_eq!(error.code, ErrorCode::SessionNotFound),
+        body => panic!("pinning an unknown session succeeded: {body:?}"),
+    }
+    for id in [&first, &restarted] {
+        app.request("session.close", json!({"sessionId":id}));
+    }
+}
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn a_pinned_agent_keeps_its_panel_when_it_resumes_after_a_reboot() {
+    let mut app = App::new();
+    let create = |kind: &str, name: &str| {
+        let session = app.request(
+            "session.create",
+            json!({
+                "kind":kind,"command":"/bin/sh",
+                "args":["-c","printf '__READY__\\n'; read line"],
+                "cwd":app.directory.path(),"name":name
+            }),
+        );
+        let id = session["id"].as_str().unwrap().to_owned();
+        app.wait_text(&id, "__READY__");
+        id
+    };
+    let main = create("shell", "main");
+    let assistant = create("codex", "assistant");
+    app.request(
+        "session.set_state",
+        json!({"sessionId":assistant,"state":"idle","conversationId":"codex-conv-1"}),
+    );
+    app.request("session.pin", json!({"sessionId":assistant}));
+
+    app.stop();
+    app.kill_hosts();
+    app.start();
+
+    // The ended session still holds the panel, so its successor finds it there.
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], assistant);
+    assert_eq!(state["selectedSessionId"], main);
+    assert_eq!(state["sessions"][1]["state"], "exited");
+    let resumed = app.request("session.restart", json!({"sessionId":assistant}));
+    let resumed = resumed["id"].as_str().unwrap().to_owned();
+    assert_ne!(resumed, assistant);
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], resumed);
+    assert_eq!(state["selectedSessionId"], main);
+
+    // And the new session is the one agtk pins the next time it starts.
+    app.stop();
+    app.start();
+    let state = app.request("app.get_state", json!({}));
+    assert_eq!(state["pinnedSessionId"], resumed);
+    for id in [&main, &resumed] {
+        app.request("session.close", json!({"sessionId":id}));
+    }
+}
+
+#[test]
+#[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
+fn keys_typed_in_the_pinned_panel_reach_its_session_and_mark_its_turn_viewed() {
+    use glib::variant::ToVariant;
+
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        (node["id"] == id).then_some(node).or_else(|| {
+            node["children"]
+                .as_array()?
+                .iter()
+                .find_map(|child| find(child, id))
+        })
+    }
+
+    assert_eq!(
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap(),
+        std::env::var("AGTK_TEST_BUS").unwrap()
+    );
+    let app = App::new();
+    // Each typist writes the keys it gets to its own file.
+    let typist = |name: &str, kind: &str| {
+        let input = app.directory.path().join(format!("{name}-input"));
+        let session = app.request(
+            "session.create",
+            json!({
+                "kind":kind,"command":"/bin/sh",
+                "args":["-c","stty raw -echo; printf '__READY__'; cat > \"$1\"", name, input],
+                "cwd":app.directory.path(),"name":name
+            }),
+        );
+        let id = session["id"].as_str().unwrap().to_owned();
+        app.wait_text(&id, "__READY__");
+        (id, input)
+    };
+    let (main, main_input) = typist("main", "custom");
+    let (other, _) = typist("other", "codex");
+    let (assistant, panel_input) = typist("assistant", "codex");
+    app.request("session.pin", json!({"sessionId":assistant}));
+
+    let bus = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>).unwrap();
+    let destination = "org.gnome.Mutter.RemoteDesktop";
+    let remote = bus
+        .call_sync(
+            Some(destination),
+            "/org/gnome/Mutter/RemoteDesktop",
+            destination,
+            "CreateSession",
+            None,
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    let remote_path = remote.child_value(0).str().unwrap().to_owned();
+    let call = |method: &str, parameters: Option<glib::Variant>| {
+        bus.call_sync(
+            Some(destination),
+            &remote_path,
+            "org.gnome.Mutter.RemoteDesktop.Session",
+            method,
+            parameters.as_ref(),
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    };
+    call("Start", None);
+    let key =
+        |code: u32, down: bool| call("NotifyKeyboardKeycode", Some((code, down).to_variant()));
+    let tap = |code: u32| {
+        key(code, true);
+        key(code, false);
+    };
+    thread::sleep(Duration::from_millis(300));
+    key(125, true);
+    tap(103);
+    key(125, false);
+    thread::sleep(Duration::from_millis(300));
+    // Activate the window in the private compositor.
+    call(
+        "NotifyPointerMotionRelative",
+        Some((-10000.0_f64, -10000.0_f64).to_variant()),
+    );
+    call(
+        "NotifyPointerMotionRelative",
+        Some((500.0_f64, 350.0_f64).to_variant()),
+    );
+    call("NotifyPointerButton", Some((272_i32, true).to_variant()));
+    call("NotifyPointerButton", Some((272_i32, false).to_variant()));
+    thread::sleep(Duration::from_millis(300));
+
+    let wait_for = |what: &str, done: &dyn Fn() -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !done() {
+            assert!(
+                Instant::now() < deadline,
+                "{what}: {}",
+                app.request("app.get_state", json!({}))
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
+    };
+    let in_panel = || {
+        let inspection = app.request("ui.inspect", json!({}));
+        find(&inspection["root"], "pinned-panel").unwrap()["isSelected"] == true
+    };
+    let typed = |input: &std::path::Path, byte: u8| {
+        std::fs::read(input).unwrap_or_default().contains(&byte)
+    };
+    let state_of = |id: &str| {
+        let state = app.request("app.get_state", json!({}));
+        state["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == id)
+            .unwrap()["state"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+
+    // Going to the pinned session puts the keyboard in its panel.
+    app.request("session.select", json!({"sessionId":assistant}));
+    wait_for("the panel did not take the focus", &in_panel);
+    tap(30);
+    wait_for("the key did not reach the pinned session", &|| {
+        typed(&panel_input, b'a')
+    });
+    assert!(!typed(&main_input, b'a'));
+
+    // Going to a session in the main area takes the keyboard back there.
+    app.request("session.select", json!({"sessionId":main}));
+    wait_for("the panel kept the focus", &|| !in_panel());
+    tap(48);
+    wait_for("the key did not reach the selected session", &|| {
+        typed(&main_input, b'b')
+    });
+    assert!(!typed(&panel_input, b'b'));
+
+    // A turn that finishes in the panel stays ready until the user goes there.
+    let finish_turn = |id: &str| {
+        app.request("session.set_state", json!({"sessionId":id,"state":"busy"}));
+        app.request("session.set_state", json!({"sessionId":id,"state":"ready"}))["state"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(finish_turn(&assistant), "ready");
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(state_of(&assistant), "ready");
+    app.request("session.select", json!({"sessionId":assistant}));
+    wait_for("going to the panel did not mark its turn viewed", &|| {
+        state_of(&assistant) == "idle"
+    });
+    // And one that finishes while the user is in the panel is viewed at once.
+    assert_eq!(finish_turn(&assistant), "idle");
+
+    // Next ready passes through the panel like through any other session.
+    for id in [&other, &assistant] {
+        app.request(
+            "session.set_state",
+            json!({"sessionId":id,"state":"waiting"}),
+        );
+    }
+    app.activate_action("next-ready-session");
+    wait_for("next ready did not leave the panel", &|| !in_panel());
+    assert_eq!(
+        app.request("app.get_state", json!({}))["selectedSessionId"],
+        other
+    );
+    app.activate_action("next-ready-session");
+    wait_for("next ready did not go to the panel", &in_panel);
+    assert_eq!(
+        app.request("app.get_state", json!({}))["selectedSessionId"],
+        other
+    );
+    app.activate_action("next-ready-session");
+    wait_for("next ready did not return to the selected session", &|| {
+        !in_panel()
+    });
+
+    call("Stop", None);
+    for id in [&main, &other, &assistant] {
+        app.request("session.close", json!({"sessionId":id}));
+    }
+}

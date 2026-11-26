@@ -11,6 +11,8 @@ pub struct AppState {
     pub instance: String,
     pub protocol_version: u16,
     pub selected_session_id: Option<String>,
+    /// The session shown in the right sidebar's panel, if one is pinned there.
+    pub pinned_session_id: Option<String>,
     pub appearance: AppearanceSummary,
     pub shortcuts: Vec<ShortcutSummary>,
     pub window: WindowState,
@@ -77,6 +79,8 @@ pub struct SessionSummary {
     pub kind: SessionKind,
     pub state: SessionState,
     pub is_selected: bool,
+    /// Shown in the right sidebar's panel instead of the main area.
+    pub is_pinned: bool,
     pub history_count: usize,
     pub cwd: Option<PathBuf>,
     pub project_root: Option<PathBuf>,

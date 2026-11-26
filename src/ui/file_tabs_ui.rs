@@ -113,9 +113,17 @@ impl Workspace {
         line: Option<u32>,
         column: Option<u32>,
     ) -> Option<String> {
+        // A pinned session has no tabs of its own, so its files open with the selected session.
+        let from_panel = session_id.as_deref().is_some_and(|id| self.is_pinned(id));
         let owner = session_id
-            .filter(|id| self.sessions.borrow().contains_key(id))
-            .or_else(|| self.selected_session_id())?;
+            .filter(|id| !from_panel && self.sessions.borrow().contains_key(id))
+            .or_else(|| self.selected_session_id());
+        let Some(owner) = owner else {
+            if from_panel {
+                self.show_error("Select a session in the main area to open files there");
+            }
+            return None;
+        };
         let context = self.context_key_for_session(&owner);
         self.workspace_tabs
             .borrow_mut()

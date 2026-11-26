@@ -1245,6 +1245,7 @@ impl Workspace {
         let placement = super::sessions::Placement {
             position: self.make_room_below(&parent.id),
             select: pending.is_none(),
+            pin: false,
         };
         self.launch_session(params, plan.conversation_id, Some(placement), pending);
     }
@@ -1405,6 +1406,7 @@ impl Workspace {
         let placement = super::sessions::Placement {
             position: Some(record.position),
             select: self.selected_session_id().as_deref() == Some(id),
+            pin: self.is_pinned(id),
         };
         self.stop_session_then(id, pending, move |workspace, pending| {
             workspace.launch_session(params, conversation_id, Some(placement), pending);

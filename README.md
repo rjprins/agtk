@@ -109,7 +109,24 @@ Optional tools:
 - Switch Claude model and effort with presets.
 - Closing the last session in a worktree offers to remove the worktree too. Uncommitted changes are saved to the attic first, and the branch can go with it after an attic tag.
 
+- Pin one session to the right sidebar to keep it in view next to the session you work in. See [Pinned session](#pinned-session).
+
 Sessions do not survive a reboot, and terminal scrollback is not saved. After a reboot, agtk lists the sessions that were open and offers to start them again: agents resume their conversation, shells open in the same directory. Later, press Enter in the terminal of an exited agent to resume it.
+
+### Pinned session
+
+Pin one session, such as your assistant, to the right sidebar. It then stays in view next to whichever session you select.
+
+- Choose Pin to Side Panel in the session's row menu, or run `agtkctl session pin SESSION_ID`. An agent can use the MCP tool `pin_session`. This opens the right sidebar.
+- The session's terminal moves to a panel under the Changes, Files, Brief and Updates pages. Drag the line above the panel to resize it.
+- One session is pinned at a time. Pinning another one moves the first back to the main area.
+- The row stays in the sidebar with a pin mark. Click it to go to the panel. Next and previous session skip it. Next ready session goes to the panel when the pinned agent is ready or waiting.
+- A finished turn of the pinned agent stays ready until you click or type in the panel.
+- Copy, paste and Close selected session act on the pinned session while you type in its panel. Search, prompt history and the Claude preset stay with the selected session.
+- A file path clicked in the panel opens in the main area, with the tabs of the selected session.
+- To move the session back, click the pin button in the panel, choose Unpin from Side Panel in the row menu, or run `agtkctl session unpin`. An agent can use `unpin_session`.
+- agtk remembers the pinned session when it restarts. It stays pinned after Restart Agent and after a resume following a reboot.
+- In a narrow window the right sidebar lies over the main area. Going to a session in the main area then closes the sidebar. Going to the pinned session opens it again.
 
 ### Terminal
 
@@ -169,7 +186,7 @@ These work while the terminal has focus. Change them under Keyboard Shortcuts in
 | Search open file or diff | `Ctrl+F` |
 | Increase or decrease font size | `Ctrl++` or `Ctrl+-` |
 
-Session navigation shortcuts skip sessions in collapsed projects.
+Session navigation shortcuts skip sessions in collapsed projects. Next and previous session also skip the [pinned session](#pinned-session).
 
 The Claude preset shortcut opens a chooser for the selected Claude session. Press the shortcut again to move to the next preset, Enter to apply it, and Escape to cancel. Apply a preset only when Claude is at an empty prompt.
 
@@ -182,7 +199,7 @@ The Claude preset shortcut opens a chooser for the selected Claude session. Pres
 | ● | ready | The turn finished and you have not viewed it yet |
 | ○ | idle | Nothing is running, or you viewed the finished turn |
 
-Staying on a ready session for 7 seconds marks it as viewed, so a quick pass through the list leaves the mark alone. The timer shows how long the session has been in its state.
+Staying on a ready session for 7 seconds marks it as viewed, so a quick pass through the list leaves the mark alone. The timer shows how long the session has been in its state. A [pinned session](#pinned-session) is always in view, so its ready turn counts as viewed when you click or type in its panel.
 
 Claude sessions report their state through hooks that agtk generates. You do not need to change your Claude configuration. Codex and Gemini sessions are read from the screen once a second, with status rules ported from [agent-manager](https://github.com/YoanWai/agent-manager).
 
@@ -221,6 +238,8 @@ agtkctl session create --kind codex --cwd /absolute/project
 agtkctl session text SESSION_ID --lines 200
 agtkctl session restart SESSION_ID
 agtkctl session fork SESSION_ID
+agtkctl session pin SESSION_ID
+agtkctl session unpin
 agtkctl ui inspect
 agtkctl ui capture
 agtkctl ui show changes
@@ -264,9 +283,9 @@ An agent can open a shell with `spawn_shell` and give it an `initialCommand`, su
 
 Sessions that agtk starts run outside any sandbox the agent has. An agent with the `agtk` tools can therefore run commands beyond its own sandbox, through `spawn_shell`, `send_input`, or `launch_agent`. Give the tools only to agents you would let run commands. PR reviews start Claude and Codex without the `agtk` tools, because they read code from someone else.
 
-The tools cover sessions, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, the daily brief, and screenshots of the agtk window. The server never captures the rest of the desktop.
+The tools cover sessions, the pinned session, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, the daily brief, and screenshots of the agtk window. The server never captures the rest of the desktop.
 
-`list_sessions` gives each session's `conversationId`, and for Claude and Codex agents `lastAgentMessage`: the agent's last message from its Claude or Codex log, cut to 500 characters, with `lastAgentMessageAt` in Unix milliseconds. Both are null until agtk knows the conversation and the agent has answered. So a caller can tell what an agent finished or asks without reading its terminal with `snapshot`. Together with the [state hook](#state-hook), a supervising agent hears about a finished turn right away and reads what it said.
+`list_sessions` gives each session's `conversationId`, and for Claude and Codex agents `lastAgentMessage`: the agent's last message from its Claude or Codex log, cut to 500 characters, with `lastAgentMessageAt` in Unix milliseconds. Both are null until agtk knows the conversation and the agent has answered. `list_sessions` also gives `selectedSessionId` and `pinnedSessionId`, the session in the side panel, or null. So a caller can tell what an agent finished or asks without reading its terminal with `snapshot`. Together with the [state hook](#state-hook), a supervising agent hears about a finished turn right away and reads what it said.
 
 ### Daily brief
 

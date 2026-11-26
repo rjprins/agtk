@@ -251,6 +251,11 @@ impl<B: ControlBackend> McpServer<B> {
             }
             "fork_session" => ControlCommand::SessionFork(parse_args(arguments)?),
             "select_session" => ControlCommand::SessionSelect(parse_args(arguments)?),
+            "pin_session" => ControlCommand::SessionPin(parse_args(arguments)?),
+            "unpin_session" => {
+                require_empty(arguments)?;
+                ControlCommand::SessionUnpin
+            }
             "open_diff" => ControlCommand::UiOpenDiff(parse_args::<UiOpenDiffParams>(arguments)?),
             "open_file" => ControlCommand::UiOpenFile(parse_args::<UiOpenFileParams>(arguments)?),
             "kill_session" => {
@@ -301,6 +306,7 @@ impl<B: ControlBackend> McpServer<B> {
             "list_sessions" => json!({
                 "sessions":self.with_last_agent_messages(value.get("sessions").cloned().unwrap_or(Value::Array(Vec::new()))),
                 "selectedSessionId":value.get("selectedSessionId").cloned().unwrap_or(Value::Null),
+                "pinnedSessionId":value.get("pinnedSessionId").cloned().unwrap_or(Value::Null),
                 "attention":value.get("attention").cloned().unwrap_or_else(|| json!({"count":0}))
             }),
             _ => value,
@@ -695,7 +701,7 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "list_sessions",
             "List sessions",
-            "List live native terminal sessions and attention state. Claude and Codex sessions include lastAgentMessage, the agent's last message from its log truncated to 500 characters, and lastAgentMessageAt in Unix milliseconds; both are null until the agent answers.",
+            "List live native terminal sessions, the selected and pinned session IDs, and attention state. Claude and Codex sessions include lastAgentMessage, the agent's last message from its log truncated to 500 characters, and lastAgentMessageAt in Unix milliseconds; both are null until the agent answers.",
             empty_schema(),
         ),
         tool(
@@ -743,6 +749,18 @@ fn tool_definitions() -> Vec<Value> {
             "Select session",
             "Show and focus one exact session.",
             schema(&[("sessionId", string())], &["sessionId"]),
+        ),
+        tool(
+            "pin_session",
+            "Pin session to the side panel",
+            "Show one exact session in a panel of the right sidebar, under the Changes, Files, Brief and Updates pages, so it stays in view next to whichever session is selected. One session is pinned at a time: pinning another replaces it. The pinned session leaves the main area and its row focuses the panel; the pin is saved and follows a restart of agtk or of the agent. Pinning opens the right sidebar. list_sessions reports the pinned session as pinnedSessionId.",
+            schema(&[("sessionId", string())], &["sessionId"]),
+        ),
+        tool(
+            "unpin_session",
+            "Unpin the side panel session",
+            "Move the pinned session back to the main area and close the side panel. Does nothing when no session is pinned.",
+            empty_schema(),
         ),
         tool(
             "open_diff",

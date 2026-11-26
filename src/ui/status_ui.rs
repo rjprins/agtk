@@ -10,7 +10,7 @@ use crate::state_hook::StateChange;
 pub(super) const VIEWED_AFTER: Duration = Duration::from_secs(7);
 
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
-const STATE_CLASSES: [&str; 7] = [
+pub(super) const STATE_CLASSES: [&str; 7] = [
     "state-running",
     "state-busy",
     "state-ready",
@@ -203,8 +203,19 @@ impl Workspace {
         });
     }
 
+    /// The user went into the pinned session's panel, which is always in view,
+    /// so only that tells its finished turn was seen.
+    pub(super) fn acknowledge_pinned_session(&self) {
+        if let Some(id) = self.pinned_session_id() {
+            self.mark_viewed(&id);
+        }
+    }
+
     /// Whether the user has stayed on this session long enough for it to count as viewed.
     fn has_viewed(&self, id: &str) -> bool {
+        if self.is_pinned(id) {
+            return self.pinned_has_focus();
+        }
         let dwelt = self
             .viewing
             .borrow()
@@ -274,6 +285,7 @@ impl Workspace {
         session
             .state_label
             .add_css_class(session_state_css_class(state));
+        self.sync_pinned_state(id, state);
         for (class, active) in [
             ("session-ready", state == SessionState::Ready),
             ("session-waiting", state == SessionState::Waiting),

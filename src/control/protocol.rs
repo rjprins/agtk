@@ -61,6 +61,9 @@ pub enum ControlCommand {
     AgentRestore(AgentRestoreParams),
     SessionCreate(CreateSessionParams),
     SessionSelect(SessionIdParams),
+    /// Shows one session in the right sidebar's panel, next to the selected one.
+    SessionPin(SessionIdParams),
+    SessionUnpin,
     SessionSendInput(SendInputParams),
     SessionGetText(GetTextParams),
     SessionRename(RenameSessionParams),
@@ -605,6 +608,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             ControlCommand::SessionCreate(params)
         }
         "session.select" => ControlCommand::SessionSelect(decode_session_params(wire.params)?),
+        "session.pin" => ControlCommand::SessionPin(decode_session_params(wire.params)?),
+        "session.unpin" => {
+            decode_empty_params(wire.params)?;
+            ControlCommand::SessionUnpin
+        }
         "session.send_input" => {
             let params: SendInputParams = decode_params(wire.params)?;
             validate_session_id(&params.session_id)?;
@@ -773,6 +781,8 @@ impl ControlCommand {
             Self::AgentRestore(_) => "agent.restore",
             Self::SessionCreate(_) => "session.create",
             Self::SessionSelect(_) => "session.select",
+            Self::SessionPin(_) => "session.pin",
+            Self::SessionUnpin => "session.unpin",
             Self::SessionSendInput(_) => "session.send_input",
             Self::SessionGetText(_) => "session.get_text",
             Self::SessionRename(_) => "session.rename",
@@ -824,6 +834,8 @@ impl ControlCommand {
             Self::AgentRestore(params) => Ok(("agent.restore", serde_json::to_value(params)?)),
             Self::SessionCreate(params) => Ok(("session.create", serde_json::to_value(params)?)),
             Self::SessionSelect(params) => Ok(("session.select", serde_json::to_value(params)?)),
+            Self::SessionPin(params) => Ok(("session.pin", serde_json::to_value(params)?)),
+            Self::SessionUnpin => Ok(("session.unpin", empty_params())),
             Self::SessionSendInput(params) => {
                 Ok(("session.send_input", serde_json::to_value(params)?))
             }

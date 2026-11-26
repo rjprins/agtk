@@ -11,6 +11,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
         instance: "test-1".to_owned(),
         protocol_version: 1,
         selected_session_id: Some("shell-1".to_owned()),
+        pinned_session_id: None,
         appearance: AppearanceSummary {
             theme: ThemeKey::Neutral,
             effective_theme: ThemeKey::Neutral,
@@ -57,6 +58,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
             kind: SessionKind::Shell,
             state: SessionState::Running,
             is_selected: true,
+            is_pinned: false,
             history_count: 2,
         }],
         attention: AttentionSummary { count: 0 },
@@ -68,6 +70,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
             "instance": "test-1",
             "protocolVersion": 1,
             "selectedSessionId": "shell-1",
+            "pinnedSessionId": null,
             "appearance": {
                 "theme": "neutral",
                 "effectiveTheme": "neutral",
@@ -107,6 +110,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
                 "kind": "shell",
                 "state": "running",
                 "isSelected": true,
+                "isPinned": false,
                 "historyCount": 2,
                 "cwd": null,
                 "projectRoot": null,

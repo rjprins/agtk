@@ -12,6 +12,11 @@ impl Workspace {
     }
 
     pub(super) fn activate_session(&self, session_id: &str) {
+        // A pinned session lives in the right sidebar, so go there instead.
+        if self.is_pinned(session_id) {
+            self.focus_pinned_session();
+            return;
+        }
         let Some(record) = self
             .sessions
             .borrow()
@@ -60,6 +65,11 @@ impl Workspace {
         self.context_pr.set_visible(true);
         self.search_bar.set_search_mode(false);
         self.refresh_content_title();
+        // A narrow window lays the right sidebar over the main area, which
+        // cannot take the keyboard from the pinned session until it closes.
+        if self.changes.split.is_collapsed() && self.pinned_has_focus() {
+            self.changes.split.set_show_sidebar(false);
+        }
         if let Some(session) = self.sessions.borrow().get(session_id) {
             session.terminal.grab_focus();
         }
@@ -151,6 +161,16 @@ impl Workspace {
             ));
             return;
         };
+        // Diffs show among their worktree's tabs, which a pinned session has left.
+        if self.is_pinned(&params.session_id) {
+            let _ = pending.respond(ControlResponse::failure(
+                request_id,
+                ErrorCode::OperationRefused,
+                "This session is pinned to the side panel; unpin it to open its diffs",
+                None,
+            ));
+            return;
+        }
         let path = record.worktree_path.clone().or(record.cwd.clone());
         let Some(path) = path else {
             let _ = pending.respond(ControlResponse::failure(
@@ -267,6 +287,10 @@ impl Workspace {
     }
 
     pub(super) fn select_session_for_diff(&self, session_id: &str) {
+        // The main area keeps its selection; a pinned session shows next to it.
+        if self.is_pinned(session_id) {
+            return;
+        }
         let Some(row) = self
             .sessions
             .borrow()
