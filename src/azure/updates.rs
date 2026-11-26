@@ -336,8 +336,9 @@ mod tests {
     #[test]
     fn status_events_come_from_draft_and_status_threads() {
         let events = crate::azure::normalize_status_events(&json!({"value": [
-            {"id": 1, "properties": {"CodeReviewThreadType": {"$value": "IsDraftUpdate"}, "CodeReviewIsDraftNowSet": {"$value": "0"}},
-             "comments": [{"publishedDate": "2026-11-20T15:46:40.637Z", "author": {"displayName": "Bob", "uniqueName": "bob@example.com"}}]},
+            {"id": 1, "properties": {"CodeReviewThreadType": {"$value": "IsDraftUpdate"}, "CodeReviewIsDraftNowSet": {"$value": "0"}, "CodeReviewIsDraftUpdatedByIdentity": {"$value": "1"}},
+             "identities": {"1": {"displayName": "Bob", "uniqueName": "bob@example.com"}},
+             "comments": [{"publishedDate": "2026-11-20T15:46:40.637Z", "author": {"displayName": "Microsoft.VisualStudio.Services.TFS"}}]},
             {"id": 2, "properties": {"CodeReviewThreadType": {"$value": "IsDraftUpdate"}, "CodeReviewIsDraftNowSet": {"$value": "1"}},
              "comments": [{"publishedDate": "2026-11-21T15:46:40.637Z"}]},
             {"id": 3, "properties": {"CodeReviewThreadType": {"$value": "StatusUpdate"}, "CodeReviewStatus": {"$value": "Completed"}},
@@ -357,6 +358,10 @@ mod tests {
             vec![(1, Published), (3, Completed), (4, Abandoned)]
         );
         assert_eq!(events[0].actor, "Bob");
+        assert_eq!(
+            events[0].actor_unique_name.as_deref(),
+            Some("bob@example.com")
+        );
         assert_eq!(events[1].actor, "Dino");
         assert_eq!(events[2].actor, "Unknown");
     }

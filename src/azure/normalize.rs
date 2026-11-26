@@ -240,12 +240,14 @@ fn person(value: Option<&Value>) -> (String, Option<String>) {
     (name, unique_name)
 }
 
-/// A system thread of the given type: its id, its properties' values, its first
-/// comment's author and when that comment was made.
+/// A system thread of the given type: its id, its properties' values, who
+/// acted and when its first comment was made.
 struct SystemThread<'a> {
     id: u64,
     properties: &'a Value,
-    author: Option<&'a Value>,
+    /// The comment's author is a service account, so the person comes from the
+    /// thread's identities, by the id in the type's `...ByIdentity` property.
+    actor: Option<&'a Value>,
     at: u64,
 }
 
@@ -258,6 +260,7 @@ impl SystemThread<'_> {
 fn system_threads<'a>(
     value: &'a Value,
     kind: &'a str,
+    actor_property: &'a str,
 ) -> impl Iterator<Item = SystemThread<'a>> + 'a {
     value
         .get("value")
@@ -288,10 +291,19 @@ fn system_threads<'a>(
                         .and_then(nonempty)
                         .and_then(parse_timestamp)
                 })?;
+            let identity = properties
+                .get(actor_property)
+                .and_then(|property| property.get("$value"))
+                .and_then(|id| match id {
+                    Value::String(id) => Some(id.clone()),
+                    Value::Number(id) => Some(id.to_string()),
+                    _ => None,
+                })
+                .and_then(|id| thread.get("identities")?.get(id));
             Some(SystemThread {
                 id: thread.get("id").and_then(Value::as_u64).unwrap_or(0),
                 properties,
-                author: comment.get("author"),
+                actor: identity.or_else(|| comment.get("author")),
                 at,
             })
         })
@@ -300,13 +312,13 @@ fn system_threads<'a>(
 /// The votes in a PR's vote-update system threads, oldest first as Azure DevOps
 /// sent them. Each vote, also a changed one, has its own thread.
 pub fn normalize_votes(value: &Value) -> Vec<PrVote> {
-    system_threads(value, "VoteUpdate")
+    system_threads(value, "VoteUpdate", "CodeReviewVotedByIdentity")
         .filter_map(|thread| {
             let vote = thread.property("CodeReviewVoteResult").and_then(|vote| {
                 vote.as_i64()
                     .or_else(|| vote.as_str().and_then(|vote| vote.trim().parse().ok()))
             })?;
-            let (voter, voter_unique_name) = person(thread.author);
+            let (voter, voter_unique_name) = person(thread.actor);
             Some(PrVote {
                 thread_id: thread.id,
                 voter,
@@ -321,25 +333,27 @@ pub fn normalize_votes(value: &Value) -> Vec<PrVote> {
 /// Publishing a draft, completing and abandoning, from the draft and status
 /// system threads, in the order Azure DevOps sent them.
 pub fn normalize_status_events(value: &Value) -> Vec<PrStatusEvent> {
-    let published = system_threads(value, "IsDraftUpdate").filter_map(|thread| {
-        let now_draft = thread.property("CodeReviewIsDraftNowSet")?;
-        let now_draft = now_draft
-            .as_bool()
-            .or_else(|| now_draft.as_str().map(|value| value.trim() == "1"))?;
-        (!now_draft).then_some((thread, PrStatusChange::Published))
-    });
-    let status = system_threads(value, "StatusUpdate").filter_map(|thread| {
-        let change = match thread.property("CodeReviewStatus")?.as_str()? {
-            status if status.eq_ignore_ascii_case("completed") => PrStatusChange::Completed,
-            status if status.eq_ignore_ascii_case("abandoned") => PrStatusChange::Abandoned,
-            _ => return None,
-        };
-        Some((thread, change))
-    });
+    let published = system_threads(value, "IsDraftUpdate", "CodeReviewIsDraftUpdatedByIdentity")
+        .filter_map(|thread| {
+            let now_draft = thread.property("CodeReviewIsDraftNowSet")?;
+            let now_draft = now_draft
+                .as_bool()
+                .or_else(|| now_draft.as_str().map(|value| value.trim() == "1"))?;
+            (!now_draft).then_some((thread, PrStatusChange::Published))
+        });
+    let status = system_threads(value, "StatusUpdate", "CodeReviewStatusUpdatedByIdentity")
+        .filter_map(|thread| {
+            let change = match thread.property("CodeReviewStatus")?.as_str()? {
+                status if status.eq_ignore_ascii_case("completed") => PrStatusChange::Completed,
+                status if status.eq_ignore_ascii_case("abandoned") => PrStatusChange::Abandoned,
+                _ => return None,
+            };
+            Some((thread, change))
+        });
     published
         .chain(status)
         .map(|(thread, change)| {
-            let (actor, actor_unique_name) = person(thread.author);
+            let (actor, actor_unique_name) = person(thread.actor);
             PrStatusEvent {
                 thread_id: thread.id,
                 change,
