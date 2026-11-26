@@ -69,6 +69,13 @@ quota-chart.warning { color: var(--warning-color); }
 .navigation-sidebar row.drop-into {
   background: color-mix(in srgb, var(--accent-bg-color) 24%, transparent);
 }
+/* Project rows carry several icon buttons; keep them close so the name keeps its room. */
+.project-actions > button:not(.project-name),
+.project-actions > menubutton > button {
+  min-width: 24px;
+  padding-left: 3px;
+  padding-right: 3px;
+}
 .workspace-tab-agent:not(:checked) {
   color: var(--accent-color);
   background: color-mix(in srgb, var(--accent-bg-color) 10%, transparent);

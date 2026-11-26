@@ -517,7 +517,8 @@ impl Workspace {
         let row = gtk::ListBoxRow::new();
         row.set_selectable(false);
         row.set_activatable(false);
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        content.add_css_class("project-actions");
         // GtkButton's `icon_name` child replaces its label child. Build the
         // compact project control explicitly so the chevron and project name
         // remain visible together.
@@ -545,6 +546,7 @@ impl Workspace {
         }
         collapse.set_child(Some(&collapse_contents));
         collapse.add_css_class("flat");
+        collapse.add_css_class("project-name");
         collapse.set_hexpand(true);
         collapse.set_halign(gtk::Align::Fill);
         collapse.set_tooltip_text(Some(root));
@@ -725,7 +727,8 @@ impl Workspace {
         let row = gtk::ListBoxRow::new();
         row.set_selectable(false);
         row.set_activatable(false);
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        content.add_css_class("project-actions");
         let open_contents = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         let icon = gtk::Image::from_icon_name("folder-symbolic");
         icon.add_css_class("dim-label");
@@ -743,6 +746,7 @@ impl Workspace {
             .tooltip_text(format!("Launch in {root}"))
             .build();
         open.add_css_class("flat");
+        open.add_css_class("project-name");
         let workspace = self.clone();
         let open_root = root.to_owned();
         open.connect_clicked(move |_| workspace.open_launch_for_project(&open_root));
