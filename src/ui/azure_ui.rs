@@ -582,6 +582,7 @@ impl Workspace {
                     return;
                 }
                 workspace.cache_pr_context(&loaded.context);
+                workspace.render_pr_updates();
                 if workspace.prs.modal.is_visible()
                     && pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                         == pr_cache_key(&loaded.context.project_root)
@@ -1187,7 +1188,7 @@ impl Workspace {
         self.open_pr_link(&context.pull_request.url);
     }
 
-    fn open_pr_link(&self, url: &str) {
+    pub(super) fn open_pr_link(&self, url: &str) {
         let launcher = gtk::UriLauncher::new(url);
         let workspace = self.clone();
         launcher.launch(

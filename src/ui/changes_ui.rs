@@ -7,6 +7,7 @@ use adw::prelude::*;
 use super::brief_ui::{BRIEF_PAGE, BriefPage};
 use super::explorer_ui::{CHANGES_PAGE, FILES_PAGE, FileExplorer};
 use super::sidebar::{DEFAULT_CHANGES_WIDTH, MAX_CHANGES_WIDTH, MIN_CHANGES_WIDTH};
+use super::updates_ui::{UPDATES_PAGE, UpdatesPage};
 use crate::changes::{
     ChangeStatus, ChangedFile, ChangesSnapshot, CommitSummary, DiffScope, LineCounts,
     display_changed_path,
@@ -33,6 +34,7 @@ pub(super) struct ChangesSidebar {
     pub rows: gtk::Box,
     pub explorer: FileExplorer,
     pub brief: BriefPage,
+    pub updates: UpdatesPage,
     pub(crate) state: Rc<RefCell<ChangesSidebarState>>,
     pub updating_base: Rc<std::cell::Cell<bool>>,
     /// Set while switching to a worktree's remembered page, so the switch is not remembered.
@@ -168,6 +170,8 @@ impl ChangesSidebar {
         pages.add_titled(&explorer.root, Some(FILES_PAGE), "Files");
         let brief = BriefPage::new();
         pages.add_titled(&brief.root, Some(BRIEF_PAGE), "Brief");
+        let updates = UpdatesPage::new();
+        pages.add_titled(&updates.root, Some(UPDATES_PAGE), "Updates");
         root.append(&pages);
 
         let sidebar = gtk::Overlay::new();
@@ -180,7 +184,7 @@ impl ChangesSidebar {
             .build();
         toggle.add_css_class("flat");
         toggle.set_tooltip_text(Some(
-            "Show the changes and files of the selected agent's worktree, and the daily brief",
+            "Show the changes and files of the selected agent's worktree, the daily brief and PR updates",
         ));
         let sync_toggle = toggle.clone();
         split.connect_show_sidebar_notify(move |split| {
@@ -206,6 +210,7 @@ impl ChangesSidebar {
             rows,
             explorer,
             brief,
+            updates,
             state: Rc::new(RefCell::new(ChangesSidebarState::default())),
             updating_base: Rc::new(std::cell::Cell::new(false)),
             restoring_page: Rc::new(std::cell::Cell::new(false)),
@@ -217,8 +222,10 @@ impl ChangesSidebar {
         let Some(page) = self.state.borrow().page_by_context.get(context).cloned() else {
             return;
         };
-        if !matches!(page.as_str(), CHANGES_PAGE | FILES_PAGE | BRIEF_PAGE)
-            || self.pages.visible_child_name().as_deref() == Some(page.as_str())
+        if !matches!(
+            page.as_str(),
+            CHANGES_PAGE | FILES_PAGE | BRIEF_PAGE | UPDATES_PAGE
+        ) || self.pages.visible_child_name().as_deref() == Some(page.as_str())
         {
             return;
         }
@@ -243,6 +250,7 @@ impl ChangesSidebar {
         match self.pages.visible_child_name().as_deref() {
             Some(FILES_PAGE) => "Files".to_owned(),
             Some(BRIEF_PAGE) => "Brief".to_owned(),
+            Some(UPDATES_PAGE) => "Updates".to_owned(),
             _ => "Changes".to_owned(),
         }
     }

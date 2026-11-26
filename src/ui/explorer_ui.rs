@@ -696,8 +696,10 @@ impl Workspace {
                     .map(|name| name.to_string())
                     .unwrap_or_default();
                 workspace.save_preference(SIDEBAR_PAGE_PREFERENCE, serde_json::json!(page));
-                // The brief is not about the worktree, so hide the branch line and refresh button.
-                let worktree_page = page != brief_ui::BRIEF_PAGE;
+                // The brief and updates are not about the worktree, so hide the branch line and refresh button.
+                let worktree_page =
+                    page != brief_ui::BRIEF_PAGE && page != updates_ui::UPDATES_PAGE;
+                workspace.sync_pr_updates_view();
                 workspace.changes.branch.set_visible(worktree_page);
                 workspace.changes.refresh.set_visible(worktree_page);
                 // Selecting a session restores its worktree's page; it refreshes and keeps focus.

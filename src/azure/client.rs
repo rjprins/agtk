@@ -9,7 +9,8 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::normalize::{
-    normalize_active_prs, normalize_linked_pbis, normalize_threads, summarize_threads,
+    normalize_active_prs, normalize_linked_pbis, normalize_threads, normalize_votes,
+    summarize_threads,
 };
 use super::remote::parse_azure_remote;
 use super::{AzurePr, AzurePrList, AzureRepoRef, AzureResult, LinkedPbi, PrThread};
@@ -146,7 +147,7 @@ impl AzureClient {
                         let id = pull_request.id;
                         scope.spawn(move || {
                             (
-                                client.thread_details(&reference, id).ok(),
+                                client.raw_threads(&reference, id).ok(),
                                 client.linked_pbis(&reference, id).ok(),
                             )
                         })
@@ -160,7 +161,9 @@ impl AzureClient {
                 let Some((summary, linked_pbis)) = details else {
                     continue;
                 };
-                if let Some(threads) = summary {
+                if let Some(raw) = summary {
+                    let threads = normalize_threads(&raw);
+                    pull_request.votes = normalize_votes(&raw);
                     let summary = summarize_threads(&threads);
                     pull_request.threads = Some(threads);
                     pull_request.unresolved_threads = summary.unresolved_threads;

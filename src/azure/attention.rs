@@ -55,6 +55,9 @@ pub struct PrPreferences {
     pub review: PrReviewSettings,
     #[serde(default)]
     pub projects: BTreeMap<String, PrProjectState>,
+    /// The newest PR update the user has seen on the Updates page, in Unix milliseconds.
+    #[serde(default)]
+    pub updates_seen_at: u64,
 }
 
 /// Settings shared by automatic and manual PR reviews. Empty fields inherit the agent's config.

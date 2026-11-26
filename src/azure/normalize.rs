@@ -3,7 +3,7 @@
 use serde_json::{Map, Value};
 
 use super::remote::percent_encode;
-use super::{AzurePr, AzureRepoRef, LinkedPbi, PrThread, PrThreadComment};
+use super::{AzurePr, AzureRepoRef, LinkedPbi, PrThread, PrThreadComment, PrVote};
 
 pub fn normalize_active_prs(reference: &AzureRepoRef, value: Value) -> Vec<AzurePr> {
     let Some(candidates) = value.as_array() else {
@@ -44,7 +44,7 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         .and_then(nonempty)
         .unwrap_or("unknown")
         .to_owned();
-    let reviewer_votes = raw
+    let people = raw
         .get("reviewers")
         .and_then(Value::as_array)
         .into_iter()
@@ -57,8 +57,16 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
                 .zip(author_unique_name.as_deref())
                 .is_some_and(|(name, author)| name.eq_ignore_ascii_case(author))
         })
+        .collect::<Vec<_>>();
+    let reviewer_votes = people
+        .iter()
         .filter_map(|reviewer| reviewer.get("vote").and_then(Value::as_i64))
         .filter(|vote| matches!(vote, -10 | -5 | 0 | 5 | 10))
+        .collect();
+    let reviewers = people
+        .iter()
+        .filter_map(|reviewer| reviewer.get("uniqueName").and_then(nonempty))
+        .map(str::to_owned)
         .collect();
     Some(AzurePr {
         id,
@@ -75,10 +83,12 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         head_sha,
         merge_status,
         reviewer_votes,
+        reviewers,
         unresolved_threads: 0,
         resolved_threads: 0,
         total_threads: None,
         threads: None,
+        votes: Vec::new(),
         linked_pbis: Vec::new(),
         url: format!(
             "{}/{}/_git/{}/pullrequest/{id}?_a=files",
@@ -163,17 +173,11 @@ pub fn normalize_threads(value: &Value) -> Vec<PrThread> {
                                 .and_then(parse_timestamp)
                         })
                         .unwrap_or(0);
-                    let author = comment.get("author").and_then(Value::as_object);
-                    let author = ["displayName", "uniqueName"]
-                        .into_iter()
-                        .find_map(|key| {
-                            author.and_then(|author| author.get(key)).and_then(nonempty)
-                        })
-                        .unwrap_or("Unknown")
-                        .to_owned();
+                    let (author, author_unique_name) = person(comment.get("author"));
                     Some(PrThreadComment {
                         id: comment.get("id").and_then(Value::as_u64).unwrap_or(0),
                         author,
+                        author_unique_name,
                         content,
                         updated_at,
                     })
@@ -206,6 +210,66 @@ pub fn normalize_threads(value: &Value) -> Vec<PrThread> {
                 file_path,
                 line,
                 comments,
+            })
+        })
+        .collect()
+}
+
+/// The display name, falling back to the unique name, and the unique name.
+fn person(value: Option<&Value>) -> (String, Option<String>) {
+    let person = value.and_then(Value::as_object);
+    let field = |key: &str| person.and_then(|person| person.get(key)).and_then(nonempty);
+    let unique_name = field("uniqueName").map(str::to_owned);
+    let name = field("displayName")
+        .map(str::to_owned)
+        .or_else(|| unique_name.clone())
+        .unwrap_or_else(|| "Unknown".to_owned());
+    (name, unique_name)
+}
+
+/// The votes in a PR's vote-update system threads, oldest first as Azure DevOps
+/// sent them. Each vote, also a changed one, has its own thread.
+pub fn normalize_votes(value: &Value) -> Vec<PrVote> {
+    value
+        .get("value")
+        .and_then(Value::as_array)
+        .or_else(|| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter(|thread| thread.get("isDeleted").and_then(Value::as_bool) != Some(true))
+        .filter_map(|thread| {
+            let properties = thread.get("properties")?;
+            let property = |key: &str| properties.get(key)?.get("$value");
+            if property("CodeReviewThreadType").and_then(Value::as_str) != Some("VoteUpdate") {
+                return None;
+            }
+            let vote = property("CodeReviewVoteResult").and_then(|vote| {
+                vote.as_i64()
+                    .or_else(|| vote.as_str().and_then(|vote| vote.trim().parse().ok()))
+            })?;
+            let comment = thread.get("comments")?.as_array()?.first()?;
+            let at = ["publishedDate", "lastUpdatedDate"]
+                .into_iter()
+                .find_map(|key| {
+                    comment
+                        .get(key)
+                        .and_then(nonempty)
+                        .and_then(parse_timestamp)
+                })
+                .or_else(|| {
+                    thread
+                        .get("publishedDate")
+                        .and_then(nonempty)
+                        .and_then(parse_timestamp)
+                })?;
+            let (voter, voter_unique_name) = person(comment.get("author"));
+            Some(PrVote {
+                thread_id: thread.get("id").and_then(Value::as_u64).unwrap_or(0),
+                voter,
+                voter_unique_name,
+                vote,
+                at,
             })
         })
         .collect()

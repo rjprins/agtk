@@ -132,6 +132,15 @@ button.brief-action.image-button.success {
   margin-left: -13px;
   color: var(--success-color);
 }
+.pr-update-open {
+  padding: 6px;
+}
+.pr-update-dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 50%;
+  background: var(--accent-bg-color);
+}
 .attention-dot {
   min-width: 6px;
   min-height: 6px;

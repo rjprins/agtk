@@ -59,6 +59,7 @@ mod explorer_ui;
 mod file_tabs_ui;
 mod header_layout;
 mod history_ui;
+mod updates_ui;
 pub use history_ui::scroll_to_prompt;
 mod inspection;
 mod launch_ui;
@@ -227,6 +228,8 @@ struct Workspace {
     brief_collapsed_sections: Rc<RefCell<BTreeSet<String>>>,
     /// The open comment boxes, by item id.
     brief_comment_drafts: Rc<RefCell<BTreeMap<String, brief_ui::CommentDraft>>>,
+    /// While the Updates page is in view: the seen mark from when it came into view.
+    pr_updates_seen_before: Rc<Cell<Option<u64>>>,
     /// The comment box last opened or typed in.
     brief_comment_focus: Rc<RefCell<Option<String>>>,
     /// What had the focus before a comment box took it.
@@ -789,6 +792,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         brief_hidden_expanded: Rc::new(Cell::new(false)),
         brief_collapsed_sections: Rc::default(),
         brief_comment_drafts: Rc::default(),
+        pr_updates_seen_before: Rc::default(),
         brief_comment_focus: Rc::default(),
         brief_comment_return_focus: glib::WeakRef::new(),
         selected_pr: Rc::new(RefCell::new(None)),
@@ -1039,6 +1043,7 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
     workspace.bind_sidebar_model();
     workspace.install_menu_actions();
     workspace.install_brief_actions();
+    workspace.install_pr_updates();
     workspace.install_shortcut_actions();
     workspace.install_font_scroll();
     workspace.discover_sessions();

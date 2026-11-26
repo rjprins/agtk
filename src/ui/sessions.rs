@@ -393,8 +393,11 @@ impl Workspace {
                         .explorer
                         .recent_first
                         .set_active(files_recent_first);
-                    if let Some(page @ (explorer_ui::FILES_PAGE | brief_ui::BRIEF_PAGE)) =
-                        changes_sidebar_page.as_deref()
+                    if let Some(
+                        page @ (explorer_ui::FILES_PAGE
+                        | brief_ui::BRIEF_PAGE
+                        | updates_ui::UPDATES_PAGE),
+                    ) = changes_sidebar_page.as_deref()
                     {
                         workspace.changes.pages.set_visible_child_name(page);
                     }

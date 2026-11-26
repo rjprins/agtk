@@ -363,10 +363,12 @@ fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> Azur
         head_sha: None,
         merge_status: "unknown".to_owned(),
         reviewer_votes: Vec::new(),
+        reviewers: Vec::new(),
         unresolved_threads,
         resolved_threads: 0,
         total_threads: Some(unresolved_threads),
         threads: None,
+        votes: Vec::new(),
         linked_pbis: Vec::new(),
         url: format!("https://example.test/{id}"),
     }

@@ -8,14 +8,16 @@ mod attention;
 mod client;
 mod normalize;
 mod remote;
+mod updates;
 
 pub use attention::{
     AttentionReconciliation, KnownPr, PrAttention, PrPreferences, PrProjectState, PrReviewSettings,
     acknowledge_attention, reconcile_attention,
 };
 pub use client::AzureClient;
-pub use normalize::{normalize_active_prs, normalize_threads};
+pub use normalize::{normalize_active_prs, normalize_threads, normalize_votes};
 pub use remote::parse_azure_remote;
+pub use updates::{PrUpdate, PrUpdateKind, pr_updates};
 
 pub use crate::AppResult as AzureResult;
 
@@ -45,6 +47,9 @@ pub struct AzurePr {
     pub merge_status: String,
     /// Votes of the reviewers other than the author.
     pub reviewer_votes: Vec<i64>,
+    /// Unique names of the people asked to review, the author left out.
+    #[serde(default)]
+    pub reviewers: Vec<String>,
     pub unresolved_threads: u32,
     #[serde(default)]
     pub resolved_threads: u32,
@@ -55,6 +60,9 @@ pub struct AzurePr {
     /// memory only, so the comments popover opens at once.
     #[serde(skip)]
     pub threads: Option<Vec<PrThread>>,
+    /// The votes people cast, from the same fetch as the threads. Memory only.
+    #[serde(skip)]
+    pub votes: Vec<PrVote>,
     #[serde(default)]
     pub linked_pbis: Vec<LinkedPbi>,
     pub url: String,
@@ -105,9 +113,23 @@ impl PrThread {
 pub struct PrThreadComment {
     pub id: u64,
     pub author: String,
+    pub author_unique_name: Option<String>,
     pub content: String,
     /// When the text last changed, in Unix milliseconds; 0 when unknown.
     pub updated_at: u64,
+}
+
+/// A vote someone cast on a PR, from its vote-update system thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrVote {
+    pub thread_id: u64,
+    pub voter: String,
+    pub voter_unique_name: Option<String>,
+    /// 10 approved, 5 approved with suggestions, 0 reset, -5 waiting for author, -10 rejected.
+    pub vote: i64,
+    /// Unix milliseconds.
+    pub at: u64,
 }
 
 /// Asks an agent to look into one PR comment. The comment is quoted as data:
@@ -278,6 +300,7 @@ mod tests {
         };
         let comment = super::PrThreadComment {
             id: 1,
+            author_unique_name: None,
             author: "Jane".into(),
             content: "Rename this.\n\nAlso\x1b[201~ check\ttabs".into(),
             updated_at: 0,
