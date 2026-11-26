@@ -10,7 +10,7 @@ pub(super) const UPDATES_PAGE: &str = "updates";
 const MAX_UPDATES: usize = 150;
 /// How long a closed update stays closed. Long after its PR is done.
 const REMEMBER_CLOSED_MILLIS: u64 = 90 * 24 * 60 * 60 * 1000;
-const EMPTY_TEXT: &str = "No PR updates yet. Comments and votes by others on PRs you wrote or review show up here once agtk has checked the projects in the sidebar.";
+const EMPTY_TEXT: &str = "No PR updates yet. Comments and votes by others on PRs you wrote or review, and PRs others publish, merge or abandon, show up here once agtk has checked the projects in the sidebar.";
 
 #[derive(Clone)]
 pub(super) struct UpdatesPage {
@@ -258,13 +258,26 @@ impl Workspace {
                 -10 => ("rejected", Some("error")),
                 _ => ("voted", None),
             },
+            PrUpdateKind::Published => ("published", Some("accent")),
+            PrUpdateKind::Merged => ("merged", Some("success")),
+            PrUpdateKind::Abandoned => ("abandoned", Some("dim-label")),
         };
-        let author = gtk::Label::new(Some(&update.author));
-        author.add_css_class("heading");
-        author.set_xalign(0.0);
-        author.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        top.append(&author);
-        let action = gtk::Label::new(Some(verb));
+        // Azure DevOps did not say who closed it.
+        let verb = if update.author.is_empty() {
+            let mut verb = verb.to_owned();
+            verb[..1].make_ascii_uppercase();
+            verb
+        } else {
+            verb.to_owned()
+        };
+        if !update.author.is_empty() {
+            let author = gtk::Label::new(Some(&update.author));
+            author.add_css_class("heading");
+            author.set_xalign(0.0);
+            author.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            top.append(&author);
+        }
+        let action = gtk::Label::new(Some(&verb));
         action.set_xalign(0.0);
         action.set_ellipsize(gtk::pango::EllipsizeMode::End);
         if let Some(class) = verb_class {

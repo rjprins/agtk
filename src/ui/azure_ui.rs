@@ -29,6 +29,8 @@ struct PreloadedPrContext {
 
 /// How often PR attention and linked agents look for new activity.
 const PR_POLL_INTERVAL: Duration = Duration::from_secs(120);
+/// How far back the Updates page lists merged and abandoned PRs.
+const CLOSED_PR_WINDOW_MILLIS: u64 = 7 * 24 * 60 * 60 * 1000;
 
 /// Widest the PR list grows inside the dialog.
 const PR_CONTENT_WIDTH: i32 = 1400;
@@ -582,7 +584,6 @@ impl Workspace {
                     return;
                 }
                 workspace.cache_pr_context(&loaded.context);
-                workspace.render_pr_updates();
                 if workspace.prs.modal.is_visible()
                     && pr_cache_key(Path::new(workspace.prs.root.text().trim()))
                         == pr_cache_key(&loaded.context.project_root)
@@ -1272,6 +1273,12 @@ impl Workspace {
         let attic = self.paths.attic_dir();
         let requested_key = pr_cache_key(&params.project_root);
         let had_cached = self.pr_context_cache.borrow().contains_key(&requested_key);
+        let known_closed = self
+            .pr_context_cache
+            .borrow()
+            .get(&requested_key)
+            .map(|context| context.closed_pull_requests.clone())
+            .unwrap_or_default();
         if !poll {
             self.prs.loading.set_visible(!had_cached);
         }
@@ -1360,6 +1367,16 @@ impl Workspace {
                 let Some(list) = AzureClient::from_environment().list_active(&project_root)? else {
                     return Err("project origin is not an Azure DevOps repository".into());
                 };
+                // A failed fetch keeps the closed PRs from before, so they do not
+                // drop off the Updates page for a poll.
+                let closed_pull_requests = AzureClient::from_environment()
+                    .recent_closed(
+                        &project_root,
+                        now_millis().saturating_sub(CLOSED_PR_WINDOW_MILLIS),
+                        &known_closed,
+                        list.current_user.as_deref(),
+                    )
+                    .unwrap_or(known_closed);
                 let previous = preferences.projects.get(&root_key);
                 let reconciliation = reconcile_attention(previous, &list.pull_requests);
                 let changed = reconciliation.changed.iter().copied().collect::<Vec<_>>();
@@ -1395,6 +1412,7 @@ impl Workspace {
                         current_user: list.current_user,
                         auto_review: reconciliation.state.auto_review,
                         pull_requests,
+                        closed_pull_requests,
                     },
                     changed,
                     state: reconciliation.state,
@@ -1456,10 +1474,19 @@ impl Workspace {
         }
     }
 
+    /// Keeps the project's PRs for the Updates page and shows them there. A
+    /// context loaded for a selected session has no closed PRs, so it keeps
+    /// the ones the last poll found.
     fn cache_pr_context(&self, context: &PrContext) {
-        self.pr_context_cache
-            .borrow_mut()
-            .insert(pr_cache_key(&context.project_root), context.clone());
+        let key = pr_cache_key(&context.project_root);
+        let mut context = context.clone();
+        if context.closed_pull_requests.is_empty()
+            && let Some(previous) = self.pr_context_cache.borrow().get(&key)
+        {
+            context.closed_pull_requests = previous.closed_pull_requests.clone();
+        }
+        self.pr_context_cache.borrow_mut().insert(key, context);
+        self.render_pr_updates();
     }
 
     fn render_cached_pr_context(&self, root: &str) -> bool {
@@ -2060,6 +2087,7 @@ fn pr_context_from_list(
         current_user: list.current_user,
         auto_review: state.auto_review,
         pull_requests,
+        closed_pull_requests: Vec::new(),
     }
 }
 
@@ -2188,6 +2216,7 @@ mod tests {
                     review_path: Some(project.join("wt/pr-44")),
                 },
             ],
+            closed_pull_requests: Vec::new(),
         }
     }
 

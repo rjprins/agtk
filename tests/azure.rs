@@ -355,6 +355,8 @@ fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> Azur
         author_unique_name: Some("author@example.com".to_owned()),
         is_own_author: false,
         is_draft,
+        status: "active".to_owned(),
+        closed_at: None,
         source_branch: format!("branch-{id}"),
         target_branch: "main".to_owned(),
         created_at: 100,
@@ -369,6 +371,7 @@ fn pr(id: u64, is_draft: bool, unresolved_threads: u32, updated_at: u64) -> Azur
         total_threads: Some(unresolved_threads),
         threads: None,
         votes: Vec::new(),
+        status_events: Vec::new(),
         linked_pbis: Vec::new(),
         url: format!("https://example.test/{id}"),
     }

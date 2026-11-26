@@ -3,7 +3,10 @@
 use serde_json::{Map, Value};
 
 use super::remote::percent_encode;
-use super::{AzurePr, AzureRepoRef, LinkedPbi, PrThread, PrThreadComment, PrVote};
+use super::{
+    AzurePr, AzureRepoRef, LinkedPbi, PrStatusChange, PrStatusEvent, PrThread, PrThreadComment,
+    PrVote,
+};
 
 pub fn normalize_active_prs(reference: &AzureRepoRef, value: Value) -> Vec<AzurePr> {
     let Some(candidates) = value.as_array() else {
@@ -75,6 +78,15 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         author_unique_name,
         is_own_author: false,
         is_draft,
+        status: raw
+            .get("status")
+            .and_then(nonempty)
+            .unwrap_or("active")
+            .to_ascii_lowercase(),
+        closed_at: raw
+            .get("closedDate")
+            .and_then(nonempty)
+            .and_then(parse_timestamp),
         source_branch,
         target_branch,
         created_at,
@@ -89,6 +101,7 @@ fn normalize_active_pr(reference: &AzureRepoRef, raw: &Map<String, Value>) -> Op
         total_threads: None,
         threads: None,
         votes: Vec::new(),
+        status_events: Vec::new(),
         linked_pbis: Vec::new(),
         url: format!(
             "{}/{}/_git/{}/pullrequest/{id}?_a=files",
@@ -227,9 +240,25 @@ fn person(value: Option<&Value>) -> (String, Option<String>) {
     (name, unique_name)
 }
 
-/// The votes in a PR's vote-update system threads, oldest first as Azure DevOps
-/// sent them. Each vote, also a changed one, has its own thread.
-pub fn normalize_votes(value: &Value) -> Vec<PrVote> {
+/// A system thread of the given type: its id, its properties' values, its first
+/// comment's author and when that comment was made.
+struct SystemThread<'a> {
+    id: u64,
+    properties: &'a Value,
+    author: Option<&'a Value>,
+    at: u64,
+}
+
+impl SystemThread<'_> {
+    fn property(&self, key: &str) -> Option<&Value> {
+        self.properties.get(key)?.get("$value")
+    }
+}
+
+fn system_threads<'a>(
+    value: &'a Value,
+    kind: &'a str,
+) -> impl Iterator<Item = SystemThread<'a>> + 'a {
     value
         .get("value")
         .and_then(Value::as_array)
@@ -238,16 +267,12 @@ pub fn normalize_votes(value: &Value) -> Vec<PrVote> {
         .flatten()
         .filter_map(Value::as_object)
         .filter(|thread| thread.get("isDeleted").and_then(Value::as_bool) != Some(true))
-        .filter_map(|thread| {
+        .filter_map(move |thread| {
             let properties = thread.get("properties")?;
-            let property = |key: &str| properties.get(key)?.get("$value");
-            if property("CodeReviewThreadType").and_then(Value::as_str) != Some("VoteUpdate") {
+            let kind_value = properties.get("CodeReviewThreadType")?.get("$value")?;
+            if kind_value.as_str() != Some(kind) {
                 return None;
             }
-            let vote = property("CodeReviewVoteResult").and_then(|vote| {
-                vote.as_i64()
-                    .or_else(|| vote.as_str().and_then(|vote| vote.trim().parse().ok()))
-            })?;
             let comment = thread.get("comments")?.as_array()?.first()?;
             let at = ["publishedDate", "lastUpdatedDate"]
                 .into_iter()
@@ -263,14 +288,65 @@ pub fn normalize_votes(value: &Value) -> Vec<PrVote> {
                         .and_then(nonempty)
                         .and_then(parse_timestamp)
                 })?;
-            let (voter, voter_unique_name) = person(comment.get("author"));
+            Some(SystemThread {
+                id: thread.get("id").and_then(Value::as_u64).unwrap_or(0),
+                properties,
+                author: comment.get("author"),
+                at,
+            })
+        })
+}
+
+/// The votes in a PR's vote-update system threads, oldest first as Azure DevOps
+/// sent them. Each vote, also a changed one, has its own thread.
+pub fn normalize_votes(value: &Value) -> Vec<PrVote> {
+    system_threads(value, "VoteUpdate")
+        .filter_map(|thread| {
+            let vote = thread.property("CodeReviewVoteResult").and_then(|vote| {
+                vote.as_i64()
+                    .or_else(|| vote.as_str().and_then(|vote| vote.trim().parse().ok()))
+            })?;
+            let (voter, voter_unique_name) = person(thread.author);
             Some(PrVote {
-                thread_id: thread.get("id").and_then(Value::as_u64).unwrap_or(0),
+                thread_id: thread.id,
                 voter,
                 voter_unique_name,
                 vote,
-                at,
+                at: thread.at,
             })
+        })
+        .collect()
+}
+
+/// Publishing a draft, completing and abandoning, from the draft and status
+/// system threads, in the order Azure DevOps sent them.
+pub fn normalize_status_events(value: &Value) -> Vec<PrStatusEvent> {
+    let published = system_threads(value, "IsDraftUpdate").filter_map(|thread| {
+        let now_draft = thread.property("CodeReviewIsDraftNowSet")?;
+        let now_draft = now_draft
+            .as_bool()
+            .or_else(|| now_draft.as_str().map(|value| value.trim() == "1"))?;
+        (!now_draft).then_some((thread, PrStatusChange::Published))
+    });
+    let status = system_threads(value, "StatusUpdate").filter_map(|thread| {
+        let change = match thread.property("CodeReviewStatus")?.as_str()? {
+            status if status.eq_ignore_ascii_case("completed") => PrStatusChange::Completed,
+            status if status.eq_ignore_ascii_case("abandoned") => PrStatusChange::Abandoned,
+            _ => return None,
+        };
+        Some((thread, change))
+    });
+    published
+        .chain(status)
+        .map(|(thread, change)| {
+            let (actor, actor_unique_name) = person(thread.author);
+            PrStatusEvent {
+                thread_id: thread.id,
+                change,
+                actor,
+                actor_unique_name,
+                at: thread.at,
+            }
         })
         .collect()
 }

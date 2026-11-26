@@ -9,8 +9,8 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::normalize::{
-    normalize_active_prs, normalize_linked_pbis, normalize_threads, normalize_votes,
-    summarize_threads,
+    normalize_active_prs, normalize_linked_pbis, normalize_status_events, normalize_threads,
+    normalize_votes, summarize_threads,
 };
 use super::remote::parse_azure_remote;
 use super::{AzurePr, AzurePrList, AzureRepoRef, AzureResult, LinkedPbi, PrThread};
@@ -19,6 +19,8 @@ use crate::command_runner::run_bounded;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
 const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 const PR_LIMIT: &str = "100";
+/// Covers about a week of a small team's merges.
+const CLOSED_PR_LIMIT: &str = "40";
 const DETAIL_CONCURRENCY: usize = 4;
 
 #[derive(Debug, Clone)]
@@ -110,6 +112,69 @@ impl AzureClient {
         }))
     }
 
+    /// The PRs completed or abandoned since `since` (Unix milliseconds), newest
+    /// first, with their threads. A closed PR does not change, so one found in
+    /// `known` is reused instead of fetching its threads again.
+    pub fn recent_closed(
+        &self,
+        project_root: &Path,
+        since: u64,
+        known: &[AzurePr],
+        current_user: Option<&str>,
+    ) -> AzureResult<Vec<AzurePr>> {
+        let Some(reference) = self.repository(project_root)? else {
+            return Err("project origin is not an Azure DevOps repository".into());
+        };
+        let raw = self.az_json([
+            "repos",
+            "pr",
+            "list",
+            "--org",
+            &reference.org_url,
+            "--project",
+            &reference.project,
+            "--repository",
+            &reference.repository,
+            "--status",
+            "all",
+            "--top",
+            CLOSED_PR_LIMIT,
+            "--only-show-errors",
+            "-o",
+            "json",
+        ])?;
+        let mut closed = Vec::new();
+        let mut fetch = Vec::new();
+        for mut pull_request in normalize_active_prs(&reference, raw) {
+            if pull_request.status == "active"
+                || pull_request
+                    .closed_at
+                    .is_none_or(|closed_at| closed_at < since)
+            {
+                continue;
+            }
+            match known
+                .iter()
+                .find(|known| known.id == pull_request.id && known.threads.is_some())
+            {
+                Some(known) => closed.push(known.clone()),
+                None => {
+                    if let Some(user) = current_user {
+                        pull_request.is_own_author = pull_request
+                            .author_unique_name
+                            .as_deref()
+                            .is_some_and(|author| author.eq_ignore_ascii_case(user));
+                    }
+                    fetch.push(pull_request);
+                }
+            }
+        }
+        self.add_pr_details(&reference, &mut fetch);
+        closed.extend(fetch);
+        closed.sort_by_key(|pull_request| std::cmp::Reverse(pull_request.closed_at));
+        Ok(closed)
+    }
+
     /// Whether a PR that left the active list was completed (merged), not abandoned.
     pub fn is_merged(&self, project_root: &Path, id: u64) -> AzureResult<bool> {
         let Some(reference) = self.repository(project_root)? else {
@@ -164,6 +229,7 @@ impl AzureClient {
                 if let Some(raw) = summary {
                     let threads = normalize_threads(&raw);
                     pull_request.votes = normalize_votes(&raw);
+                    pull_request.status_events = normalize_status_events(&raw);
                     let summary = summarize_threads(&threads);
                     pull_request.threads = Some(threads);
                     pull_request.unresolved_threads = summary.unresolved_threads;

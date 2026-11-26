@@ -15,7 +15,9 @@ pub use attention::{
     acknowledge_attention, reconcile_attention,
 };
 pub use client::AzureClient;
-pub use normalize::{normalize_active_prs, normalize_threads, normalize_votes};
+pub use normalize::{
+    normalize_active_prs, normalize_status_events, normalize_threads, normalize_votes,
+};
 pub use remote::parse_azure_remote;
 pub use updates::{PrUpdate, PrUpdateKind, pr_updates};
 
@@ -38,6 +40,12 @@ pub struct AzurePr {
     pub author_unique_name: Option<String>,
     pub is_own_author: bool,
     pub is_draft: bool,
+    /// Lowercase Azure DevOps status: active, completed or abandoned.
+    #[serde(default = "active_status")]
+    pub status: String,
+    /// When it was completed or abandoned, in Unix milliseconds.
+    #[serde(default)]
+    pub closed_at: Option<u64>,
     pub source_branch: String,
     pub target_branch: String,
     pub created_at: u64,
@@ -63,6 +71,9 @@ pub struct AzurePr {
     /// The votes people cast, from the same fetch as the threads. Memory only.
     #[serde(skip)]
     pub votes: Vec<PrVote>,
+    /// Publishing, completing and abandoning, from the same fetch. Memory only.
+    #[serde(skip)]
+    pub status_events: Vec<PrStatusEvent>,
     #[serde(default)]
     pub linked_pbis: Vec<LinkedPbi>,
     pub url: String,
@@ -132,6 +143,32 @@ pub struct PrVote {
     pub at: u64,
 }
 
+fn active_status() -> String {
+    "active".to_owned()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PrStatusChange {
+    /// Left draft.
+    Published,
+    /// Merged.
+    Completed,
+    Abandoned,
+}
+
+/// A status change from a PR's draft or status system thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrStatusEvent {
+    pub thread_id: u64,
+    pub change: PrStatusChange,
+    pub actor: String,
+    pub actor_unique_name: Option<String>,
+    /// Unix milliseconds.
+    pub at: u64,
+}
+
 /// Asks an agent to look into one PR comment. The comment is quoted as data:
 /// the user chose to send it, but its text still came from someone else.
 #[must_use]
@@ -197,6 +234,9 @@ pub struct PrContext {
     pub current_user: Option<String>,
     pub auto_review: bool,
     pub pull_requests: Vec<PrItem>,
+    /// PRs completed or abandoned lately, with their threads, for the Updates page.
+    #[serde(skip)]
+    pub closed_pull_requests: Vec<AzurePr>,
 }
 
 #[cfg(test)]
