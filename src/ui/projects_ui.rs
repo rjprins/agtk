@@ -567,6 +567,7 @@ impl Workspace {
         let launch_workspace = self.clone();
         let launch_root = root.to_owned();
         launch.connect_clicked(move |_| launch_workspace.open_launch_for_project(&launch_root));
+        let quick = self.quick_claude_button(root);
         let menu = gio::Menu::new();
         let surfaces = gio::Menu::new();
         surfaces.append_item(&menus::targeted_item(
@@ -617,6 +618,7 @@ impl Workspace {
             content.append(&self.project_pr_button(root, attention));
         }
         content.append(&self.project_repository_link(root));
+        content.append(&quick);
         content.append(&launch);
         content.append(&more);
         menus::open_menu_on_right_click(&collapse, &more);
@@ -775,12 +777,46 @@ impl Workspace {
         remove.connect_clicked(move |_| workspace.remove_project(&remove_root, None));
         content.append(&open);
         content.append(&self.project_repository_link(root));
+        content.append(&self.quick_claude_button(root));
         content.append(&resume);
         content.append(&pin);
         content.append(&remove);
         row.set_child(Some(&content));
         self.enable_project_drop(&row, root);
         row
+    }
+
+    /// Starts Claude in the project root with no extra flags, skipping the launch dialog.
+    fn quick_claude_button(&self, root: &str) -> gtk::Button {
+        let button = gtk::Button::builder()
+            .child(&provider_icons::session_icon(
+                SessionKind::Claude,
+                Path::new("claude"),
+            ))
+            .valign(gtk::Align::Center)
+            .tooltip_text("Start Claude here with default settings")
+            .build();
+        button.add_css_class("flat");
+        let workspace = self.clone();
+        let root = PathBuf::from(root);
+        button.connect_clicked(move |_| workspace.quick_launch_claude(&root));
+        button
+    }
+
+    fn quick_launch_claude(&self, root: &Path) {
+        self.launch_controlled(
+            CreateSessionParams {
+                kind: SessionKind::Claude,
+                command: None,
+                args: Vec::new(),
+                cwd: Some(root.to_owned()),
+                name: None,
+                project_root: Some(root.to_owned()),
+                worktree_path: Some(root.to_owned()),
+                initial_input: None,
+            },
+            None,
+        );
     }
 
     fn project_repository_link(&self, root: &str) -> gtk::LinkButton {
