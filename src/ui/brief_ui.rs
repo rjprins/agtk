@@ -627,7 +627,7 @@ fn hidden_header(items: &[&BriefItem], expanded: bool) -> gtk::Button {
 
 /// A chevron, the name and, when given, a count. Dim like a caption, unless
 /// it holds pending comments out of sight.
-fn collapsible_header(
+pub(super) fn collapsible_header(
     name: &str,
     count: Option<usize>,
     waiting: usize,
@@ -778,7 +778,7 @@ fn comment_view(entry: &gtk::Widget) -> Option<gtk::TextView> {
         .ok()
 }
 
-fn brief_button(icon: &str, tooltip: &str) -> gtk::Button {
+pub(super) fn brief_button(icon: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::builder()
         .icon_name(icon)
         .tooltip_text(tooltip)

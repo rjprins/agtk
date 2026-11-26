@@ -8,12 +8,16 @@ use crate::azure::{PrUpdate, PrUpdateKind, pr_updates};
 pub(super) const UPDATES_PAGE: &str = "updates";
 /// Enough to scroll back a few days on a small team.
 const MAX_UPDATES: usize = 150;
+/// How long a closed update stays closed. Long after its PR is done.
+const REMEMBER_CLOSED_MILLIS: u64 = 90 * 24 * 60 * 60 * 1000;
 const EMPTY_TEXT: &str = "No PR updates yet. Comments and votes by others on PRs you wrote or review show up here once agtk has checked the projects in the sidebar.";
 
 #[derive(Clone)]
 pub(super) struct UpdatesPage {
     pub root: gtk::Box,
     pub rows: gtk::Box,
+    /// Closed updates, kept at the bottom like Hidden in the brief.
+    pub closed: gtk::Box,
 }
 
 impl UpdatesPage {
@@ -27,9 +31,19 @@ impl UpdatesPage {
         rows.set_margin_start(6);
         rows.set_margin_end(6);
         rows.set_margin_bottom(8);
-        scroll.set_child(Some(&rows));
+        let closed = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        closed.set_margin_start(6);
+        closed.set_margin_end(6);
+        closed.set_margin_bottom(8);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.append(&rows);
+        let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        spacer.set_vexpand(true);
+        content.append(&spacer);
+        content.append(&closed);
+        scroll.set_child(Some(&content));
         root.append(&scroll);
-        Self { root, rows }
+        Self { root, rows, closed }
     }
 }
 
@@ -84,9 +98,15 @@ impl Workspace {
     /// what it shows counts as seen; the rows that were new when they opened it
     /// stay marked until they leave it.
     pub(super) fn render_pr_updates(&self) {
-        let updates = self.pr_update_list();
+        let (updates, closed): (Vec<_>, Vec<_>) = {
+            let preferences = self.pr_preferences.borrow();
+            self.pr_update_list()
+                .into_iter()
+                .partition(|update| !preferences.updates_closed.contains_key(&update.id))
+        };
         let newest = updates.first().map_or(0, |update| update.at);
         let seen = self.pr_preferences.borrow().updates_seen_at;
+        let closed_expanded = self.pr_preferences.borrow().updates_closed_expanded;
         let viewing = self.viewing_pr_updates();
         let new_since = if viewing {
             let before = self.pr_updates_seen_before.get().unwrap_or(seen);
@@ -111,11 +131,42 @@ impl Workspace {
         }
 
         let rows = &self.changes.updates.rows;
-        while let Some(child) = rows.first_child() {
-            rows.remove(&child);
+        for list in [rows, &self.changes.updates.closed] {
+            while let Some(child) = list.first_child() {
+                list.remove(&child);
+            }
+        }
+        if !closed.is_empty() {
+            let header =
+                brief_ui::collapsible_header("Closed", Some(closed.len()), 0, closed_expanded);
+            header.set_tooltip_text(Some(if closed_expanded {
+                "Collapse closed updates"
+            } else {
+                "Show closed updates"
+            }));
+            let workspace = self.clone();
+            header.connect_clicked(move |_| {
+                workspace.change_pr_preferences(|preferences| {
+                    preferences.updates_closed_expanded = !preferences.updates_closed_expanded;
+                });
+                workspace.render_pr_updates();
+            });
+            self.changes.updates.closed.append(&header);
+            if closed_expanded {
+                for update in &closed {
+                    self.changes
+                        .updates
+                        .closed
+                        .append(&self.pr_update_row(update, false, true));
+                }
+            }
         }
         if updates.is_empty() {
-            let message = gtk::Label::new(Some(EMPTY_TEXT));
+            let message = gtk::Label::new(Some(if closed.is_empty() {
+                EMPTY_TEXT
+            } else {
+                "No open PR updates. Closed ones are at the bottom."
+            }));
             message.set_wrap(true);
             message.add_css_class("dim-label");
             message.set_margin_top(24);
@@ -125,13 +176,33 @@ impl Workspace {
             return;
         }
         for update in &updates {
-            rows.append(&self.pr_update_row(update, update.at > new_since));
+            rows.append(&self.pr_update_row(update, update.at > new_since, false));
         }
     }
 
     fn save_pr_updates_seen(&self, at: u64) {
+        self.change_pr_preferences(|preferences| preferences.updates_seen_at = at);
+    }
+
+    /// Closes an update, or opens a closed one again, and shows the change.
+    fn set_pr_update_closed(&self, id: &str, closed: bool) {
+        let now = crate::persist::now_millis();
+        self.change_pr_preferences(|preferences| {
+            if closed {
+                preferences.updates_closed.insert(id.to_owned(), now);
+            } else {
+                preferences.updates_closed.remove(id);
+            }
+            preferences
+                .updates_closed
+                .retain(|_, at| now.saturating_sub(*at) < REMEMBER_CLOSED_MILLIS);
+        });
+        self.render_pr_updates();
+    }
+
+    fn change_pr_preferences(&self, change: impl FnOnce(&mut crate::azure::PrPreferences)) {
         let mut preferences = self.pr_preferences.borrow().clone();
-        preferences.updates_seen_at = at;
+        change(&mut preferences);
         *self.pr_preferences.borrow_mut() = preferences.clone();
         let Some(store) = self.store.borrow().clone() else {
             return;
@@ -143,7 +214,7 @@ impl Workspace {
             move || store.set_preference("pullRequests", &value),
             |workspace, result| {
                 if let Err(error) = result {
-                    workspace.show_error(&format!("Could not save PR updates as seen: {error}"));
+                    workspace.show_error(&format!("Could not save PR updates: {error}"));
                 }
             },
         );
@@ -161,9 +232,12 @@ impl Workspace {
             .min()
     }
 
-    fn pr_update_row(&self, update: &PrUpdate, is_new: bool) -> gtk::Widget {
+    fn pr_update_row(&self, update: &PrUpdate, is_new: bool, closed: bool) -> gtk::Widget {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         row.add_css_class("pr-update");
+        if closed {
+            row.add_css_class("dim-label");
+        }
 
         let body = gtk::Box::new(gtk::Orientation::Vertical, 2);
         body.set_hexpand(true);
@@ -257,10 +331,10 @@ impl Workspace {
         row.append(&open);
 
         if let Some(session) = self.session_for_pr(update.pr_id) {
-            let go = gtk::Button::from_icon_name("utilities-terminal-symbolic");
-            go.add_css_class("flat");
-            go.set_valign(gtk::Align::Start);
-            go.set_tooltip_text(Some("Go to the session on this PR and show its comments"));
+            let go = brief_ui::brief_button(
+                "utilities-terminal-symbolic",
+                "Go to the session on this PR and show its comments",
+            );
             let workspace = self.clone();
             go.connect_clicked(move |_| {
                 workspace.activate_session(&session);
@@ -268,6 +342,19 @@ impl Workspace {
             });
             row.append(&go);
         }
+        let (icon, tooltip) = if closed {
+            ("view-reveal-symbolic", "Open again")
+        } else {
+            (
+                "window-close-symbolic",
+                "Close. The comment or vote itself is not changed.",
+            )
+        };
+        let toggle = brief_ui::brief_button(icon, tooltip);
+        let workspace = self.clone();
+        let id = update.id.clone();
+        toggle.connect_clicked(move |_| workspace.set_pr_update_closed(&id, !closed));
+        row.append(&toggle);
         row.upcast()
     }
 }

@@ -20,6 +20,8 @@ pub enum PrUpdateKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrUpdate {
+    /// Stays the same from poll to poll, so the user can close the update.
+    pub id: String,
     pub pr_id: u64,
     pub pr_title: String,
     pub pr_url: String,
@@ -76,7 +78,8 @@ pub fn pr_updates<'a>(
         if !involved {
             continue;
         }
-        let update = |thread_id, author: &str, at, kind| PrUpdate {
+        let update = |id: String, thread_id, author: &str, at, kind| PrUpdate {
+            id: format!("{}:{id}", pull_request.id),
             pr_id: pull_request.id,
             pr_title: pull_request.title.clone(),
             pr_url: pull_request.url.clone(),
@@ -91,6 +94,7 @@ pub fn pr_updates<'a>(
                     continue;
                 }
                 updates.push(update(
+                    format!("comment:{}:{}", thread.id, comment.id),
                     thread.id,
                     &comment.author,
                     comment.updated_at,
@@ -108,6 +112,7 @@ pub fn pr_updates<'a>(
                 continue;
             }
             updates.push(update(
+                format!("vote:{}", vote.thread_id),
                 vote.thread_id,
                 &vote.voter,
                 vote.at,
@@ -191,6 +196,8 @@ mod tests {
         assert_eq!(updates[0].kind, PrUpdateKind::Vote { vote: 10 });
         assert_eq!(updates[0].author, "BOB@EXAMPLE.COM");
         assert_eq!(updates[1].at, 100);
+        assert_eq!(updates[0].id, "1:vote:11");
+        assert_eq!(updates[1].id, "1:comment:10:1");
         assert_eq!(
             updates[0].link(),
             "https://dev.azure.com/org/p/_git/r/pullrequest/1?_a=overview&discussionId=11"

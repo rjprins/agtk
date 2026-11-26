@@ -258,13 +258,17 @@ impl Workspace {
                         true
                     }
                     UiSurface::Search => false,
-                    UiSurface::Changes | UiSurface::Files | UiSurface::Brief => {
+                    UiSurface::Changes
+                    | UiSurface::Files
+                    | UiSurface::Brief
+                    | UiSurface::Updates => {
                         let already_open = self.changes.split.shows_sidebar();
                         self.changes
                             .pages
                             .set_visible_child_name(match params.surface {
                                 UiSurface::Files => explorer_ui::FILES_PAGE,
                                 UiSurface::Brief => brief_ui::BRIEF_PAGE,
+                                UiSurface::Updates => updates_ui::UPDATES_PAGE,
                                 _ => explorer_ui::CHANGES_PAGE,
                             });
                         self.changes.split.set_show_sidebar(true);

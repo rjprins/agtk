@@ -313,6 +313,7 @@ pub enum UiSurface {
     Changes,
     Files,
     Brief,
+    Updates,
     Worktrees,
     Agents,
     PullRequests,

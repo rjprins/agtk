@@ -58,6 +58,11 @@ pub struct PrPreferences {
     /// The newest PR update the user has seen on the Updates page, in Unix milliseconds.
     #[serde(default)]
     pub updates_seen_at: u64,
+    /// The updates the user closed, by id, with when they did, in Unix milliseconds.
+    #[serde(default)]
+    pub updates_closed: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub updates_closed_expanded: bool,
 }
 
 /// Settings shared by automatic and manual PR reviews. Empty fields inherit the agent's config.
