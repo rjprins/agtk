@@ -1,6 +1,6 @@
 use agtk::appearance::AppearancePreferences;
 use agtk::control::{SessionKind, SessionState};
-use agtk::persist::{SessionRecord, Store};
+use agtk::persist::{SessionRecord, SessionVisit, Store};
 use agtk::projects::ProjectPreferences;
 
 #[test]
@@ -91,4 +91,61 @@ fn values_another_build_wrote_differently_do_not_block_loading() {
         ProjectPreferences::default()
     );
     assert_eq!(store.sessions().unwrap(), vec![record]);
+}
+
+#[test]
+fn session_visits_keep_each_switch_once_and_survive_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state/agtk.db");
+    let visit = |at: u64, id: &str, name: &str| SessionVisit {
+        at,
+        session_id: id.to_owned(),
+        name: name.to_owned(),
+    };
+    let store = Store::open(&path).unwrap();
+    for entry in [
+        visit(1_000, "claude-1", "api"),
+        visit(2_000, "codex-2", "review"),
+        // A restart selects the same session again: not a switch.
+        visit(2_500, "codex-2", "review"),
+        visit(3_000, "claude-1", "api renamed"),
+    ] {
+        store.save_session_visit(&entry, 0).unwrap();
+    }
+    drop(store);
+
+    let store = Store::open(&path).unwrap();
+    assert_eq!(
+        store.session_visits(0, 10).unwrap(),
+        [
+            visit(1_000, "claude-1", "api"),
+            visit(2_000, "codex-2", "review"),
+            visit(3_000, "claude-1", "api renamed"),
+        ]
+    );
+    // A time leaves out what came before; a limit keeps the latest.
+    assert_eq!(
+        store.session_visits(2_001, 10).unwrap(),
+        [visit(3_000, "claude-1", "api renamed")]
+    );
+    assert_eq!(
+        store.session_visits(0, 2).unwrap(),
+        [
+            visit(2_000, "codex-2", "review"),
+            visit(3_000, "claude-1", "api renamed"),
+        ]
+    );
+    assert_eq!(store.session_visits(u64::MAX, 10).unwrap(), []);
+
+    // Saving drops visits from before the time to keep.
+    store
+        .save_session_visit(&visit(9_000, "shell-3", "tests"), 2_500)
+        .unwrap();
+    assert_eq!(
+        store.session_visits(0, 10).unwrap(),
+        [
+            visit(3_000, "claude-1", "api renamed"),
+            visit(9_000, "shell-3", "tests"),
+        ]
+    );
 }

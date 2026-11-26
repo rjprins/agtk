@@ -10,9 +10,9 @@ use agtk::control::{
     ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
     ControlResponse, ControlServer, CreateSessionParams, GetTextParams, PrAcknowledgeParams,
     ProjectRemoveParams, ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams,
-    SessionKind, SessionSetStateParams, SetSessionWorktreeParams, ShortcutSetParams,
-    StateHookSetParams, UiShowParams, UiSurface, WorktreeCreateParams, WorktreeListParams,
-    WorktreeReapParams,
+    SessionKind, SessionSetStateParams, SessionVisitsParams, SetSessionWorktreeParams,
+    ShortcutSetParams, StateHookSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
+    WorktreeListParams, WorktreeReapParams,
 };
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -318,6 +318,27 @@ fn session_mutation_commands_have_typed_protocol_mappings() {
         }),
     );
     assert_fixture_command(&["session", "unpin"], ControlCommand::SessionUnpin);
+    assert_fixture_command(
+        &["session", "visits"],
+        ControlCommand::SessionVisits(SessionVisitsParams {
+            since_ms: 0,
+            limit: 200,
+        }),
+    );
+    assert_fixture_command(
+        &[
+            "session",
+            "visits",
+            "--limit",
+            "20",
+            "--since",
+            "1795712000000",
+        ],
+        ControlCommand::SessionVisits(SessionVisitsParams {
+            since_ms: 1_795_712_000_000,
+            limit: 20,
+        }),
+    );
     assert_fixture_command(
         &[
             "session",

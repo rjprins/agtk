@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::{ControlCommand, GetTextParams, SessionState};
+use super::{ControlCommand, GetTextParams, SessionState, SessionVisitsParams};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WaitCondition {
@@ -15,6 +15,8 @@ pub enum WaitCondition {
         literal: String,
         lines: u32,
     },
+    /// Another session was selected after this time, in milliseconds since the Unix epoch.
+    VisitAfter(u64),
 }
 
 impl WaitCondition {
@@ -25,6 +27,10 @@ impl WaitCondition {
             } => ControlCommand::SessionGetText(GetTextParams {
                 session_id: session_id.clone(),
                 lines: *lines,
+            }),
+            Self::VisitAfter(at) => ControlCommand::SessionVisits(SessionVisitsParams {
+                since_ms: at.saturating_add(1),
+                ..SessionVisitsParams::default()
             }),
             Self::SessionExists(_) | Self::SelectedSession(_) | Self::SessionState { .. } => {
                 ControlCommand::AppGetState
@@ -45,6 +51,9 @@ impl WaitCondition {
             Self::TerminalText { literal, .. } => observation["text"]
                 .as_str()
                 .is_some_and(|text| text.contains(literal)),
+            Self::VisitAfter(_) => observation["visits"]
+                .as_array()
+                .is_some_and(|visits| !visits.is_empty()),
         }
     }
 }

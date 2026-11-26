@@ -14,6 +14,17 @@ use crate::session::{SessionKind, SessionState};
 
 pub use crate::AppResult as PersistResult;
 
+/// One time a session became the selected one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionVisit {
+    /// Milliseconds since the Unix epoch.
+    pub at: u64,
+    pub session_id: String,
+    /// The session's name at that time; the session may be closed by now.
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRecord {
@@ -93,7 +104,13 @@ impl Store {
                 at INTEGER NOT NULL,
                 used REAL NOT NULL,
                 PRIMARY KEY (provider, at)
-             ) WITHOUT ROWID;",
+             ) WITHOUT ROWID;
+             CREATE TABLE IF NOT EXISTS session_visits (
+                at INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                name TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS session_visits_at ON session_visits(at);",
         )?;
         Ok(Self(Arc::new(Mutex::new(conn))))
     }
@@ -166,6 +183,43 @@ impl Store {
             Ok((row.get::<_, i64>(0)? as u64, row.get::<_, f64>(1)?))
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Record that a session became the selected one, and drop visits from
+    /// before `keep_since`. Selecting the session of the latest visit again,
+    /// as a restart of agtk does, adds nothing.
+    pub fn save_session_visit(&self, visit: &SessionVisit, keep_since: u64) -> PersistResult<()> {
+        let conn = self.0.lock().map_err(|_| "database lock poisoned")?;
+        conn.execute(
+            "INSERT INTO session_visits(at, session_id, name)
+             SELECT ?1, ?2, ?3
+             WHERE ?2 IS NOT (SELECT session_id FROM session_visits ORDER BY rowid DESC LIMIT 1)",
+            params![visit.at as i64, visit.session_id, visit.name],
+        )?;
+        conn.execute(
+            "DELETE FROM session_visits WHERE at<?1",
+            [keep_since as i64],
+        )?;
+        Ok(())
+    }
+
+    /// The latest `limit` visits at or after `since`, oldest first.
+    pub fn session_visits(&self, since: u64, limit: u32) -> PersistResult<Vec<SessionVisit>> {
+        let conn = self.0.lock().map_err(|_| "database lock poisoned")?;
+        let mut query = conn.prepare(
+            "SELECT at, session_id, name FROM session_visits
+             WHERE at>=?1 ORDER BY rowid DESC LIMIT ?2",
+        )?;
+        let rows = query.query_map(params![since.min(i64::MAX as u64) as i64, limit], |row| {
+            Ok(SessionVisit {
+                at: row.get::<_, i64>(0)? as u64,
+                session_id: row.get(1)?,
+                name: row.get(2)?,
+            })
+        })?;
+        let mut visits = rows.collect::<Result<Vec<_>, _>>()?;
+        visits.reverse();
+        Ok(visits)
     }
 
     pub fn preference(&self, key: &str) -> PersistResult<Option<Value>> {

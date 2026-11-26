@@ -256,6 +256,7 @@ impl<B: ControlBackend> McpServer<B> {
                 require_empty(arguments)?;
                 ControlCommand::SessionUnpin
             }
+            "list_session_visits" => ControlCommand::SessionVisits(parse_args(arguments)?),
             "open_diff" => ControlCommand::UiOpenDiff(parse_args::<UiOpenDiffParams>(arguments)?),
             "open_file" => ControlCommand::UiOpenFile(parse_args::<UiOpenFileParams>(arguments)?),
             "kill_session" => {
@@ -761,6 +762,18 @@ fn tool_definitions() -> Vec<Value> {
             "Unpin the side panel session",
             "Move the pinned session back to the main area and close the side panel. Does nothing when no session is pinned.",
             empty_schema(),
+        ),
+        tool(
+            "list_session_visits",
+            "List session visits",
+            "Read the log of which session was selected in the main area and when, oldest first. Each visit has at (milliseconds since the Unix epoch), sessionId and the session's name at that time. A visit lasts until the next one. The result also gives now, the current time: pass it as sinceMs the next time to read only what is new. limit keeps the latest visits, 200 by default. agtk keeps visits for 30 days. The pinned session and the time the user spends in other windows are not in the log.",
+            schema(
+                &[
+                    ("sinceMs", json!({"type":"integer","minimum":0})),
+                    ("limit", integer(1, 1_000)),
+                ],
+                &[],
+            ),
         ),
         tool(
             "open_diff",

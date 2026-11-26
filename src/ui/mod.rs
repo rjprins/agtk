@@ -86,6 +86,7 @@ mod status_bar;
 mod status_bar_layout;
 mod status_ui;
 mod style;
+mod visits_ui;
 mod window_size;
 mod workspace_tabs_ui;
 mod worktrees_ui;

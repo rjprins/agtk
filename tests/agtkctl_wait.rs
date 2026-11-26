@@ -2,7 +2,9 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use agtk::control::{ControlCommand, ControlResponse, ControlServer, GetTextParams};
+use agtk::control::{
+    ControlCommand, ControlResponse, ControlServer, GetTextParams, SessionVisitsParams,
+};
 use serde_json::json;
 
 #[test]
@@ -158,4 +160,73 @@ fn wait_supports_selected_session_and_session_state_conditions() {
     assert!(ready.status.success());
 
     worker.join().expect("request worker");
+}
+
+#[test]
+fn wait_returns_the_visits_once_another_session_is_selected() {
+    let directory = tempfile::tempdir().expect("create temporary directory");
+    let socket = directory.path().join("agtk/wait-visit/control.sock");
+    let (_server, requests) = ControlServer::bind(&socket).expect("bind control server");
+    let switched = json!({
+        "visits": [{ "at": 5_400, "sessionId": "shell-7", "name": "tests" }],
+        "now": 5_500
+    });
+    let answers = [json!({ "visits": [], "now": 5_200 }), switched.clone()];
+    let worker = thread::spawn(move || {
+        for answer in answers {
+            let pending = requests.recv().expect("receive visits observation");
+            assert_eq!(
+                pending.request.command,
+                ControlCommand::SessionVisits(SessionVisitsParams {
+                    since_ms: 5_001,
+                    limit: 200,
+                })
+            );
+            let request_id = pending.request.id.clone();
+            pending
+                .respond(ControlResponse::success(request_id, answer))
+                .expect("respond to visits observation");
+        }
+    });
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
+        .args([
+            "--instance",
+            "wait-visit",
+            "wait",
+            "--visit-after",
+            "5000",
+            "--timeout-ms",
+            "1000",
+            "--poll-ms",
+            "1",
+        ])
+        .env("AGTK_RUNTIME_ROOT", directory.path())
+        .output()
+        .expect("wait for a visit");
+    assert!(
+        output.status.success(),
+        "agtkctl wait failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("JSON stdout"),
+        switched
+    );
+    worker.join().expect("request worker");
+
+    let combined = Command::new(env!("CARGO_BIN_EXE_agtkctl"))
+        .args([
+            "--instance",
+            "wait-visit",
+            "wait",
+            "--visit-after",
+            "5000",
+            "--session",
+            "shell-7",
+        ])
+        .env("AGTK_RUNTIME_ROOT", directory.path())
+        .output()
+        .expect("reject a session with --visit-after");
+    assert_eq!(combined.status.code(), Some(2));
 }

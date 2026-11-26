@@ -22,6 +22,7 @@ const MAX_REQUEST_ID_CHARS: usize = 128;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_TEXT_LINES: u32 = 20_000;
+const MAX_VISITS: u32 = 1_000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ControlRequest {
@@ -64,6 +65,8 @@ pub enum ControlCommand {
     /// Shows one session in the right sidebar's panel, next to the selected one.
     SessionPin(SessionIdParams),
     SessionUnpin,
+    /// The log of which session was selected when.
+    SessionVisits(SessionVisitsParams),
     SessionSendInput(SendInputParams),
     SessionGetText(GetTextParams),
     SessionRename(RenameSessionParams),
@@ -115,6 +118,26 @@ pub struct SendInputParams {
     pub text: String,
     #[serde(default = "default_true")]
     pub append_enter: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionVisitsParams {
+    /// Only visits at or after this time, in milliseconds since the Unix epoch.
+    #[serde(default)]
+    pub since_ms: u64,
+    /// The latest visits win when there are more.
+    #[serde(default = "default_visit_limit")]
+    pub limit: u32,
+}
+
+impl Default for SessionVisitsParams {
+    fn default() -> Self {
+        Self {
+            since_ms: 0,
+            limit: default_visit_limit(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -621,6 +644,13 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             }
             ControlCommand::SessionSendInput(params)
         }
+        "session.visits" => {
+            let params: SessionVisitsParams = decode_params(wire.params)?;
+            if !(1..=MAX_VISITS).contains(&params.limit) {
+                return Err(invalid_params("limit must be between 1 and 1000"));
+            }
+            ControlCommand::SessionVisits(params)
+        }
         "session.get_text" => {
             let params: GetTextParams = decode_params(wire.params)?;
             validate_session_id(&params.session_id)?;
@@ -783,6 +813,7 @@ impl ControlCommand {
             Self::SessionSelect(_) => "session.select",
             Self::SessionPin(_) => "session.pin",
             Self::SessionUnpin => "session.unpin",
+            Self::SessionVisits(_) => "session.visits",
             Self::SessionSendInput(_) => "session.send_input",
             Self::SessionGetText(_) => "session.get_text",
             Self::SessionRename(_) => "session.rename",
@@ -836,6 +867,7 @@ impl ControlCommand {
             Self::SessionSelect(params) => Ok(("session.select", serde_json::to_value(params)?)),
             Self::SessionPin(params) => Ok(("session.pin", serde_json::to_value(params)?)),
             Self::SessionUnpin => Ok(("session.unpin", empty_params())),
+            Self::SessionVisits(params) => Ok(("session.visits", serde_json::to_value(params)?)),
             Self::SessionSendInput(params) => {
                 Ok(("session.send_input", serde_json::to_value(params)?))
             }
@@ -1281,6 +1313,10 @@ const fn default_true() -> bool {
 }
 
 const fn default_text_lines() -> u32 {
+    200
+}
+
+const fn default_visit_limit() -> u32 {
     200
 }
 

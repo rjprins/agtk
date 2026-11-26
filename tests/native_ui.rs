@@ -4910,3 +4910,79 @@ fn keys_typed_in_the_pinned_panel_reach_its_session_and_mark_its_turn_viewed() {
         app.request("session.close", json!({"sessionId":id}));
     }
 }
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn session_visits_log_each_switch_and_survive_a_restart() {
+    let mut app = App::new();
+    let create = |name: &str| {
+        app.request(
+            "session.create",
+            json!({
+                "kind":"custom","command":"/bin/sh","args":["-c","exec sleep 30"],
+                "cwd":app.directory.path(),"name":name
+            }),
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let visited = |app: &App, params: Value| {
+        let result = app.request("session.visits", params);
+        let visits = result["visits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|visit| {
+                assert!(visit["at"].as_u64().unwrap() <= result["now"].as_u64().unwrap());
+                (
+                    visit["sessionId"].as_str().unwrap().to_owned(),
+                    visit["name"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        (visits, result["now"].as_u64().unwrap())
+    };
+    let entry = |id: &str, name: &str| (id.to_owned(), name.to_owned());
+
+    // The first session fills the empty main area, which is the first visit.
+    let first = create("first");
+    let second = create("second");
+    let assistant = create("assistant");
+    assert_eq!(visited(&app, json!({})).0, [entry(&first, "first")]);
+
+    app.request("session.select", json!({"sessionId":second}));
+    // Selecting the selected session again is not a switch.
+    app.request("session.select", json!({"sessionId":second}));
+    app.request(
+        "session.rename",
+        json!({"sessionId":first,"name":"first renamed"}),
+    );
+    thread::sleep(Duration::from_millis(5));
+    let (_, before_return) = visited(&app, json!({}));
+    thread::sleep(Duration::from_millis(5));
+    app.request("session.select", json!({"sessionId":first}));
+    let all = [
+        entry(&first, "first"),
+        entry(&second, "second"),
+        entry(&first, "first renamed"),
+    ];
+    let (visits, now) = visited(&app, json!({}));
+    assert_eq!(visits, all);
+    assert_eq!(visited(&app, json!({"sinceMs":before_return})).0, all[2..]);
+    assert_eq!(visited(&app, json!({"limit":2})).0, all[1..]);
+    assert_eq!(visited(&app, json!({"sinceMs":now + 1})).0, []);
+
+    // Going to the pinned session's panel leaves the main area as it is.
+    app.request("session.pin", json!({"sessionId":assistant}));
+    app.request("session.select", json!({"sessionId":assistant}));
+    assert_eq!(visited(&app, json!({})).0, all);
+
+    // A restart shows the same session again, which adds no visit.
+    app.stop();
+    app.start();
+    assert_eq!(visited(&app, json!({})).0, all);
+    for id in [&first, &second, &assistant] {
+        app.request("session.close", json!({"sessionId":id}));
+    }
+}

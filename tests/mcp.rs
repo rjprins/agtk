@@ -5,7 +5,8 @@ use std::fs;
 use agtk::brief::{BriefCommentClear, BriefItemInput, BriefLink, BriefPostParams, BriefSession};
 use agtk::control::{
     ClaudePresetApplyParams, ControlCommand, CreateSessionParams, PrListParams, SendInputParams,
-    SessionIdParams, SessionKind, SetSessionWorktreeParams, WorktreeCreateParams,
+    SessionIdParams, SessionKind, SessionVisitsParams, SetSessionWorktreeParams,
+    WorktreeCreateParams,
 };
 use agtk::mcp::{ControlBackend, McpServer};
 use agtk::providers::{AgentProvider, DiscoveryRoots, ProviderDiscovery};
@@ -67,6 +68,7 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "select_session",
             "pin_session",
             "unpin_session",
+            "list_session_visits",
             "open_diff",
             "open_file",
             "kill_session",
@@ -273,6 +275,37 @@ fn pinning_and_unpinning_map_to_the_typed_local_control_protocol() {
                 session_id: "claude-1".to_owned(),
             }),
             ControlCommand::SessionUnpin,
+        ]
+    );
+}
+
+#[test]
+fn listing_session_visits_maps_to_the_typed_local_control_protocol() {
+    let mut server = McpServer::new(MockBackend::default());
+    for (id, arguments) in [
+        (8, json!({})),
+        (9, json!({"sinceMs":1_795_712_000_000_u64,"limit":20})),
+    ] {
+        let response = server
+            .handle(request(
+                id,
+                "tools/call",
+                json!({"name":"list_session_visits","arguments":arguments}),
+            ))
+            .unwrap();
+        assert_eq!(response["result"]["isError"], false);
+    }
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        [
+            ControlCommand::SessionVisits(SessionVisitsParams {
+                since_ms: 0,
+                limit: 200,
+            }),
+            ControlCommand::SessionVisits(SessionVisitsParams {
+                since_ms: 1_795_712_000_000,
+                limit: 20,
+            }),
         ]
     );
 }

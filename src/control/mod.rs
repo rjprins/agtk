@@ -11,7 +11,7 @@ pub use protocol::{
     ControlError, ControlRequest, ControlResponse, CreateSessionParams, ErrorCode, GetTextParams,
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectRemoveParams, ProjectSetParams, RenameSessionParams,
-    ResponseBody, SendInputParams, SessionIdParams, SessionSetStateParams,
+    ResponseBody, SendInputParams, SessionIdParams, SessionSetStateParams, SessionVisitsParams,
     SetSessionWorktreeParams, ShortcutSetParams, StateHookSetParams, UiDiffScope, UiOpenDiffParams,
     UiOpenFileParams, UiShowParams, UiSurface, WorktreeCreateParams, WorktreeListParams,
     WorktreeReapParams, control_timeout, decode_request, decode_response, encode_request,

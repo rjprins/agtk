@@ -13,9 +13,9 @@ use agtk::control::{
     PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectRemoveParams, ProjectSetParams, RenameSessionParams,
     ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionSetStateParams,
-    SessionState, SetSessionWorktreeParams, ShortcutSetParams, StateHookSetParams, UiDiffScope,
-    UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface, WaitCondition,
-    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
+    SessionState, SessionVisitsParams, SetSessionWorktreeParams, ShortcutSetParams,
+    StateHookSetParams, UiDiffScope, UiOpenDiffParams, UiOpenFileParams, UiShowParams, UiSurface,
+    WaitCondition, WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agtk::history::submitted_prompt;
 use agtk::instance::{InstanceName, InstancePaths};
@@ -217,12 +217,29 @@ fn parse_ui_file(session_id: &str, arguments: &[String]) -> Result<UiOpenFilePar
     })
 }
 
+fn parse_session_visits(arguments: &[String]) -> Result<ControlCommand, Failure> {
+    let mut params = SessionVisitsParams::default();
+    for pair in arguments.chunks(2) {
+        match pair {
+            [option, value] if option == "--since" => {
+                params.since_ms = parse_bounded_u64("--since", value, 0, u64::MAX)?;
+            }
+            [option, value] if option == "--limit" => {
+                params.limit = parse_bounded_u32("--limit", value, 1, 1_000)?;
+            }
+            _ => return Err(usage_failure()),
+        }
+    }
+    Ok(ControlCommand::SessionVisits(params))
+}
+
 fn parse_wait(arguments: &[String]) -> Result<WaitOptions, Failure> {
     let mut session_id = None;
     let mut selected_id = None;
     let mut exists = false;
     let mut text = None;
     let mut state = None;
+    let mut visit_after = None;
     let mut lines = 200;
     let mut timeout_ms = 5_000;
     let mut poll_ms = 50;
@@ -243,6 +260,9 @@ fn parse_wait(arguments: &[String]) -> Result<WaitOptions, Failure> {
             "--selected" => selected_id = Some(value),
             "--text" => text = Some(value),
             "--state" => state = Some(parse_session_state(&value)?),
+            "--visit-after" => {
+                visit_after = Some(parse_bounded_u64("--visit-after", &value, 0, u64::MAX)?);
+            }
             "--lines" => lines = parse_bounded_u32("--lines", &value, 1, 20_000)?,
             "--timeout-ms" => {
                 timeout_ms = parse_bounded_u64("--timeout-ms", &value, 1, 3_600_000)?;
@@ -256,10 +276,12 @@ fn parse_wait(arguments: &[String]) -> Result<WaitOptions, Failure> {
     let condition_count = usize::from(exists)
         + usize::from(text.is_some())
         + usize::from(state.is_some())
-        + usize::from(selected_id.is_some());
+        + usize::from(selected_id.is_some())
+        + usize::from(visit_after.is_some());
     if condition_count != 1 {
         return Err(Failure::Usage(
-            "wait requires exactly one of --exists, --text, --state, or --selected".to_owned(),
+            "wait requires exactly one of --exists, --text, --state, --selected, or --visit-after"
+                .to_owned(),
         ));
     }
     let condition = if let Some(selected_id) = selected_id {
@@ -269,6 +291,13 @@ fn parse_wait(arguments: &[String]) -> Result<WaitOptions, Failure> {
             ));
         }
         WaitCondition::SelectedSession(selected_id)
+    } else if let Some(at) = visit_after {
+        if session_id.is_some() {
+            return Err(Failure::Usage(
+                "--visit-after cannot be combined with --session".to_owned(),
+            ));
+        }
+        WaitCondition::VisitAfter(at)
     } else {
         let session_id = session_id
             .ok_or_else(|| Failure::Usage("wait condition requires --session".to_owned()))?;
@@ -443,6 +472,7 @@ fn parse_session_command(action: &str, arguments: &[String]) -> Result<ControlCo
             [] => Ok(ControlCommand::SessionUnpin),
             _ => Err(usage_failure()),
         },
+        "visits" => parse_session_visits(arguments),
         "input" => parse_session_input(arguments),
         "text" => match arguments {
             [session_id] => Ok(ControlCommand::SessionGetText(GetTextParams {
@@ -1152,7 +1182,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|hook show|hook set --command CMD [--states STATE,...]|hook clear|project set ROOT OPTIONS|project remove ROOT|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|brief|brief post --json JSON|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session pin ID|session unpin|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session fork ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, files, brief and updates, SCOPE is all|staged|unstaged|untracked|committed|commit)"
+    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|hook show|hook set --command CMD [--states STATE,...]|hook clear|project set ROOT OPTIONS|project remove ROOT|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|brief|brief post --json JSON|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session pin ID|session unpin|session visits [--since MS] [--limit N]|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session fork ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, files, brief and updates, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

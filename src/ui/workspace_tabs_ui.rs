@@ -50,7 +50,13 @@ impl Workspace {
             viewer.save_view_state();
             viewer.clear();
         }
-        *self.selected_session.borrow_mut() = Some(session_id.to_owned());
+        let previous = self
+            .selected_session
+            .borrow_mut()
+            .replace(session_id.to_owned());
+        if previous.as_deref() != Some(session_id) {
+            self.record_session_visit(&record);
+        }
         let context = self
             .workspace_tabs
             .borrow()

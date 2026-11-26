@@ -3,9 +3,9 @@ use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ControlCommand, ControlResponse, ErrorCode, PROTOCOL_VERSION, PrListParams,
     ProjectRemoveParams, ProjectSetParams, ResponseBody, SessionIdParams, SessionKind,
-    SessionSetStateParams, ShortcutSetParams, StateHookSetParams, WorktreeCreateParams,
-    WorktreeListParams, WorktreeReapParams, control_timeout, decode_request, decode_response,
-    encode_request, encode_response,
+    SessionSetStateParams, SessionVisitsParams, ShortcutSetParams, StateHookSetParams,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams, control_timeout, decode_request,
+    decode_response, encode_request, encode_response,
 };
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -204,6 +204,11 @@ fn every_core_method_decodes_to_a_typed_command() {
         ),
         ("session.pin", r#"{"sessionId":"claude-1"}"#, "SessionPin"),
         ("session.unpin", "{}", "SessionUnpin"),
+        (
+            "session.visits",
+            r#"{"sinceMs":1795712000000,"limit":50}"#,
+            "SessionVisits",
+        ),
         (
             "session.send_input",
             r#"{"sessionId":"shell-1","text":"status","appendEnter":false}"#,
@@ -706,4 +711,40 @@ fn brief_posts_are_validated_and_round_trip() {
         decode_request(br#"{"version":1,"id":"req","method":"brief.get","params":{"all":true}}"#)
             .expect_err("brief.get takes no parameters");
     assert_eq!(error.code, ErrorCode::InvalidParams);
+}
+
+#[test]
+fn session_visits_default_to_the_latest_200_and_bound_the_limit() {
+    let decode = |params: &str| {
+        decode_request(
+            format!(r#"{{"version":1,"id":"visits","method":"session.visits","params":{params}}}"#)
+                .as_bytes(),
+        )
+    };
+    assert_eq!(
+        decode("{}").unwrap().command,
+        ControlCommand::SessionVisits(SessionVisitsParams {
+            since_ms: 0,
+            limit: 200,
+        })
+    );
+    assert_eq!(
+        decode(r#"{"sinceMs":7,"limit":1000}"#).unwrap().command,
+        ControlCommand::SessionVisits(SessionVisitsParams {
+            since_ms: 7,
+            limit: 1000,
+        })
+    );
+    for invalid in [
+        r#"{"limit":0}"#,
+        r#"{"limit":1001}"#,
+        r#"{"sinceMs":-1}"#,
+        r#"{"since":7}"#,
+    ] {
+        assert_eq!(
+            decode(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams,
+            "{invalid}"
+        );
+    }
 }

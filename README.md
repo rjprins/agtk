@@ -240,6 +240,7 @@ agtkctl session restart SESSION_ID
 agtkctl session fork SESSION_ID
 agtkctl session pin SESSION_ID
 agtkctl session unpin
+agtkctl session visits
 agtkctl ui inspect
 agtkctl ui capture
 agtkctl ui show changes
@@ -260,6 +261,22 @@ agtkctl session state "$AGTK_SESSION_ID" busy
 ```
 
 The states are `busy`, `waiting`, `ready`, and `idle`. Add `--hook-input` when the command runs as a Claude Code hook.
+
+### Session visits
+
+agtk keeps a log of which session was selected in the main area, and when. A script or an assistant can read it to see which sessions you used, without asking for `agtkctl state` again and again.
+
+```sh
+agtkctl session visits
+agtkctl session visits --since 1795712000000 --limit 50
+agtkctl wait --visit-after 1795712000000 --timeout-ms 3600000 --poll-ms 1000
+```
+
+- Each visit has `at` in Unix milliseconds, the `sessionId`, and the session's `name` at that time. A visit lasts until the next one.
+- The result also has `now`. Pass it as `--since` the next time to read only what is new. `--limit` keeps the latest visits, 200 by default.
+- `agtkctl wait --visit-after MS` prints the new visits as soon as you select another session. It ends with exit code 4 when the time is up.
+- An agent can use the MCP tool `list_session_visits`.
+- agtk keeps visits for 30 days. The log does not show the [pinned session](#pinned-session), or the time you spend in other windows.
 
 ## MCP
 
@@ -283,7 +300,7 @@ An agent can open a shell with `spawn_shell` and give it an `initialCommand`, su
 
 Sessions that agtk starts run outside any sandbox the agent has. An agent with the `agtk` tools can therefore run commands beyond its own sandbox, through `spawn_shell`, `send_input`, or `launch_agent`. Give the tools only to agents you would let run commands. PR reviews start Claude and Codex without the `agtk` tools, because they read code from someone else.
 
-The tools cover sessions, the pinned session, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, the daily brief, and screenshots of the agtk window. The server never captures the rest of the desktop.
+The tools cover sessions, the pinned session, session visits, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, the daily brief, and screenshots of the agtk window. The server never captures the rest of the desktop.
 
 `list_sessions` gives each session's `conversationId`, and for Claude and Codex agents `lastAgentMessage`: the agent's last message from its Claude or Codex log, cut to 500 characters, with `lastAgentMessageAt` in Unix milliseconds. Both are null until agtk knows the conversation and the agent has answered. `list_sessions` also gives `selectedSessionId` and `pinnedSessionId`, the session in the side panel, or null. So a caller can tell what an agent finished or asks without reading its terminal with `snapshot`. Together with the [state hook](#state-hook), a supervising agent hears about a finished turn right away and reads what it said.
 

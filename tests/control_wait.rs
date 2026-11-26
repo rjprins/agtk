@@ -1,4 +1,6 @@
-use agtk::control::{ControlCommand, GetTextParams, SessionState, WaitCondition};
+use agtk::control::{
+    ControlCommand, GetTextParams, SessionState, SessionVisitsParams, WaitCondition,
+};
 use serde_json::json;
 
 #[test]
@@ -85,4 +87,22 @@ fn wait_conditions_do_not_match_missing_or_partial_state() {
         }
         .is_satisfied(&json!({ "text": "comp" }))
     );
+}
+
+#[test]
+fn waiting_for_a_visit_asks_only_for_what_came_after_the_given_time() {
+    let condition = WaitCondition::VisitAfter(5_000);
+    assert_eq!(
+        condition.observation(),
+        ControlCommand::SessionVisits(SessionVisitsParams {
+            since_ms: 5_001,
+            limit: 200,
+        })
+    );
+    assert!(!condition.is_satisfied(&json!({ "visits": [], "now": 6_000 })));
+    assert!(!condition.is_satisfied(&json!({ "now": 6_000 })));
+    assert!(condition.is_satisfied(&json!({
+        "visits": [{ "at": 5_500, "sessionId": "shell-2", "name": "tests" }],
+        "now": 6_000
+    })));
 }

@@ -142,6 +142,10 @@ impl Workspace {
             self.handle_pin_control(pending);
             return;
         }
+        if matches!(&pending.request.command, ControlCommand::SessionVisits(_)) {
+            self.handle_visits_control(pending);
+            return;
+        }
         if matches!(
             &pending.request.command,
             ControlCommand::PrList(_)
@@ -427,6 +431,7 @@ impl Workspace {
             ControlCommand::SessionCreate(_)
             | ControlCommand::SessionPin(_)
             | ControlCommand::SessionUnpin
+            | ControlCommand::SessionVisits(_)
             | ControlCommand::UiOpenDiff(_)
             | ControlCommand::UiOpenFile(_)
             | ControlCommand::AppearanceSet(_)
