@@ -257,6 +257,11 @@ impl<B: ControlBackend> McpServer<B> {
                 ControlCommand::SessionUnpin
             }
             "list_session_visits" => ControlCommand::SessionVisits(parse_args(arguments)?),
+            "post_nudge" => ControlCommand::NudgePost(parse_args(arguments)?),
+            "clear_nudge" => {
+                require_empty(arguments)?;
+                ControlCommand::NudgeClear
+            }
             "open_diff" => ControlCommand::UiOpenDiff(parse_args::<UiOpenDiffParams>(arguments)?),
             "open_file" => ControlCommand::UiOpenFile(parse_args::<UiOpenFileParams>(arguments)?),
             "kill_session" => {
@@ -308,6 +313,7 @@ impl<B: ControlBackend> McpServer<B> {
                 "sessions":self.with_last_agent_messages(value.get("sessions").cloned().unwrap_or(Value::Array(Vec::new()))),
                 "selectedSessionId":value.get("selectedSessionId").cloned().unwrap_or(Value::Null),
                 "pinnedSessionId":value.get("pinnedSessionId").cloned().unwrap_or(Value::Null),
+                "nudge":value.get("nudge").cloned().unwrap_or(Value::Null),
                 "attention":value.get("attention").cloned().unwrap_or_else(|| json!({"count":0}))
             }),
             _ => value,
@@ -774,6 +780,18 @@ fn tool_definitions() -> Vec<Value> {
                 ],
                 &[],
             ),
+        ),
+        tool(
+            "post_nudge",
+            "Post a nudge",
+            "Show one short message to the user in a colored bar above the pinned session's panel, and open the right sidebar. Use it to interrupt: too many sessions open, a session that waits for them, the end of a focus block. At most 300 characters. A new nudge replaces the one before. It stays until the user dismisses it or clear_nudge removes it; list_sessions gives the nudge that still shows as nudge, or null. Refused when no session is pinned.",
+            schema(&[("text", string())], &["text"]),
+        ),
+        tool(
+            "clear_nudge",
+            "Clear the nudge",
+            "Remove the nudge above the pinned session's panel. Does nothing when none shows.",
+            empty_schema(),
         ),
         tool(
             "open_diff",

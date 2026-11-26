@@ -9,7 +9,7 @@ pub use protocol::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
     ControlError, ControlRequest, ControlResponse, CreateSessionParams, ErrorCode, GetTextParams,
-    PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
+    NudgePostParams, PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectRemoveParams, ProjectSetParams, RenameSessionParams,
     ResponseBody, SendInputParams, SessionIdParams, SessionSetStateParams, SessionVisitsParams,
     SetSessionWorktreeParams, ShortcutSetParams, StateHookSetParams, UiDiffScope, UiOpenDiffParams,

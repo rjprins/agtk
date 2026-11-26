@@ -326,7 +326,12 @@ impl Workspace {
             .collect()
     }
 
-    fn add_action(&self, name: &'static str, enabled: bool, activate: impl Fn(&Self) + 'static) {
+    pub(super) fn add_action(
+        &self,
+        name: &'static str,
+        enabled: bool,
+        activate: impl Fn(&Self) + 'static,
+    ) {
         let action = gio::SimpleAction::new(name, None);
         action.set_enabled(enabled);
         let workspace = self.clone();

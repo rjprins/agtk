@@ -33,6 +33,9 @@ pub(super) struct PinnedPanel {
     /// Holds the pinned session's terminal.
     pub host: gtk::Box,
     pub focus: gtk::EventControllerFocus,
+    /// A short message for the user above the panel's header, hidden when there is none.
+    pub nudge_bar: gtk::Revealer,
+    nudge_text: gtk::Label,
     share: Rc<Cell<f64>>,
     /// Whether the share has been turned into a divider position since the panel showed.
     placed: Rc<Cell<bool>>,
@@ -60,6 +63,24 @@ impl PinnedPanel {
         header.append(&title);
         header.append(&unpin);
 
+        let nudge_text = gtk::Label::new(None);
+        nudge_text.set_xalign(0.0);
+        nudge_text.set_hexpand(true);
+        nudge_text.set_wrap(true);
+        nudge_text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        let dismiss = gtk::Button::builder()
+            .icon_name("window-close-symbolic")
+            .tooltip_text("Dismiss")
+            .action_name("win.nudge-dismiss")
+            .valign(gtk::Align::Start)
+            .build();
+        dismiss.add_css_class("flat");
+        let nudge_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        nudge_row.add_css_class("pinned-nudge");
+        nudge_row.append(&nudge_text);
+        nudge_row.append(&dismiss);
+        let nudge_bar = gtk::Revealer::builder().child(&nudge_row).build();
+
         let host = gtk::Box::new(gtk::Orientation::Vertical, 0);
         host.set_vexpand(true);
         let focus = gtk::EventControllerFocus::new();
@@ -67,6 +88,7 @@ impl PinnedPanel {
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_size_request(-1, MIN_PANEL_HEIGHT);
+        root.append(&nudge_bar);
         root.append(&header);
         root.append(&host);
         root.set_visible(false);
@@ -86,6 +108,8 @@ impl PinnedPanel {
             unpin,
             host,
             focus,
+            nudge_bar,
+            nudge_text,
             share: Rc::new(Cell::new(DEFAULT_SHARE)),
             placed: Rc::new(Cell::new(false)),
             bindings: Rc::default(),
@@ -132,8 +156,22 @@ impl PinnedPanel {
         self.place_divider();
     }
 
-    /// Lets go of the terminal page and hides the panel.
+    /// Shows a message above the header, or removes it.
+    pub fn set_nudge(&self, text: Option<&str>) {
+        self.nudge_text.set_text(text.unwrap_or_default());
+        self.nudge_bar.set_reveal_child(text.is_some());
+    }
+
+    /// The message that still shows.
+    pub fn nudge(&self) -> Option<String> {
+        self.nudge_bar
+            .reveals_child()
+            .then(|| self.nudge_text.text().to_string())
+    }
+
+    /// Lets go of the terminal page and hides the panel, with its nudge.
     pub fn clear(&self) {
+        self.set_nudge(None);
         for binding in self.bindings.borrow_mut().drain(..) {
             binding.unbind();
         }
@@ -197,6 +235,9 @@ impl Workspace {
             {
                 workspace.save_preference(PINNED_SHARE_PREFERENCE, serde_json::json!(share));
             }
+        });
+        self.add_action("nudge-dismiss", true, |workspace| {
+            workspace.changes.pinned.set_nudge(None);
         });
         self.add_target_action("session-pin", |workspace, id| {
             if workspace.is_pinned(id) {
@@ -353,6 +394,17 @@ impl Workspace {
                 terminal.grab_focus();
             });
         }
+    }
+
+    /// Shows a short message above the pinned session's panel and opens the
+    /// right sidebar. False when no session is pinned, so there is no panel.
+    pub(super) fn post_nudge(&self, text: &str) -> bool {
+        if self.pinned_session.borrow().is_none() {
+            return false;
+        }
+        self.changes.pinned.set_nudge(Some(text.trim()));
+        self.reveal_pinned_panel();
+        true
     }
 
     fn reveal_pinned_panel(&self) {

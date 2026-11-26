@@ -154,6 +154,8 @@ button.brief-action.image-button.success {
   border-top: 1px solid var(--borders);
 }
 .pinned-header button { min-height: 24px; min-width: 24px; padding: 0; }
+.pinned-nudge { padding: 6px 6px 6px 12px; background-color: var(--accent-bg-color); color: var(--accent-fg-color); }
+.pinned-nudge button { min-height: 24px; min-width: 24px; padding: 0; color: inherit; }
 .attention-dot {
   min-width: 6px;
   min-height: 6px;

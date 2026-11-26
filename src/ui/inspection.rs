@@ -33,6 +33,7 @@ impl Workspace {
             protocol_version: PROTOCOL_VERSION,
             selected_session_id,
             pinned_session_id,
+            nudge: self.changes.pinned.nudge(),
             appearance: self.appearance_summary(),
             shortcuts: self.shortcut_summaries(),
             window: WindowState {
@@ -449,6 +450,17 @@ impl Workspace {
             is_enabled: self.changes.pinned.root.is_sensitive(),
             is_selected: self.pinned_has_focus(),
             bounds: widget_bounds(&self.changes.pinned.root, &self.window),
+            children: Vec::new(),
+        });
+        let nudge = self.changes.pinned.nudge();
+        changes_children.push(UiNode {
+            id: "pinned-nudge".to_owned(),
+            role: "status".to_owned(),
+            is_visible: nudge.is_some() && self.changes.split.shows_sidebar(),
+            label: nudge,
+            is_enabled: true,
+            is_selected: false,
+            bounds: widget_bounds(&self.changes.pinned.nudge_bar, &self.window),
             children: Vec::new(),
         });
         let changes_sidebar_node = UiNode {

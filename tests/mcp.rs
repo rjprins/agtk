@@ -4,8 +4,8 @@ use std::fs;
 
 use agtk::brief::{BriefCommentClear, BriefItemInput, BriefLink, BriefPostParams, BriefSession};
 use agtk::control::{
-    ClaudePresetApplyParams, ControlCommand, CreateSessionParams, PrListParams, SendInputParams,
-    SessionIdParams, SessionKind, SessionVisitsParams, SetSessionWorktreeParams,
+    ClaudePresetApplyParams, ControlCommand, CreateSessionParams, NudgePostParams, PrListParams,
+    SendInputParams, SessionIdParams, SessionKind, SessionVisitsParams, SetSessionWorktreeParams,
     WorktreeCreateParams,
 };
 use agtk::mcp::{ControlBackend, McpServer};
@@ -69,6 +69,8 @@ fn legacy_initialize_and_tool_listing_are_compatible_and_deterministic() {
             "pin_session",
             "unpin_session",
             "list_session_visits",
+            "post_nudge",
+            "clear_nudge",
             "open_diff",
             "open_file",
             "kill_session",
@@ -306,6 +308,33 @@ fn listing_session_visits_maps_to_the_typed_local_control_protocol() {
                 since_ms: 1_795_712_000_000,
                 limit: 20,
             }),
+        ]
+    );
+}
+
+#[test]
+fn posting_and_clearing_a_nudge_map_to_the_typed_local_control_protocol() {
+    let mut server = McpServer::new(MockBackend::default());
+    for (id, name, arguments) in [
+        (8, "post_nudge", json!({"text":"Back to the review"})),
+        (9, "clear_nudge", json!({})),
+    ] {
+        let response = server
+            .handle(request(
+                id,
+                "tools/call",
+                json!({"name":name,"arguments":arguments}),
+            ))
+            .unwrap();
+        assert_eq!(response["result"]["isError"], false);
+    }
+    assert_eq!(
+        server.backend().calls.borrow().as_slice(),
+        [
+            ControlCommand::NudgePost(NudgePostParams {
+                text: "Back to the review".to_owned(),
+            }),
+            ControlCommand::NudgeClear,
         ]
     );
 }

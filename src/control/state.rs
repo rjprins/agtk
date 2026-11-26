@@ -13,6 +13,8 @@ pub struct AppState {
     pub selected_session_id: Option<String>,
     /// The session shown in the right sidebar's panel, if one is pinned there.
     pub pinned_session_id: Option<String>,
+    /// The message shown above the pinned session's panel, until it is dismissed.
+    pub nudge: Option<String>,
     pub appearance: AppearanceSummary,
     pub shortcuts: Vec<ShortcutSummary>,
     pub window: WindowState,

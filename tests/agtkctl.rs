@@ -8,11 +8,11 @@ use agtk::claude_presets::{ClaudeEffort, ClaudeModelPreset};
 use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ClaudePresetApplyParams, ClaudePresetsSetParams, CloseSessionParams, ControlCommand,
-    ControlResponse, ControlServer, CreateSessionParams, GetTextParams, PrAcknowledgeParams,
-    ProjectRemoveParams, ProjectSetParams, RenameSessionParams, SendInputParams, SessionIdParams,
-    SessionKind, SessionSetStateParams, SessionVisitsParams, SetSessionWorktreeParams,
-    ShortcutSetParams, StateHookSetParams, UiShowParams, UiSurface, WorktreeCreateParams,
-    WorktreeListParams, WorktreeReapParams,
+    ControlResponse, ControlServer, CreateSessionParams, GetTextParams, NudgePostParams,
+    PrAcknowledgeParams, ProjectRemoveParams, ProjectSetParams, RenameSessionParams,
+    SendInputParams, SessionIdParams, SessionKind, SessionSetStateParams, SessionVisitsParams,
+    SetSessionWorktreeParams, ShortcutSetParams, StateHookSetParams, UiShowParams, UiSurface,
+    WorktreeCreateParams, WorktreeListParams, WorktreeReapParams,
 };
 use agtk::providers::AgentProvider;
 use agtk::shortcuts::ShortcutAction;
@@ -318,6 +318,13 @@ fn session_mutation_commands_have_typed_protocol_mappings() {
         }),
     );
     assert_fixture_command(&["session", "unpin"], ControlCommand::SessionUnpin);
+    assert_fixture_command(
+        &["nudge", "Back to the review"],
+        ControlCommand::NudgePost(NudgePostParams {
+            text: "Back to the review".to_owned(),
+        }),
+    );
+    assert_fixture_command(&["nudge", "--clear"], ControlCommand::NudgeClear);
     assert_fixture_command(
         &["session", "visits"],
         ControlCommand::SessionVisits(SessionVisitsParams {

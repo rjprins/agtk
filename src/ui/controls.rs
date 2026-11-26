@@ -369,6 +369,25 @@ impl Workspace {
                     ),
                 }
             }
+            ControlCommand::NudgePost(params) => {
+                if self.post_nudge(&params.text) {
+                    ControlResponse::success(
+                        id,
+                        serde_json::json!({ "nudge": self.changes.pinned.nudge() }),
+                    )
+                } else {
+                    ControlResponse::failure(
+                        id,
+                        ErrorCode::OperationRefused,
+                        "No session is pinned to the side panel, so there is no place for a nudge",
+                        None,
+                    )
+                }
+            }
+            ControlCommand::NudgeClear => {
+                self.changes.pinned.set_nudge(None);
+                ControlResponse::success(id, serde_json::json!({ "nudge": null }))
+            }
             ControlCommand::SessionSelect(params) => {
                 if self.is_pinned(&params.session_id) {
                     // It is in view already; the main area keeps its selection.

@@ -4986,3 +4986,88 @@ fn session_visits_log_each_switch_and_survive_a_restart() {
         app.request("session.close", json!({"sessionId":id}));
     }
 }
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn a_nudge_shows_above_the_pinned_panel_until_it_is_dismissed() {
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        (node["id"] == id).then_some(node).or_else(|| {
+            node["children"]
+                .as_array()?
+                .iter()
+                .find_map(|child| find(child, id))
+        })
+    }
+    let mut app = App::new();
+    let create = |app: &App, name: &str| {
+        app.request(
+            "session.create",
+            json!({
+                "kind":"custom","command":"/bin/sh","args":["-c","exec sleep 30"],
+                "cwd":app.directory.path(),"name":name
+            }),
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let nudge = |app: &App| app.request("app.get_state", json!({}))["nudge"].clone();
+    let bar = |app: &App| {
+        let inspection = app.request("ui.inspect", json!({}));
+        find(&inspection["root"], "pinned-nudge").unwrap().clone()
+    };
+    let main = create(&app, "main");
+    let assistant = create(&app, "assistant");
+
+    // Without a pinned session there is no panel to show it in.
+    match app.request_body("nudge.post", json!({"text":"Too early"})) {
+        ResponseBody::Failure(error) => assert_eq!(error.code, ErrorCode::OperationRefused),
+        body => panic!("a nudge without a pinned session succeeded: {body:?}"),
+    }
+    assert_eq!(nudge(&app), Value::Null);
+    assert_eq!(bar(&app)["isVisible"], false);
+
+    // The user closed the right sidebar, and a restart leaves it closed.
+    app.request("session.pin", json!({"sessionId":assistant}));
+    app.stop();
+    Store::open(&app.paths.database())
+        .unwrap()
+        .set_preference("changesSidebarOpen", &json!(false))
+        .unwrap();
+    app.start();
+    let inspection = app.request("ui.inspect", json!({}));
+    assert_eq!(
+        find(&inspection["root"], "pinned-panel").unwrap()["isVisible"],
+        false
+    );
+
+    // A nudge opens it again.
+    let posted = app.request("nudge.post", json!({"text":"  Five sessions open  "}));
+    let inspection = app.request("ui.inspect", json!({}));
+    assert_eq!(
+        find(&inspection["root"], "pinned-panel").unwrap()["isVisible"],
+        true
+    );
+    assert_eq!(posted["nudge"], "Five sessions open");
+    assert_eq!(nudge(&app), "Five sessions open");
+    assert_eq!(bar(&app)["isVisible"], true);
+    assert_eq!(bar(&app)["label"], "Five sessions open");
+
+    // A new nudge replaces the one before; the user dismisses it with its button.
+    app.request("nudge.post", json!({"text":"The review waits for you"}));
+    assert_eq!(nudge(&app), "The review waits for you");
+    app.activate_action("nudge-dismiss");
+    assert_eq!(nudge(&app), Value::Null);
+    assert_eq!(bar(&app)["isVisible"], false);
+
+    // The caller can take it back, and it goes with the panel.
+    app.request("nudge.post", json!({"text":"End of the block"}));
+    assert_eq!(app.request("nudge.clear", json!({}))["nudge"], Value::Null);
+    assert_eq!(nudge(&app), Value::Null);
+    app.request("nudge.post", json!({"text":"End of the block"}));
+    app.request("session.unpin", json!({}));
+    assert_eq!(nudge(&app), Value::Null);
+    for id in [&main, &assistant] {
+        app.request("session.close", json!({"sessionId":id}));
+    }
+}

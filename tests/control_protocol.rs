@@ -205,6 +205,12 @@ fn every_core_method_decodes_to_a_typed_command() {
         ("session.pin", r#"{"sessionId":"claude-1"}"#, "SessionPin"),
         ("session.unpin", "{}", "SessionUnpin"),
         (
+            "nudge.post",
+            r#"{"text":"Back to the review"}"#,
+            "NudgePost",
+        ),
+        ("nudge.clear", "{}", "NudgeClear"),
+        (
             "session.visits",
             r#"{"sinceMs":1795712000000,"limit":50}"#,
             "SessionVisits",
@@ -743,6 +749,31 @@ fn session_visits_default_to_the_latest_200_and_bound_the_limit() {
     ] {
         assert_eq!(
             decode(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams,
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
+fn a_nudge_needs_a_short_text() {
+    let decode = |params: serde_json::Value| {
+        decode_request(
+            json!({"version":1,"id":"nudge","method":"nudge.post","params":params})
+                .to_string()
+                .as_bytes(),
+        )
+    };
+    assert!(decode(json!({"text":"é".repeat(300)})).is_ok());
+    for invalid in [
+        json!({}),
+        json!({"text":""}),
+        json!({"text":"  \n "}),
+        json!({"text":"x".repeat(301)}),
+        json!({"text":"hi","urgent":true}),
+    ] {
+        assert_eq!(
+            decode(invalid.clone()).unwrap_err().code,
             ErrorCode::InvalidParams,
             "{invalid}"
         );

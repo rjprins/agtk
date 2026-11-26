@@ -125,6 +125,7 @@ Pin one session, such as your assistant, to the right sidebar. It then stays in 
 - Copy, paste and Close selected session act on the pinned session while you type in its panel. Search, prompt history and the Claude preset stay with the selected session.
 - A file path clicked in the panel opens in the main area, with the tabs of the selected session.
 - To move the session back, click the pin button in the panel, choose Unpin from Side Panel in the row menu, or run `agtkctl session unpin`. An agent can use `unpin_session`.
+- A script or the pinned agent itself can show a short message above the panel: `agtkctl nudge "The review waits for you"`, or the MCP tool `post_nudge`. The message can be 300 characters long and opens the right sidebar. A new one replaces the one before. It stays until you click its close button, or until `agtkctl nudge --clear` or `clear_nudge` removes it. `agtkctl state` and `list_sessions` give the message that still shows as `nudge`.
 - agtk remembers the pinned session when it restarts. It stays pinned after Restart Agent and after a resume following a reboot.
 - In a narrow window the right sidebar lies over the main area. Going to a session in the main area then closes the sidebar. Going to the pinned session opens it again.
 
@@ -241,6 +242,7 @@ agtkctl session fork SESSION_ID
 agtkctl session pin SESSION_ID
 agtkctl session unpin
 agtkctl session visits
+agtkctl nudge "The review waits for you"
 agtkctl ui inspect
 agtkctl ui capture
 agtkctl ui show changes
@@ -300,7 +302,7 @@ An agent can open a shell with `spawn_shell` and give it an `initialCommand`, su
 
 Sessions that agtk starts run outside any sandbox the agent has. An agent with the `agtk` tools can therefore run commands beyond its own sandbox, through `spawn_shell`, `send_input`, or `launch_agent`. Give the tools only to agents you would let run commands. PR reviews start Claude and Codex without the `agtk` tools, because they read code from someone else.
 
-The tools cover sessions, the pinned session, session visits, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, the daily brief, and screenshots of the agtk window. The server never captures the rest of the desktop.
+The tools cover sessions, the pinned session and its nudge, session visits, terminal input and text, diffs, worktrees, recent conversations, Claude presets, Emacs actions, pull requests, the daily brief, and screenshots of the agtk window. The server never captures the rest of the desktop.
 
 `list_sessions` gives each session's `conversationId`, and for Claude and Codex agents `lastAgentMessage`: the agent's last message from its Claude or Codex log, cut to 500 characters, with `lastAgentMessageAt` in Unix milliseconds. Both are null until agtk knows the conversation and the agent has answered. `list_sessions` also gives `selectedSessionId` and `pinnedSessionId`, the session in the side panel, or null. So a caller can tell what an agent finished or asks without reading its terminal with `snapshot`. Together with the [state hook](#state-hook), a supervising agent hears about a finished turn right away and reads what it said.
 

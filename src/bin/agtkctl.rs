@@ -10,7 +10,7 @@ use agtk::control::{
     AgentListParams, AgentPreviewParams, AgentRestoreParams, AgentSignalState, AppearanceSetParams,
     ClaudePresetApplyParams, ClaudePresetsSetParams, ClientError, CloseSessionParams,
     ControlClient, ControlCommand, ControlRequest, CreateSessionParams, ErrorCode, GetTextParams,
-    PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
+    NudgePostParams, PROTOCOL_VERSION, PrAcknowledgeParams, PrLaunchReviewParams, PrListParams,
     PrSetAutoReviewParams, ProjectRemoveParams, ProjectSetParams, RenameSessionParams,
     ResponseBody, SendInputParams, SessionIdParams, SessionKind, SessionSetStateParams,
     SessionState, SessionVisitsParams, SetSessionWorktreeParams, ShortcutSetParams,
@@ -108,6 +108,10 @@ fn run() -> Result<(), Failure> {
                 serde_json::from_str(value)
                     .map_err(|error| Failure::Usage(format!("invalid brief JSON: {error}")))?,
             )
+        }
+        [group, flag] if group == "nudge" && flag == "--clear" => ControlCommand::NudgeClear,
+        [group, text] if group == "nudge" && !text.starts_with("--") => {
+            ControlCommand::NudgePost(NudgePostParams { text: text.clone() })
         }
         [group, action, rest @ ..] if group == "agent" => parse_agent_command(action, rest)?,
         [group, action, rest @ ..] if group == "session" => parse_session_command(action, rest)?,
@@ -1182,7 +1186,7 @@ fn usage_failure() -> Failure {
 }
 
 fn usage() -> &'static str {
-    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|hook show|hook set --command CMD [--states STATE,...]|hook clear|project set ROOT OPTIONS|project remove ROOT|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|brief|brief post --json JSON|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session pin ID|session unpin|session visits [--since MS] [--limit N]|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session fork ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, files, brief and updates, SCOPE is all|staged|unstaged|untracked|committed|commit)"
+    "usage: agtkctl [--instance NAME] <state|ui inspect|ui capture|ui show SURFACE|ui diff SESSION_ID --scope SCOPE --path PATH [--commit OID]|ui file SESSION_ID --path PATH [--line N] [--column N]|appearance set OPTIONS|shortcut set OPTIONS|shortcut reset --action ACTION|hook show|hook set --command CMD [--states STATE,...]|hook clear|project set ROOT OPTIONS|project remove ROOT|worktree list ROOT|worktree create ROOT OPTIONS|worktree reap PATH GUARDS|pr list ROOT|pr acknowledge ROOT ID MARKER|pr auto-review ROOT on|off|pr review ROOT ID|claude presets [--json JSON]|claude apply SESSION_ID PRESET_ID|brief|brief post --json JSON|nudge TEXT|nudge --clear|agent list OPTIONS|agent preview PROVIDER ID OPTIONS|agent restore PROVIDER ID OPTIONS|session create OPTIONS|session select ID|session pin ID|session unpin|session visits [--since MS] [--limit N]|session input ID --text TEXT [--no-enter]|session text ID [--lines N]|session rename ID --name NAME|session worktree ID --path PATH|session close ID [--allow-missing]|session restart ID|session fork ID|session state ID STATE [--hook-input]|session magit ID|session review ID|wait OPTIONS> (SURFACE includes changes, files, brief and updates, SCOPE is all|staged|unstaged|untracked|committed|commit)"
 }
 
 fn client_exit_code(error: &ClientError) -> u8 {

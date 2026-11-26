@@ -42,3 +42,10 @@ Decisions:
     in the main area closes the sidebar there.
 11. No keyboard shortcut for now. The row, a click in the panel,
     `select_session` and Next ready session all go to the panel.
+12. A nudge is one short message above the panel's header, in the accent
+    color. It is for an assistant that wants to interrupt the user. It opens
+    the right sidebar, because an interrupt that nobody sees is no use. Only
+    one shows at a time, and it stays until the user closes it or the caller
+    clears it. It belongs to the panel: it is refused when no session is
+    pinned, and it goes away when the panel empties or agtk restarts. A caller
+    that needs to know if the user saw it reads `nudge` from the state.

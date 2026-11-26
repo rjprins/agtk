@@ -23,6 +23,8 @@ const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_TEXT_LINES: u32 = 20_000;
 const MAX_VISITS: u32 = 1_000;
+/// A nudge is one glance, not a message to read.
+const MAX_NUDGE_CHARS: usize = 300;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ControlRequest {
@@ -57,6 +59,9 @@ pub enum ControlCommand {
     ClaudePresetApply(ClaudePresetApplyParams),
     BriefPost(BriefPostParams),
     BriefGet,
+    /// Shows a short message above the pinned session's panel.
+    NudgePost(NudgePostParams),
+    NudgeClear,
     AgentList(AgentListParams),
     AgentPreview(AgentPreviewParams),
     AgentRestore(AgentRestoreParams),
@@ -118,6 +123,12 @@ pub struct SendInputParams {
     pub text: String,
     #[serde(default = "default_true")]
     pub append_enter: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NudgePostParams {
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -610,6 +621,20 @@ pub fn decode_request(bytes: &[u8]) -> Result<ControlRequest, ControlError> {
             decode_empty_params(wire.params)?;
             ControlCommand::BriefGet
         }
+        "nudge.post" => {
+            let params: NudgePostParams = decode_params(wire.params)?;
+            if params.text.trim().is_empty() {
+                return Err(invalid_params("text cannot be empty"));
+            }
+            if params.text.chars().count() > MAX_NUDGE_CHARS {
+                return Err(invalid_params("text is longer than 300 characters"));
+            }
+            ControlCommand::NudgePost(params)
+        }
+        "nudge.clear" => {
+            decode_empty_params(wire.params)?;
+            ControlCommand::NudgeClear
+        }
         "agent.list" => {
             let params: AgentListParams = decode_params(wire.params)?;
             validate_agent_list(&params)?;
@@ -806,6 +831,8 @@ impl ControlCommand {
             Self::ClaudePresetApply(_) => "claude.preset_apply",
             Self::BriefPost(_) => "brief.post",
             Self::BriefGet => "brief.get",
+            Self::NudgePost(_) => "nudge.post",
+            Self::NudgeClear => "nudge.clear",
             Self::AgentList(_) => "agent.list",
             Self::AgentPreview(_) => "agent.preview",
             Self::AgentRestore(_) => "agent.restore",
@@ -860,6 +887,8 @@ impl ControlCommand {
             }
             Self::BriefPost(params) => Ok(("brief.post", serde_json::to_value(params)?)),
             Self::BriefGet => Ok(("brief.get", empty_params())),
+            Self::NudgePost(params) => Ok(("nudge.post", serde_json::to_value(params)?)),
+            Self::NudgeClear => Ok(("nudge.clear", empty_params())),
             Self::AgentList(params) => Ok(("agent.list", serde_json::to_value(params)?)),
             Self::AgentPreview(params) => Ok(("agent.preview", serde_json::to_value(params)?)),
             Self::AgentRestore(params) => Ok(("agent.restore", serde_json::to_value(params)?)),

@@ -12,6 +12,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
         protocol_version: 1,
         selected_session_id: Some("shell-1".to_owned()),
         pinned_session_id: None,
+        nudge: None,
         appearance: AppearanceSummary {
             theme: ThemeKey::Neutral,
             effective_theme: ThemeKey::Neutral,
@@ -71,6 +72,7 @@ fn application_state_has_a_stable_machine_readable_shape() {
             "protocolVersion": 1,
             "selectedSessionId": "shell-1",
             "pinnedSessionId": null,
+            "nudge": null,
             "appearance": {
                 "theme": "neutral",
                 "effectiveTheme": "neutral",
