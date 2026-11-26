@@ -216,7 +216,6 @@ struct Workspace {
     settled_reviews: Rc<RefCell<HashSet<(String, u64)>>>,
     session_pr_cache: Rc<RefCell<HashMap<String, AzurePr>>>,
     /// Prompts waiting for their agent to rest, by session.
-    queued_prompts: Rc<RefCell<HashMap<String, std::collections::VecDeque<String>>>>,
     /// When each agent was last restarted for a CLI update, so the poll asks once
     /// and only tries again if that restart was skipped.
     update_restarts: Rc<RefCell<HashMap<String, u64>>>,
@@ -785,7 +784,6 @@ pub fn build(app: &adw::Application, paths: InstancePaths) {
         pr_context_cache: Rc::new(RefCell::new(HashMap::new())),
         settled_reviews: Rc::default(),
         session_pr_cache: Rc::new(RefCell::new(HashMap::new())),
-        queued_prompts: Rc::default(),
         update_restarts: Rc::default(),
         claude_presets: Rc::new(RefCell::new(ClaudePresetPreferences::default())),
         brief: Rc::new(RefCell::new(crate::brief::Brief::default())),

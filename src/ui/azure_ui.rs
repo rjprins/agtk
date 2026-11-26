@@ -998,14 +998,14 @@ impl Workspace {
                     let session_id = context.session_id.clone();
                     let workspace = self.clone();
                     send.connect_clicked(move |button| {
-                        let sent = workspace.queue_agent_prompt(&session_id, prompt.clone());
-                        button.set_icon_name("object-select-symbolic");
+                        let sent = workspace.send_agent_prompt(&session_id, &prompt);
                         let message = if sent {
+                            button.set_icon_name("object-select-symbolic");
+                            button.set_tooltip_text(Some("Sent the comment to the agent"));
                             "Sent the comment to the agent"
                         } else {
-                            "The comment goes to the agent once it is ready"
+                            "The agent is not connected, so the comment was not sent"
                         };
-                        button.set_tooltip_text(Some(message));
                         workspace.overlay.add_toast(adw::Toast::new(message));
                     });
                     top.append(&send);
@@ -1918,78 +1918,37 @@ impl Workspace {
         }
     }
 
-    /// Queues a prompt for an agent and sends it once the agent rests. A draft
-    /// does not hold it back: the prompt is added after the draft and sent with it.
-    pub(super) fn queue_agent_prompt(&self, session_id: &str, prompt: String) -> bool {
-        self.queued_prompts
-            .borrow_mut()
-            .entry(session_id.to_owned())
-            .or_default()
-            .push_back(prompt);
-        self.deliver_queued_prompts();
-        !self.queued_prompts.borrow().contains_key(session_id)
-    }
-
-    pub(super) fn deliver_queued_prompts(&self) {
-        if self.queued_prompts.borrow().is_empty() {
-            return;
-        }
-        self.queued_prompts
-            .borrow_mut()
-            .retain(|id, _| self.sessions.borrow().contains_key(id));
-        let terminals = self
+    /// Types a prompt into an agent and submits it right away. The agent CLI queues
+    /// it if a turn is running. A draft is kept: the prompt goes after it.
+    /// Returns false when the session has no live terminal to type into.
+    pub(super) fn send_agent_prompt(&self, session_id: &str, prompt: &str) -> bool {
+        let target = self
             .sessions
             .borrow()
-            .values()
-            .filter(|session| {
-                self.queued_prompts
-                    .borrow()
-                    .contains_key(&session.record.id)
-                    && session.control.is_some()
-                    && matches!(
-                        session.record.state,
-                        SessionState::Ready | SessionState::Idle
-                    )
-                    && now_millis().saturating_sub(session.record.state_changed_at) >= 2_000
-                    && {
-                        let rules = crate::agent_status::rules_for(session.record.kind);
-                        let screen = status_ui::screen_text(&session.terminal);
-                        rules.activity_region(&screen).is_some()
-                            && !matches!(
-                                rules.classify(&screen),
-                                Some(
-                                    crate::agent_status::Signal::Working
-                                        | crate::agent_status::Signal::Waiting
-                                )
-                            )
-                    }
-            })
+            .get(session_id)
+            .filter(|session| session.control.is_some())
             .map(|session| {
                 let has_text = crate::agent_status::rules_for(session.record.kind)
                     .composer_has_text(&status_ui::screen_text(&session.terminal));
                 (
-                    session.record.id.clone(),
                     session.terminal.clone(),
                     session.input_tracker.clone(),
                     has_text,
                 )
-            })
-            .collect::<Vec<_>>();
+            });
+        let Some((terminal, tracker, has_text)) = target else {
+            return false;
+        };
         // Terminal input can re-enter session callbacks: all session borrows are released.
-        for (id, terminal, tracker, has_text) in terminals {
-            let Some(prompts) = self.queued_prompts.borrow_mut().remove(&id) else {
-                continue;
-            };
-            let message = prompts.into_iter().collect::<Vec<_>>().join("\n\n");
-            self.mark_agent_busy(&id);
-            let separator = if has_text { "\n\n" } else { "" };
-            terminal.paste_text(&format!("{separator}{message}"));
-            terminal.feed_child(b"\r");
-            let submitted = tracker.borrow_mut().push("\r");
-            if let Some(input) = submitted {
-                self.record_typed_input(&id, input);
-            }
+        self.mark_agent_busy(session_id);
+        let separator = if has_text { "\n\n" } else { "" };
+        terminal.paste_text(&format!("{separator}{prompt}"));
+        terminal.feed_child(b"\r");
+        let submitted = tracker.borrow_mut().push("\r");
+        if let Some(input) = submitted {
+            self.record_typed_input(session_id, input);
         }
+        true
     }
 
     /// Finds the Azure DevOps projects in the sidebar and refreshes their PR attention.

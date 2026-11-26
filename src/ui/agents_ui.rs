@@ -1080,7 +1080,6 @@ impl Workspace {
             .flatten();
         let ids = {
             let sessions = self.sessions.borrow();
-            let queued = self.queued_prompts.borrow();
             let mut restarting = self.update_restarts.borrow_mut();
             let now = now_millis();
             restarting.retain(|id, at| {
@@ -1096,7 +1095,6 @@ impl Workspace {
                             >= UPDATE_RESTART_REST_MS
                         && in_front.as_ref() != Some(id)
                         && !restarting.contains_key(id)
-                        && !queued.contains_key(id)
                         && {
                             let rules = crate::agent_status::rules_for(s.record.kind);
                             let screen = status_ui::screen_text(&s.terminal);
