@@ -39,6 +39,8 @@ pub struct PrUpdate {
     /// Unix milliseconds.
     pub at: u64,
     pub kind: PrUpdateKind,
+    /// The PR is one the user wrote.
+    pub on_own_pr: bool,
 }
 
 impl PrUpdate {
@@ -86,6 +88,7 @@ pub fn pr_updates<'a>(
                 .votes
                 .iter()
                 .any(|vote| is_me(vote.voter_unique_name.as_deref()));
+        let own = pull_request.is_own_author || is_me(pull_request.author_unique_name.as_deref());
         let update = |id: String, thread_id, author: &str, at, kind| PrUpdate {
             id: format!("{}:{id}", pull_request.id),
             pr_id: pull_request.id,
@@ -95,6 +98,7 @@ pub fn pr_updates<'a>(
             author: author.to_owned(),
             at,
             kind,
+            on_own_pr: own,
         };
         let mut published = false;
         for event in &pull_request.status_events {
@@ -115,7 +119,6 @@ pub fn pr_updates<'a>(
                 kind,
             ));
         }
-        let own = pull_request.is_own_author || is_me(pull_request.author_unique_name.as_deref());
         // A PR opened ready for review has no draft thread: it was published when made.
         if !published && !pull_request.is_draft && !own && pull_request.threads.is_some() {
             updates.push(update(
@@ -249,6 +252,7 @@ mod tests {
         assert_eq!(updates[0].author, "BOB@EXAMPLE.COM");
         assert_eq!(updates[1].at, 100);
         assert_eq!(updates[0].id, "1:vote:11");
+        assert!(updates.iter().all(|update| update.on_own_pr));
         assert_eq!(updates[1].id, "1:comment:10:1");
         assert_eq!(
             updates[0].link(),
@@ -278,6 +282,11 @@ mod tests {
         assert_eq!(
             comments_on(pr_updates([&reviewing, &commented, &other], Some(ME))),
             vec![2, 1]
+        );
+        assert!(
+            pr_updates([&reviewing], Some(ME))
+                .iter()
+                .all(|update| !update.on_own_pr)
         );
         assert_eq!(comments_on(pr_updates([&other], None)), vec![3]);
     }

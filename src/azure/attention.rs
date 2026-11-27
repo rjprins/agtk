@@ -63,6 +63,9 @@ pub struct PrPreferences {
     pub updates_closed: BTreeMap<String, u64>,
     #[serde(default)]
     pub updates_closed_expanded: bool,
+    /// The Updates page lists only updates on PRs the user wrote.
+    #[serde(default)]
+    pub updates_only_mine: bool,
 }
 
 /// Settings shared by automatic and manual PR reviews. Empty fields inherit the agent's config.

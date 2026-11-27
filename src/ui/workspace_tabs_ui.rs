@@ -84,6 +84,8 @@ impl Workspace {
         }
         self.render_history(Some(session_id));
         self.refresh_selected_pr_context(session_id);
+        // The Updates page shows the selected session's project.
+        self.render_pr_updates();
         self.search_button.set_sensitive(true);
         self.save_preference("selectedSessionId", serde_json::json!(session_id));
         self.render_workspace_tabs();
@@ -318,6 +320,8 @@ impl Workspace {
         self.render_workspace_tabs();
         self.render_history(Some(session_id));
         self.refresh_selected_pr_context(session_id);
+        // The Updates page shows the selected session's project.
+        self.render_pr_updates();
         self.search_button.set_sensitive(true);
         self.refresh_changes();
         self.update_emacs_actions();

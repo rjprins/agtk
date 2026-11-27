@@ -1,6 +1,7 @@
 //! The Updates page of the right sidebar: comments and votes by other people on
-//! the PRs the user wrote or reviews, newest first, with a dot on the tab for
-//! what came in since the user last looked.
+//! the PRs the user wrote or reviews in the selected session's project, newest
+//! first, with a dot on the tab for what came in since the user last looked.
+//! The tab is hidden while that project has no updates.
 
 use super::*;
 use crate::azure::{PrUpdate, PrUpdateKind, pr_updates};
@@ -10,11 +11,14 @@ pub(super) const UPDATES_PAGE: &str = "updates";
 const MAX_UPDATES: usize = 150;
 /// How long a closed update stays closed. Long after its PR is done.
 const REMEMBER_CLOSED_MILLIS: u64 = 90 * 24 * 60 * 60 * 1000;
-const EMPTY_TEXT: &str = "No PR updates yet. Comments and votes by others on PRs you wrote or review, and PRs others publish, merge or abandon, show up here once agtk has checked the projects in the sidebar.";
+const EMPTY_TEXT: &str =
+    "No updates on PRs you wrote. Choose All for the PRs you review or took part in.";
 
 #[derive(Clone)]
 pub(super) struct UpdatesPage {
     pub root: gtk::Box,
+    /// Active: only updates on the user's own PRs. Grouped with an All button.
+    pub mine: gtk::ToggleButton,
     pub rows: gtk::Box,
     /// Closed updates, kept at the bottom like Hidden in the brief.
     pub closed: gtk::Box,
@@ -23,6 +27,22 @@ pub(super) struct UpdatesPage {
 impl UpdatesPage {
     pub fn new() -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let all = gtk::ToggleButton::with_label("All");
+        all.set_tooltip_text(Some(
+            "Updates on every PR you wrote, review or took part in",
+        ));
+        let mine = gtk::ToggleButton::with_label("My PRs");
+        mine.set_tooltip_text(Some("Only updates on PRs you wrote"));
+        mine.set_group(Some(&all));
+        all.set_active(true);
+        let filter = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        filter.add_css_class("linked");
+        filter.set_halign(gtk::Align::Center);
+        filter.set_margin_top(6);
+        filter.set_margin_bottom(6);
+        filter.append(&all);
+        filter.append(&mine);
+        root.append(&filter);
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
@@ -43,7 +63,12 @@ impl UpdatesPage {
         content.append(&closed);
         scroll.set_child(Some(&content));
         root.append(&scroll);
-        Self { root, rows, closed }
+        Self {
+            root,
+            mine,
+            rows,
+            closed,
+        }
     }
 }
 
@@ -58,6 +83,18 @@ impl Workspace {
         let workspace = self.clone();
         self.window
             .connect_is_active_notify(move |_| workspace.sync_pr_updates_view());
+        let only_mine = self.pr_preferences.borrow().updates_only_mine;
+        self.changes.updates.mine.set_active(only_mine);
+        let workspace = self.clone();
+        self.changes.updates.mine.connect_toggled(move |mine| {
+            let only_mine = mine.is_active();
+            if workspace.pr_preferences.borrow().updates_only_mine != only_mine {
+                workspace.change_pr_preferences(|preferences| {
+                    preferences.updates_only_mine = only_mine;
+                });
+                workspace.render_pr_updates();
+            }
+        });
         self.render_pr_updates();
     }
 
@@ -76,37 +113,64 @@ impl Workspace {
         }
     }
 
-    /// Every project's updates, newest first, from its active PRs and the ones
-    /// closed in the last week, so a PR's updates stay when it is merged.
+    /// The selected session's project's updates, newest first, from its active
+    /// PRs and the ones closed in the last week, so a PR's updates stay when it
+    /// is merged. Empty without a selected session or a polled project.
     pub(super) fn pr_update_list(&self) -> Vec<PrUpdate> {
-        let mut updates = self
-            .pr_context_cache
-            .borrow()
-            .values()
-            .flat_map(|context| {
-                pr_updates(
-                    context
-                        .pull_requests
-                        .iter()
-                        .map(|item| &item.pull_request)
-                        .chain(&context.closed_pull_requests),
-                    context.current_user.as_deref(),
-                )
-            })
-            .collect::<Vec<_>>();
-        updates.sort_by_key(|update| std::cmp::Reverse(update.at));
+        let root = self.selected_session_id().and_then(|id| {
+            self.sessions
+                .borrow()
+                .get(&id)
+                .and_then(|session| session.record.project_root.clone())
+        });
+        let Some(root) = root else {
+            return Vec::new();
+        };
+        let cache = self.pr_context_cache.borrow();
+        let Some(context) = cache.get(&azure_ui::pr_cache_key(&root)) else {
+            return Vec::new();
+        };
+        let mut updates = pr_updates(
+            context
+                .pull_requests
+                .iter()
+                .map(|item| &item.pull_request)
+                .chain(&context.closed_pull_requests),
+            context.current_user.as_deref(),
+        );
         updates.truncate(MAX_UPDATES);
         updates
+    }
+
+    /// Shows the tab only while the project has updates, open or closed. A
+    /// hidden tab gives way to Changes without remembering that as the
+    /// user's choice.
+    fn set_pr_updates_tab_visible(&self, visible: bool) {
+        let page = self.changes.pages.page(&self.changes.updates.root);
+        if page.is_visible() == visible {
+            return;
+        }
+        page.set_visible(visible);
+        if !visible && self.changes.pages.visible_child_name().as_deref() == Some(UPDATES_PAGE) {
+            self.changes.restoring_page.set(true);
+            self.changes
+                .pages
+                .set_visible_child_name(explorer_ui::CHANGES_PAGE);
+            self.changes.restoring_page.set(false);
+        }
     }
 
     /// Rebuilds the page and its tab's dot. While the user looks at the page,
     /// what it shows counts as seen; the rows that were new when they opened it
     /// stay marked until they leave it.
     pub(super) fn render_pr_updates(&self) {
+        let all_updates = self.pr_update_list();
+        self.set_pr_updates_tab_visible(!all_updates.is_empty());
         let (updates, closed): (Vec<_>, Vec<_>) = {
             let preferences = self.pr_preferences.borrow();
-            self.pr_update_list()
+            all_updates
                 .into_iter()
+                .filter(|update| !preferences.updates_only_mine || update.on_own_pr)
                 .partition(|update| !preferences.updates_closed.contains_key(&update.id))
         };
         let newest = updates.first().map_or(0, |update| update.at);
@@ -167,6 +231,7 @@ impl Workspace {
             }
         }
         if updates.is_empty() {
+            // The tab shows only with updates, so an empty list comes from My PRs.
             let message = gtk::Label::new(Some(if closed.is_empty() {
                 EMPTY_TEXT
             } else {
