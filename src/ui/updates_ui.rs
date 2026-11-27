@@ -337,16 +337,21 @@ impl Workspace {
             body.append(&text_label);
         }
 
-        let open = gtk::Button::new();
-        open.add_css_class("flat");
-        open.add_css_class("pr-update-open");
-        open.set_child(Some(&body));
-        open.set_hexpand(true);
-        open.set_tooltip_text(Some("Open in Azure DevOps"));
-        let link = update.link();
+        // Clicking an update closes it, or opens a closed one again.
+        let item = gtk::Button::new();
+        item.add_css_class("flat");
+        item.add_css_class("pr-update-open");
+        item.set_child(Some(&body));
+        item.set_hexpand(true);
+        item.set_tooltip_text(Some(if closed {
+            "Open again"
+        } else {
+            "Close. The comment or vote itself is not changed."
+        }));
         let workspace = self.clone();
-        open.connect_clicked(move |_| workspace.open_pr_link(&link));
-        row.append(&open);
+        let id = update.id.clone();
+        item.connect_clicked(move |_| workspace.set_pr_update_closed(&id, !closed));
+        row.append(&item);
 
         if let Some(session) = self.session_for_pr(update.pr_id) {
             let go = brief_ui::brief_button(
@@ -360,19 +365,11 @@ impl Workspace {
             });
             row.append(&go);
         }
-        let (icon, tooltip) = if closed {
-            ("view-reveal-symbolic", "Open again")
-        } else {
-            (
-                "window-close-symbolic",
-                "Close. The comment or vote itself is not changed.",
-            )
-        };
-        let toggle = brief_ui::brief_button(icon, tooltip);
+        let open = brief_ui::brief_button("adw-external-link-symbolic", "Open in Azure DevOps");
+        let link = update.link();
         let workspace = self.clone();
-        let id = update.id.clone();
-        toggle.connect_clicked(move |_| workspace.set_pr_update_closed(&id, !closed));
-        row.append(&toggle);
+        open.connect_clicked(move |_| workspace.open_pr_link(&link));
+        row.append(&open);
         row.upcast()
     }
 }
