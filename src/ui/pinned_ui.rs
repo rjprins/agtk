@@ -87,6 +87,7 @@ impl PinnedPanel {
         host.add_controller(focus.clone());
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.add_css_class("pinned-panel");
         root.set_size_request(-1, MIN_PANEL_HEIGHT);
         root.append(&nudge_bar);
         root.append(&header);

@@ -148,11 +148,12 @@ button.brief-action.image-button.success {
   border-radius: 50%;
   background: var(--accent-bg-color);
 }
-/* The strip above the pinned session's terminal in the right sidebar. */
-.pinned-header {
-  padding: 2px 6px 2px 12px;
-  border-top: 1px solid var(--borders);
-}
+/* The pinned session's terminal has the color of the terminal in the main
+   area, so a line keeps the two apart. */
+.pinned-panel { border-left: 1px solid var(--border-color); }
+/* The strip above the pinned session's terminal. The divider above it
+   already draws a line. */
+.pinned-header { padding: 2px 6px 2px 12px; }
 .pinned-header button { min-height: 24px; min-width: 24px; padding: 0; }
 .pinned-nudge { padding: 6px 6px 6px 12px; background-color: var(--accent-bg-color); color: var(--accent-fg-color); }
 .pinned-nudge button { min-height: 24px; min-width: 24px; padding: 0; color: inherit; }
