@@ -76,7 +76,8 @@ impl Workspace {
         }
     }
 
-    /// Every project's updates, newest first.
+    /// Every project's updates, newest first, from its active PRs and the ones
+    /// closed in the last week, so a PR's updates stay when it is merged.
     pub(super) fn pr_update_list(&self) -> Vec<PrUpdate> {
         let mut updates = self
             .pr_context_cache
@@ -84,7 +85,11 @@ impl Workspace {
             .values()
             .flat_map(|context| {
                 pr_updates(
-                    context.pull_requests.iter().map(|item| &item.pull_request),
+                    context
+                        .pull_requests
+                        .iter()
+                        .map(|item| &item.pull_request)
+                        .chain(&context.closed_pull_requests),
                     context.current_user.as_deref(),
                 )
             })
