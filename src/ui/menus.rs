@@ -233,9 +233,6 @@ impl Workspace {
         self.add_target_action("project-remote-control", |workspace, root| {
             workspace.toggle_project_remote_control(root)
         });
-        self.add_target_action("project-pr-updates", |workspace, root| {
-            workspace.toggle_project_pr_updates(root)
-        });
     }
 
     pub(super) fn add_target_action(&self, name: &str, activate: impl Fn(&Self, &str) + 'static) {

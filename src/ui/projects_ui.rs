@@ -42,18 +42,6 @@ impl Workspace {
         self.save_projects(None);
     }
 
-    pub(super) fn toggle_project_pr_updates(&self, root: &str) {
-        if self.store.borrow().is_none() {
-            self.report_projects_loading(None);
-            return;
-        }
-        let hide = !self.projects.borrow().get(root).hide_pr_updates;
-        self.projects.borrow_mut().set_hide_pr_updates(root, hide);
-        self.rebuild_sidebar();
-        self.save_projects(None);
-        self.render_pr_updates();
-    }
-
     /// Lists the project a session runs in, so it stays listed once its sessions close.
     pub(super) fn remember_project(&self, root: Option<&Path>) {
         let Some(root) = root else {
@@ -296,7 +284,7 @@ impl Workspace {
                 let settings = ProjectSettings {
                     is_pinned: project.is_pinned,
                     is_collapsed: project.is_collapsed,
-                    ..self.projects.borrow().get(&project.root)
+                    remote_control: self.projects.borrow().get(&project.root).remote_control,
                 };
                 keys.push(SidebarKey::project_key(
                     &project.root,
@@ -617,15 +605,6 @@ impl Workspace {
                 "Start Claude with Remote Control"
             },
             "win.project-remote-control",
-            root,
-        ));
-        pin.append_item(&menus::targeted_item(
-            if settings.hide_pr_updates {
-                "Show PR Updates"
-            } else {
-                "Hide PR Updates"
-            },
-            "win.project-pr-updates",
             root,
         ));
         menu.append_section(None, &pin);
@@ -968,7 +947,7 @@ const KEY_SEPARATOR: char = '\u{1f}';
 impl<'a> SidebarKey<'a> {
     const OTHER: &'static str = "other";
 
-    /// Pin, collapse, Remote Control, hidden PR updates and PR state are part of the key, so changing them rebuilds the header.
+    /// Pin, collapse, Remote Control and PR state are part of the key, so changing them rebuilds the header.
     fn project_key(
         root: &str,
         name: &str,
@@ -976,11 +955,10 @@ impl<'a> SidebarKey<'a> {
         pr_attention: Option<usize>,
     ) -> String {
         format!(
-            "project{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{root}{KEY_SEPARATOR}{name}",
+            "project{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{}{KEY_SEPARATOR}{root}{KEY_SEPARATOR}{name}",
             u8::from(settings.is_pinned),
             u8::from(settings.is_collapsed),
             u8::from(settings.remote_control),
-            u8::from(settings.hide_pr_updates),
             pr_attention.map_or_else(|| "-".to_owned(), |count| count.to_string()),
         )
     }
@@ -1005,7 +983,7 @@ impl<'a> SidebarKey<'a> {
         if key == Self::OTHER {
             return Some(Self::Other);
         }
-        let mut parts = key.splitn(8, KEY_SEPARATOR);
+        let mut parts = key.splitn(7, KEY_SEPARATOR);
         match parts.next()? {
             "session" => Some(Self::Session(parts.next()?)),
             "inactive" => {
@@ -1020,7 +998,6 @@ impl<'a> SidebarKey<'a> {
                 let is_pinned = parts.next()? == "1";
                 let is_collapsed = parts.next()? == "1";
                 let remote_control = parts.next()? == "1";
-                let hide_pr_updates = parts.next()? == "1";
                 let pr_attention = parts.next()?.parse().ok();
                 Some(Self::Project {
                     root: parts.next()?,
@@ -1029,7 +1006,6 @@ impl<'a> SidebarKey<'a> {
                         is_pinned,
                         is_collapsed,
                         remote_control,
-                        hide_pr_updates,
                     },
                     pr_attention,
                 })
@@ -1097,7 +1073,6 @@ mod sidebar_tests {
                 is_pinned: true,
                 is_collapsed: false,
                 remote_control: true,
-                hide_pr_updates: true,
             },
             Some(2),
         );
@@ -1111,12 +1086,7 @@ mod sidebar_tests {
             panic!("project key did not parse");
         };
         assert_eq!((root, name), ("/work/agtk", "agtk"));
-        assert!(
-            settings.is_pinned
-                && !settings.is_collapsed
-                && settings.remote_control
-                && settings.hide_pr_updates
-        );
+        assert!(settings.is_pinned && !settings.is_collapsed && settings.remote_control);
         assert_eq!(pr_attention, Some(2));
     }
 

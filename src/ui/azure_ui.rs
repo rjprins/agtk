@@ -2062,7 +2062,7 @@ fn worktree_for_branch(worktrees: &[PorcelainWorktree], branch: &str) -> Option<
         .map(|worktree| worktree.path.clone())
 }
 
-pub(super) fn pr_cache_key(root: &Path) -> String {
+fn pr_cache_key(root: &Path) -> String {
     root.canonicalize()
         .unwrap_or_else(|_| root.to_path_buf())
         .to_string_lossy()

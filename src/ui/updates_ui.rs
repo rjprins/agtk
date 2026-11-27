@@ -78,22 +78,11 @@ impl Workspace {
 
     /// Every project's updates, newest first, from its active PRs and the ones
     /// closed in the last week, so a PR's updates stay when it is merged.
-    /// Projects set to hide their PR updates are left out.
     pub(super) fn pr_update_list(&self) -> Vec<PrUpdate> {
-        let hidden = self
-            .projects
-            .borrow()
-            .projects
-            .iter()
-            .filter(|(_, settings)| settings.hide_pr_updates)
-            .map(|(root, _)| azure_ui::pr_cache_key(Path::new(root)))
-            .collect::<HashSet<_>>();
         let mut updates = self
             .pr_context_cache
             .borrow()
-            .iter()
-            .filter(|(key, _)| !hidden.contains(key.as_str()))
-            .map(|(_, context)| context)
+            .values()
             .flat_map(|context| {
                 pr_updates(
                     context
