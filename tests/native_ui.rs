@@ -5071,3 +5071,253 @@ fn a_nudge_shows_above_the_pinned_panel_until_it_is_dismissed() {
         app.request("session.close", json!({"sessionId":id}));
     }
 }
+
+#[test]
+#[ignore = "requires AGTK_TEST_DISPLAY private Wayland compositor"]
+fn the_pinned_panel_keeps_a_font_size_of_its_own() {
+    let mut app = App::new();
+    // Each shell answers a line of input with the columns of its terminal.
+    let shell = |app: &App, name: &str| {
+        let session = app.request(
+            "session.create",
+            json!({
+                "kind":"custom","command":"/bin/sh",
+                "args":["-c","stty -echo; printf '__READY__\\n'; while read tag; do printf '__%s_%s__\\n' \"$tag\" \"$(stty size | cut -d' ' -f2)\"; done"],
+                "cwd":app.directory.path(),"name":name
+            }),
+        );
+        let id = session["id"].as_str().unwrap().to_owned();
+        app.wait_text(&id, "__READY__");
+        id
+    };
+    let tags = AtomicU64::new(0);
+    let columns = |app: &App, id: &str| -> u32 {
+        let tag = format!("t{}", tags.fetch_add(1, Ordering::Relaxed));
+        app.request(
+            "session.send_input",
+            json!({"sessionId":id,"text":tag,"appendEnter":true}),
+        );
+        let text = app.wait_text(id, &format!("__{tag}_"));
+        text.lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix(&format!("__{tag}_"))?
+                    .strip_suffix("__")
+            })
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // A terminal learns its new width a moment after its font or its place
+    // changes, and the sidebar slides open, so wait until the width stands still.
+    let wait_columns = |app: &App, id: &str, what: &str, fits: &dyn Fn(u32) -> bool| -> u32 {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut before = 0;
+        loop {
+            let now = columns(app, id);
+            if now == before && fits(now) {
+                return now;
+            }
+            assert!(Instant::now() < deadline, "{what}: {now} columns");
+            before = now;
+            thread::sleep(Duration::from_millis(200));
+        }
+    };
+    let appearance = |app: &App| app.request("app.get_state", json!({}))["appearance"].clone();
+
+    let main = shell(&app, "main");
+    let assistant = shell(&app, "assistant");
+    app.request("session.pin", json!({"sessionId":assistant}));
+    assert_eq!(appearance(&app)["pinnedFontSize"], Value::Null);
+    // Let the sidebar slide open before measuring: it takes room from the main area.
+    thread::sleep(Duration::from_millis(700));
+    let main_columns = wait_columns(&app, &main, "the main terminal has no width", &|c| c > 0);
+    let panel_columns = wait_columns(&app, &assistant, "the panel terminal has no width", &|c| {
+        c > 0
+    });
+
+    // A smaller size in the panel fits more columns there, and only there.
+    let set = app.request("appearance.set", json!({"pinnedFontSize":7}));
+    assert_eq!(set["pinnedFontSize"], 7);
+    assert_eq!(set["font"], "Monospace 11");
+    let small_panel = wait_columns(&app, &assistant, "the panel kept its font", &|c| {
+        c > panel_columns
+    });
+    assert_eq!(
+        wait_columns(&app, &main, "the main terminal has no width", &|c| c > 0),
+        main_columns
+    );
+
+    // The terminal font changes the main area, and no longer the panel.
+    app.request("appearance.set", json!({"font":"Monospace 16"}));
+    wait_columns(&app, &main, "the main terminal kept its font", &|c| {
+        c < main_columns
+    });
+    assert_eq!(
+        wait_columns(&app, &assistant, "the panel has no width", &|c| c > 0),
+        small_panel
+    );
+    assert_eq!(appearance(&app)["pinnedFontSize"], 7);
+
+    // The size is kept over a restart, and stays with the panel, not the session.
+    app.stop();
+    app.start();
+    assert_eq!(appearance(&app)["pinnedFontSize"], 7);
+    wait_columns(&app, &assistant, "the restart lost the panel font", &|c| {
+        c == small_panel
+    });
+    app.request("session.pin", json!({"sessionId":main}));
+    wait_columns(
+        &app,
+        &main,
+        "the new pinned session kept the main font",
+        &|c| c == small_panel,
+    );
+
+    for id in [&main, &assistant] {
+        app.request("session.close", json!({"sessionId":id}));
+    }
+}
+
+#[test]
+#[ignore = "requires a private Mutter display and AGTK_TEST_BUS session bus"]
+fn ctrl_scroll_over_the_pinned_panel_resizes_only_its_terminal() {
+    use glib::variant::ToVariant;
+
+    fn find<'a>(node: &'a Value, id: &str) -> Option<&'a Value> {
+        (node["id"] == id).then_some(node).or_else(|| {
+            node["children"]
+                .as_array()?
+                .iter()
+                .find_map(|child| find(child, id))
+        })
+    }
+
+    assert_eq!(
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap(),
+        std::env::var("AGTK_TEST_BUS").unwrap()
+    );
+    // A maximized window starts at (0, 0), so its coordinates are the pointer's.
+    let mut app = App::new();
+    app.stop();
+    Store::open(&app.paths.database())
+        .unwrap()
+        .set_preference(
+            "windowSize",
+            &json!({"width":1200,"height":800,"maximized":true}),
+        )
+        .unwrap();
+    app.start();
+    let create = |name: &str| {
+        app.request(
+            "session.create",
+            json!({
+                "kind":"custom","command":"/bin/sh","args":["-c","exec sleep 30"],
+                "cwd":app.directory.path(),"name":name
+            }),
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let main = create("main");
+    let assistant = create("assistant");
+    app.request("session.pin", json!({"sessionId":assistant}));
+
+    let bus = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>).unwrap();
+    let destination = "org.gnome.Mutter.RemoteDesktop";
+    let remote = bus
+        .call_sync(
+            Some(destination),
+            "/org/gnome/Mutter/RemoteDesktop",
+            destination,
+            "CreateSession",
+            None,
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    let path = remote.child_value(0).str().unwrap().to_owned();
+    let call = |method: &str, parameters: Option<glib::Variant>| {
+        bus.call_sync(
+            Some(destination),
+            &path,
+            "org.gnome.Mutter.RemoteDesktop.Session",
+            method,
+            parameters.as_ref(),
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+        )
+        .unwrap();
+    };
+    call("Start", None);
+    let key = |code: u32, state: bool| {
+        call("NotifyKeyboardKeycode", Some((code, state).to_variant()));
+    };
+    let wheel = |steps: i32| {
+        call(
+            "NotifyPointerAxisDiscrete",
+            Some((0_u32, steps).to_variant()),
+        );
+    };
+    // Puts the pointer inside a part of the window, a share of its width from its left edge.
+    let move_into = |node: &str, across: f64| {
+        let inspection = app.request("ui.inspect", json!({}));
+        let bounds = &find(&inspection["root"], node).unwrap()["bounds"];
+        let x = bounds["x"].as_f64().unwrap() + bounds["width"].as_f64().unwrap() * across;
+        let y = bounds["y"].as_f64().unwrap() + bounds["height"].as_f64().unwrap() * 0.6;
+        call(
+            "NotifyPointerMotionRelative",
+            Some((-10000.0_f64, -10000.0_f64).to_variant()),
+        );
+        call("NotifyPointerMotionRelative", Some((x, y).to_variant()));
+        thread::sleep(Duration::from_millis(100));
+    };
+    let assert_sizes = |font: &str, pinned: Value| {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let appearance = app.request("app.get_state", json!({}))["appearance"].clone();
+            if appearance["font"] == font && appearance["pinnedFontSize"] == pinned {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "expected terminal {font}, pinned {pinned}: {appearance}"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
+    };
+    // Let the sidebar slide open, then click in the panel: that makes the
+    // window the active one, so that it gets the keys.
+    thread::sleep(Duration::from_millis(700));
+    move_into("pinned-panel", 0.5);
+    call("NotifyPointerButton", Some((272_i32, true).to_variant()));
+    call("NotifyPointerButton", Some((272_i32, false).to_variant()));
+    thread::sleep(Duration::from_millis(300));
+    // The virtual keyboard drops its first key, so spend one.
+    key(42, true);
+    key(42, false);
+
+    // Over the panel only its own size moves. It starts from the terminal size.
+    key(29, true);
+    wheel(1);
+    assert_sizes("Monospace 11", json!(10));
+    wheel(1);
+    assert_sizes("Monospace 11", json!(9));
+    wheel(-1);
+    assert_sizes("Monospace 11", json!(10));
+    key(29, false);
+
+    // The shortcut that enlarges everything takes the panel along.
+    app.activate_action("increase-font-size");
+    assert_sizes("Monospace 12", json!(11));
+
+    call("Stop", None);
+    for id in [&main, &assistant] {
+        app.request("session.close", json!({"sessionId":id}));
+    }
+}

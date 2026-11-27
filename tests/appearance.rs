@@ -82,3 +82,28 @@ fn older_appearance_preferences_receive_default_ui_and_viewer_sizes() {
         11
     );
 }
+
+#[test]
+fn the_pinned_panel_has_no_font_size_of_its_own_until_one_is_set() {
+    assert_eq!(AppearancePreferences::default().pinned_font_size, None);
+    let saved_before: AppearancePreferences = serde_json::from_value(serde_json::json!({
+        "theme": "neutral",
+        "followSystem": false,
+        "font": "Monospace 11",
+        "uiFontSize": 13,
+        "viewerFontSize": 11
+    }))
+    .expect("deserialize preferences saved before the pinned panel");
+    assert_eq!(saved_before.pinned_font_size, None);
+
+    let preferences = AppearancePreferences {
+        pinned_font_size: Some(9),
+        ..AppearancePreferences::default()
+    };
+    let json = serde_json::to_value(&preferences).unwrap();
+    assert_eq!(json["pinnedFontSize"], 9);
+    assert_eq!(
+        serde_json::from_value::<AppearancePreferences>(json).unwrap(),
+        preferences
+    );
+}

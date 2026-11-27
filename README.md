@@ -125,6 +125,7 @@ Pin one session, such as your assistant, to the right sidebar. It then stays in 
 - Copy, paste and Close selected session act on the pinned session while you type in its panel. Search, prompt history and the Claude preset stay with the selected session.
 - A file path clicked in the panel opens in the main area, with the tabs of the selected session.
 - To move the session back, click the pin button in the panel, choose Unpin from Side Panel in the row menu, or run `agtkctl session unpin`. An agent can use `unpin_session`.
+- The panel has its own text size. Hold Ctrl and scroll over the panel to change it, or run `agtkctl appearance set --pinned-font-size 9`. Sizes from 6 to 32 work. Until you change it, the panel uses the terminal size. The size stays with the panel: a session gets the terminal size back when you unpin it.
 - A script or the pinned agent itself can show a short message above the panel: `agtkctl nudge "The review waits for you"`, or the MCP tool `post_nudge`. The message can be 300 characters long and opens the right sidebar. A new one replaces the one before. It stays until you click its close button, or until `agtkctl nudge --clear` or `clear_nudge` removes it. `agtkctl state` and `list_sessions` give the message that still shows as `nudge`.
 - agtk remembers the pinned session when it restarts. It stays pinned after Restart Agent and after a resume following a reboot.
 - In a narrow window the right sidebar lies over the main area. Going to a session in the main area then closes the sidebar. Going to the pinned session opens it again.
@@ -135,7 +136,7 @@ Pin one session, such as your assistant, to the right sidebar. It then stays in 
 - Selected text is copied to the clipboard.
 - Click a file path such as `src/main.rs:42:7` to open it in the file viewer at that line, or `Ctrl+click` it to open it in Emacs. Click a URL to open it in the browser.
 - `Ctrl++` and `Ctrl+-` scale the font of the whole window.
-- `Ctrl+Scroll` up or down increases or decreases text size under the pointer: the UI, terminals, or file/diff viewer. Each surface has its own saved size; terminal size applies to all sessions, and viewer size applies to all file and diff tabs.
+- `Ctrl+Scroll` up or down increases or decreases text size under the pointer: the UI, terminals, the [pinned session](#pinned-session)'s panel, or file/diff viewer. Each surface has its own saved size; terminal size applies to all sessions in the main area, and viewer size applies to all file and diff tabs.
 
 ### Changes and files
 

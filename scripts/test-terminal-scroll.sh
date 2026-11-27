@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Exercise VTE scrolling, brief row clicks and the pinned panel's keyboard focus
-# with real pointer and key input on a private Mutter display.
+# and font size with real pointer and key input on a private Mutter display.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)

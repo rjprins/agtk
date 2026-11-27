@@ -1,13 +1,15 @@
 use super::*;
 use crate::appearance::{
-    MAX_UI_FONT_SIZE, MAX_VIEWER_FONT_SIZE, MIN_UI_FONT_SIZE, MIN_VIEWER_FONT_SIZE,
-    clamp_ui_font_size, resolve_system_theme, theme,
+    MAX_TERMINAL_FONT_SIZE, MAX_UI_FONT_SIZE, MAX_VIEWER_FONT_SIZE, MIN_TERMINAL_FONT_SIZE,
+    MIN_UI_FONT_SIZE, MIN_VIEWER_FONT_SIZE, clamp_ui_font_size, resolve_system_theme, theme,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FontSurface {
     Ui,
     Terminal,
+    /// The terminal in the pinned session's panel, which has a size of its own.
+    Pinned,
     Viewer,
     All,
 }
@@ -68,6 +70,18 @@ impl Workspace {
             );
             return;
         }
+        if update
+            .pinned_font_size
+            .is_some_and(|size| !(MIN_TERMINAL_FONT_SIZE..=MAX_TERMINAL_FONT_SIZE).contains(&size))
+        {
+            self.report_failure(
+                pending,
+                ErrorCode::InvalidParams,
+                "Pinned font size is invalid",
+                "use a pinned font size between 6 and 32".to_owned(),
+            );
+            return;
+        }
         let mut preferences = self.appearance.borrow().clone();
         if let Some(theme) = update.theme {
             preferences.theme = theme;
@@ -83,6 +97,9 @@ impl Workspace {
         }
         if let Some(size) = update.viewer_font_size {
             preferences.viewer_font_size = size;
+        }
+        if let Some(size) = update.pinned_font_size {
+            preferences.pinned_font_size = Some(size);
         }
         let value = match serde_json::to_value(&preferences) {
             Ok(value) => value,
@@ -136,6 +153,7 @@ impl Workspace {
             font: preferences.font.clone(),
             ui_font_size: preferences.ui_font_size,
             viewer_font_size: preferences.viewer_font_size,
+            pinned_font_size: preferences.pinned_font_size,
             available_themes: ThemeKey::ALL.to_vec(),
         }
     }
@@ -145,14 +163,21 @@ impl Workspace {
         self.chrome_style.apply(preferences.ui_font_size);
         let effective = self.effective_terminal_theme();
         self.preferences.show_appearance(&preferences);
+        let pinned = self.pinned_session_id();
+        let pinned_font = pinned_terminal_font(&preferences);
         let terminals = self
             .sessions
             .borrow()
-            .values()
-            .map(|session| session.terminal.clone())
+            .iter()
+            .map(|(id, session)| (pinned.as_ref() == Some(id), session.terminal.clone()))
             .collect::<Vec<_>>();
-        for terminal in terminals {
-            apply_terminal_appearance(&terminal, effective, &preferences.font);
+        for (is_pinned, terminal) in terminals {
+            let font = if is_pinned {
+                &pinned_font
+            } else {
+                &preferences.font
+            };
+            apply_terminal_appearance(&terminal, effective, font);
         }
         if let Some(viewer) = self.code_viewer.borrow().as_ref() {
             let (theme, font_family, font_size) = self.viewer_appearance();
@@ -163,6 +188,28 @@ impl Workspace {
     pub(super) fn apply_current_terminal_appearance(&self, terminal: &vte::Terminal) {
         let preferences = self.appearance.borrow();
         apply_terminal_appearance(terminal, self.effective_terminal_theme(), &preferences.font);
+    }
+
+    /// Gives a session's terminal the font of the place it is in now: the
+    /// pinned session's panel or the main area.
+    pub(super) fn apply_session_font(&self, id: &str) {
+        let Some(terminal) = self
+            .sessions
+            .borrow()
+            .get(id)
+            .map(|session| session.terminal.clone())
+        else {
+            return;
+        };
+        let font = {
+            let preferences = self.appearance.borrow();
+            if self.is_pinned(id) {
+                pinned_terminal_font(&preferences)
+            } else {
+                preferences.font.clone()
+            }
+        };
+        terminal.set_font(Some(&FontDescription::from_string(&font)));
     }
 
     pub(super) fn adjust_font_size(&self, delta: i8) {
@@ -188,7 +235,29 @@ impl Workspace {
         let viewer_font_size = (matches!(surface, FontSurface::Viewer | FontSurface::All)
             && next_viewer != preferences.viewer_font_size)
             .then_some(next_viewer);
-        if font.is_none() && ui_font_size.is_none() && viewer_font_size.is_none() {
+        // Changing every size also moves the panel's own size, once it has one.
+        let pinned_base = match surface {
+            FontSurface::Pinned => Some(
+                preferences
+                    .pinned_font_size
+                    .unwrap_or_else(|| terminal_font_points(&preferences.font)),
+            ),
+            FontSurface::All => preferences.pinned_font_size,
+            _ => None,
+        };
+        let pinned_font_size = pinned_base
+            .map(|size| {
+                (i16::from(size) + i16::from(delta)).clamp(
+                    i16::from(MIN_TERMINAL_FONT_SIZE),
+                    i16::from(MAX_TERMINAL_FONT_SIZE),
+                ) as u8
+            })
+            .filter(|size| Some(*size) != preferences.pinned_font_size);
+        if font.is_none()
+            && ui_font_size.is_none()
+            && viewer_font_size.is_none()
+            && pinned_font_size.is_none()
+        {
             return;
         }
         self.set_appearance(
@@ -196,6 +265,7 @@ impl Workspace {
                 font,
                 ui_font_size,
                 viewer_font_size,
+                pinned_font_size,
                 ..Default::default()
             },
             None,
@@ -253,7 +323,11 @@ impl Workspace {
                 return glib::Propagation::Proceed;
             };
             let surface = if widget.ancestor(vte::Terminal::static_type()).is_some() {
-                FontSurface::Terminal
+                if widget.is_ancestor(&workspace.changes.pinned.host) {
+                    FontSurface::Pinned
+                } else {
+                    FontSurface::Terminal
+                }
             } else if widget.ancestor(webkit6::WebView::static_type()).is_some() {
                 FontSurface::Viewer
             } else {
@@ -313,16 +387,37 @@ fn apply_terminal_appearance(terminal: &vte::Terminal, key: ThemeKey, font: &str
 }
 
 fn adjust_terminal_font_size(font: &str, delta: i8) -> String {
-    let mut description = FontDescription::from_string(font);
-    let current = description.size();
-    let current_points = if current > 0 {
-        (current as f64 / gtk::pango::SCALE as f64).round() as i16
+    let next_points = (i16::from(terminal_font_points(font)) + i16::from(delta)).clamp(
+        i16::from(MIN_TERMINAL_FONT_SIZE),
+        i16::from(MAX_TERMINAL_FONT_SIZE),
+    );
+    terminal_font_at(font, next_points as u8)
+}
+
+/// The point size a terminal font names, or 11 when it names none.
+fn terminal_font_points(font: &str) -> u8 {
+    let size = FontDescription::from_string(font).size();
+    if size > 0 {
+        (f64::from(size) / f64::from(gtk::pango::SCALE))
+            .round()
+            .clamp(1.0, 255.0) as u8
     } else {
         11
-    };
-    let next_points = (current_points + i16::from(delta)).clamp(6, 32);
-    description.set_size(i32::from(next_points) * gtk::pango::SCALE);
+    }
+}
+
+fn terminal_font_at(font: &str, points: u8) -> String {
+    let mut description = FontDescription::from_string(font);
+    description.set_size(i32::from(points) * gtk::pango::SCALE);
     description.to_string()
+}
+
+/// The font of the pinned session's panel: the terminal font at the panel's own size.
+fn pinned_terminal_font(preferences: &AppearancePreferences) -> String {
+    match preferences.pinned_font_size {
+        Some(points) => terminal_font_at(&preferences.font, points),
+        None => preferences.font.clone(),
+    }
 }
 
 fn parse_color(value: &str) -> gtk::gdk::RGBA {

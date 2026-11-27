@@ -664,6 +664,7 @@ fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure>
     let mut font = None;
     let mut ui_font_size = None;
     let mut viewer_font_size = None;
+    let mut pinned_font_size = None;
     let mut index = 0;
     while index < arguments.len() {
         let option = arguments[index].as_str();
@@ -697,6 +698,13 @@ fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure>
                     )
                 })?);
             }
+            "--pinned-font-size" => {
+                pinned_font_size = Some(value.parse::<u8>().map_err(|_| {
+                    Failure::Usage(
+                        "--pinned-font-size must be an integer between 6 and 32".to_owned(),
+                    )
+                })?);
+            }
             _ => {
                 return Err(Failure::Usage(format!(
                     "unknown appearance set option: {option}"
@@ -710,6 +718,7 @@ fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure>
         && font.is_none()
         && ui_font_size.is_none()
         && viewer_font_size.is_none()
+        && pinned_font_size.is_none()
     {
         return Err(Failure::Usage(
             "appearance set requires at least one option".to_owned(),
@@ -721,6 +730,7 @@ fn parse_appearance_set(arguments: &[String]) -> Result<ControlCommand, Failure>
         font,
         ui_font_size,
         viewer_font_size,
+        pinned_font_size,
     }))
 }
 

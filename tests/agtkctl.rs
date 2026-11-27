@@ -424,6 +424,8 @@ fn appearance_set_command_has_a_typed_protocol_mapping() {
             "15",
             "--viewer-font-size",
             "16",
+            "--pinned-font-size",
+            "9",
         ],
         ControlCommand::AppearanceSet(AppearanceSetParams {
             theme: Some(ThemeKey::SolarizedDark),
@@ -431,6 +433,7 @@ fn appearance_set_command_has_a_typed_protocol_mapping() {
             font: Some("Iosevka 12".to_owned()),
             ui_font_size: Some(15),
             viewer_font_size: Some(16),
+            pinned_font_size: Some(9),
         }),
     );
 }

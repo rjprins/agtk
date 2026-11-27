@@ -304,6 +304,7 @@ impl Workspace {
         row.set_selectable(false);
         *self.pinned_session.borrow_mut() = Some(id.to_owned());
         self.mark_pinned_row(id, true);
+        self.apply_session_font(id);
         self.apply_session_state(id);
         self.save_preference(PINNED_SESSION_PREFERENCE, serde_json::json!(id));
         if was_selected {
@@ -331,6 +332,7 @@ impl Workspace {
             self.stack.add_named(&page, Some(&id));
             row.set_selectable(true);
             self.mark_pinned_row(&id, false);
+            self.apply_session_font(&id);
             self.attach_workspace_session(&id);
             if select || self.selected_session_id().is_none() {
                 self.list.select_row(Some(&row));

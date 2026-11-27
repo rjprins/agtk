@@ -6,6 +6,9 @@ pub const MAX_UI_FONT_SIZE: u8 = 24;
 pub const DEFAULT_VIEWER_FONT_SIZE: u8 = 11;
 pub const MIN_VIEWER_FONT_SIZE: u8 = 8;
 pub const MAX_VIEWER_FONT_SIZE: u8 = 48;
+/// The point sizes a terminal font can be scrolled to.
+pub const MIN_TERMINAL_FONT_SIZE: u8 = 6;
+pub const MAX_TERMINAL_FONT_SIZE: u8 = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -53,6 +56,10 @@ pub struct AppearancePreferences {
     pub ui_font_size: u8,
     #[serde(default = "default_viewer_font_size")]
     pub viewer_font_size: u8,
+    /// The point size of the terminal in the pinned session's panel. None
+    /// until it is set: the panel then uses the size in `font`.
+    #[serde(default)]
+    pub pinned_font_size: Option<u8>,
 }
 
 impl Default for AppearancePreferences {
@@ -63,6 +70,7 @@ impl Default for AppearancePreferences {
             font: "Monospace 11".to_owned(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             viewer_font_size: DEFAULT_VIEWER_FONT_SIZE,
+            pinned_font_size: None,
         }
     }
 }

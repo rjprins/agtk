@@ -43,6 +43,8 @@ pub struct AppearanceSummary {
     pub font: String,
     pub ui_font_size: u8,
     pub viewer_font_size: u8,
+    /// Null while the pinned session's panel uses the size in `font`.
+    pub pinned_font_size: Option<u8>,
     pub available_themes: Vec<ThemeKey>,
 }
 

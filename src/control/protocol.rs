@@ -189,6 +189,8 @@ pub struct AppearanceSetParams {
     pub font: Option<String>,
     pub ui_font_size: Option<u8>,
     pub viewer_font_size: Option<u8>,
+    /// The point size of the terminal in the pinned session's panel.
+    pub pinned_font_size: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1036,6 +1038,7 @@ fn validate_appearance(params: &AppearanceSetParams) -> Result<(), ControlError>
         && params.font.is_none()
         && params.ui_font_size.is_none()
         && params.viewer_font_size.is_none()
+        && params.pinned_font_size.is_none()
     {
         return Err(invalid_params(
             "at least one appearance setting is required",
@@ -1060,6 +1063,12 @@ fn validate_appearance(params: &AppearanceSetParams) -> Result<(), ControlError>
             .contains(&size)
     {
         return Err(invalid_params("viewer font size must be between 8 and 48"));
+    }
+    if let Some(size) = params.pinned_font_size
+        && !(crate::appearance::MIN_TERMINAL_FONT_SIZE..=crate::appearance::MAX_TERMINAL_FONT_SIZE)
+            .contains(&size)
+    {
+        return Err(invalid_params("pinned font size must be between 6 and 32"));
     }
     Ok(())
 }

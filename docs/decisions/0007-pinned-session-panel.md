@@ -42,7 +42,14 @@ Decisions:
     in the main area closes the sidebar there.
 11. No keyboard shortcut for now. The row, a click in the panel,
     `select_session` and Next ready session all go to the panel.
-12. A nudge is one short message above the panel's header, in the accent
+12. The panel has a text size of its own, `pinnedFontSize` in the appearance
+    settings. The panel is narrow, so its terminal often needs a smaller font
+    than the main area. Ctrl+scroll over the panel changes only this size.
+    It has no value until the user sets one: the panel then uses the size
+    of the terminal font. The size belongs to the panel, not to the session,
+    so an unpinned session gets the terminal size back. Ctrl++ and Ctrl+-
+    change every size, and take this one along once it is set.
+13. A nudge is one short message above the panel's header, in the accent
     color. It is for an assistant that wants to interrupt the user. It opens
     the right sidebar, because an interrupt that nobody sees is no use. Only
     one shows at a time, and it stays until the user closes it or the caller

@@ -531,6 +531,16 @@ fn appearance_updates_decode_to_a_typed_additive_command() {
             font: Some("Iosevka 12".to_owned()),
             ui_font_size: Some(15),
             viewer_font_size: None,
+            pinned_font_size: None,
+        })
+    );
+    assert_eq!(
+        decode_request(br#"{"version":1,"id":"theme","method":"appearance.set","params":{"pinnedFontSize":9}}"#)
+            .expect("decode the pinned font size")
+            .command,
+        ControlCommand::AppearanceSet(AppearanceSetParams {
+            pinned_font_size: Some(9),
+            ..AppearanceSetParams::default()
         })
     );
 
@@ -544,6 +554,10 @@ fn appearance_updates_decode_to_a_typed_additive_command() {
         br#"{"version":1,"id":"theme","method":"appearance.set","params":{"viewerFontSize":7}}"#
             .as_slice(),
         br#"{"version":1,"id":"theme","method":"appearance.set","params":{"viewerFontSize":49}}"#
+            .as_slice(),
+        br#"{"version":1,"id":"theme","method":"appearance.set","params":{"pinnedFontSize":5}}"#
+            .as_slice(),
+        br#"{"version":1,"id":"theme","method":"appearance.set","params":{"pinnedFontSize":33}}"#
             .as_slice(),
     ] {
         assert_eq!(
