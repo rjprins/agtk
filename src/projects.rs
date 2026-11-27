@@ -84,6 +84,9 @@ pub struct ProjectSettings {
     /// `--remote-control` instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remote_control: bool,
+    /// The Updates page leaves out this project's PRs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_pr_updates: bool,
 }
 
 /// Every project a session ran in, with its settings. A project stays listed
@@ -115,6 +118,13 @@ impl ProjectPreferences {
             .entry(root.to_owned())
             .or_default()
             .remote_control = remote_control;
+    }
+
+    pub fn set_hide_pr_updates(&mut self, root: &str, hide: bool) {
+        self.projects
+            .entry(root.to_owned())
+            .or_default()
+            .hide_pr_updates = hide;
     }
 
     /// Lists a project a session runs in. True when it was not listed yet.
